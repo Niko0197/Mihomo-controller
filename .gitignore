@@ -1,0 +1,15 @@
+# Логи и временные файлы
+*.log
+*.txt
+*.pid
+*.bak
+*.tmp_bak
+smart_unblock_db.json
+tor_bridges.json
+
+# Системные папки
+node_modules/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

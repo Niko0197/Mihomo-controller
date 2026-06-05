@@ -1,0 +1,429 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mihomo Controller</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- Подключаем редактор CodeMirror для YAML -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.css">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/codemirror.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/mode/yaml/yaml.min.js"></script>
+ 
+  <!-- Подключаем внешние стили и логику -->
+  <link rel="stylesheet" href="/app.css">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="/app.js" defer></script>
+  <script src="/app_monitoring.js" defer></script>
+</head>
+<body>
+  <div class="app-layout">
+    <!-- Левая колонка: Боковое меню -->
+    <aside class="sidebar">
+      <div class="sidebar-header">
+        <div class="logo-section">
+          <div class="logo-icon">MC</div>
+          <div class="logo-title">Mihomo Controller</div>
+        </div>
+      </div>
+      
+      <div class="sidebar-status-controls">
+        <div class="status-badge" id="xkeen-status-badge">
+          <div class="status-dot" id="xkeen-status-dot"></div>
+          <span id="xkeen-status-text">Загрузка...</span>
+        </div>
+        <div class="xkeen-controls">
+          <button id="btn-xkeen-toggle" class="icon-btn" title="Запустить / Остановить XKeen" disabled>
+            <svg viewBox="0 0 24 24" id="svg-xkeen-toggle"><path d="M8 5v14l11-7z"/></svg>
+          </button>
+          <button id="btn-xkeen-restart" class="icon-btn" title="Перезапустить XKeen" disabled>
+            <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <nav class="tabs-vertical">
+        <button class="tab-btn active" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
+        <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
+        <button class="tab-btn" id="tab-btn-import" onclick="switchTab('import')">🔌 Импорт прокси</button>
+        <button class="tab-btn" id="tab-btn-subs" onclick="switchTab('subs')">🌐 Подписки</button>
+        <button class="tab-btn" id="tab-btn-ping" onclick="switchTab('ping')">⚡ Пинг-тест</button>
+        <button class="tab-btn" id="tab-btn-tor" onclick="switchTab('tor')">🌉 Tor мосты</button>
+        <button class="tab-btn" id="tab-btn-traffic" onclick="switchTab('traffic')">📊 Трафик</button>
+        <button class="tab-btn" id="tab-btn-connections" onclick="switchTab('connections')">🔌 Соединения</button>
+        <button class="tab-btn" id="tab-btn-logs" onclick="switchTab('logs')">📋 Логи ядра</button>
+        <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
+      </nav>
+    </aside>
+
+    <!-- Правая колонка: Основной контент -->
+    <main class="main-content">
+
+    <!-- Вкладка 1: Утекшие домены -->
+    <div id="tab-content-leak" class="tab-content active">
+      <div class="card">
+        <div class="card-title">
+          Утекшие домены (через VPN)
+          <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);" id="domain-count">Загрузка...</span>
+        </div>
+
+        <div class="controls-row">
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="search-box" placeholder="Поиск по доменам...">
+          </div>
+          <div class="btn-group">
+            <button class="btn" id="btn-select-all-direct">Выбрать все в DIRECT</button>
+            <button class="btn btn-primary" id="btn-apply" disabled>Применить выбранные</button>
+          </div>
+        </div>
+
+        <div id="table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th class="checkbox-cell"><input type="checkbox" id="header-select-all"></th>
+                <th>Домен</th>
+                <th>Время обнаружения</th>
+                <th>Маршрут (Proxy Chain)</th>
+                <th>Целевая группа</th>
+              </tr>
+            </thead>
+            <tbody id="domains-list">
+              <!-- Сюда подгрузятся домены -->
+            </tbody>
+          </table>
+          <div class="empty-state" id="empty-state" style="display: none;">
+            <div class="empty-icon">🎉</div>
+            <h3>Все чисто!</h3>
+            <p>Российских доменов, идущих в обход DIRECT, не обнаружено.</p>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 3: Редактор YAML -->
+    <div id="tab-content-editor" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          📝 Редактор конфигурации (config.yaml)
+          <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);">Будет создан временный бэкап при сохранении</span>
+        </div>
+        <div style="margin-bottom: 15px;">
+          <textarea id="config-editor-textarea" style="display: none;"></textarea>
+        </div>
+        <div class="btn-group">
+          <button class="btn btn-primary" id="btn-save-config">💾 Сохранить и применить</button>
+          <button class="btn" id="btn-reload-config-editor">🔄 Обновить</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 4: Импорт прокси -->
+    <div id="tab-content-import" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          🔌 Импорт прокси по ссылкам
+        </div>
+        <p class="timestamp" style="margin-bottom: 20px; font-size: 0.95rem;">
+          Вставьте ссылки (одна на строку) форматов <code>vless://</code>, <code>ss://</code> или <code>trojan://</code>. Они добавятся в конфиг в раздел proxies и будут привязаны к выбранным группам.
+        </p>
+        <div style="margin-bottom: 20px;">
+          <textarea id="import-links-textarea" placeholder="Вставьте vless://, ss:// или trojan:// ссылки (каждая с новой строки)..."></textarea>
+        </div>
+        
+        <div style="margin-bottom: 25px;">
+          <h4 style="font-family: var(--font-outfit); font-weight: 600; margin-bottom: 12px;">Выберите группы прокси для привязки узлов:</h4>
+          <div id="import-groups-checkboxes" class="checkbox-grid">
+            <!-- Группы подгрузятся динамически -->
+          </div>
+        </div>
+
+        <button class="btn btn-primary" id="btn-import-links">📥 Импортировать прокси</button>
+      </div>
+    </div>
+
+    <!-- Вкладка 5: Подписки -->
+    <div id="tab-content-subs" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          🌐 Менеджер подписок прокси (Proxy Providers)
+          <button class="btn" style="font-size: 0.85rem; padding: 6px 12px;" onclick="showAddSubModal()">➕ Добавить подписку</button>
+        </div>
+        
+        <!-- Форма добавления/редактирования подписки (скрыта по умолчанию) -->
+        <div id="add-sub-modal" style="display: none;">
+          <h3 style="font-family: var(--font-outfit); margin-bottom: 15px;" id="sub-modal-title">Добавить новую подписку</h3>
+          <input type="hidden" id="edit-sub-old-name">
+          <div class="sub-grid-container">
+            <div>
+              <label class="modal-label">Название подписки (латиницей, без пробелов)</label>
+              <input type="text" id="sub-name" class="search-input" placeholder="например: custom_sub">
+            </div>
+            <div>
+              <label class="modal-label">Ссылка на подписку (URL)</label>
+              <input type="text" id="sub-url" class="search-input" placeholder="https://...">
+            </div>
+            <div>
+              <label class="modal-label">Интервал обновления (в секундах)</label>
+              <input type="number" id="sub-interval" class="search-input" value="3600">
+            </div>
+          </div>
+          
+          <div id="sub-groups-section" style="margin-bottom: 15px;">
+            <label class="modal-label" style="margin-bottom: 8px;">Добавить подписку в группы (через use):</label>
+            <div id="sub-groups-checkboxes" class="checkbox-grid" style="max-height: 120px;">
+              <!-- Динамический список чекбоксов -->
+            </div>
+          </div>
+
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btn-save-sub" onclick="saveSubscription()">Сохранить</button>
+            <button class="btn" onclick="hideAddSubModal()">Отмена</button>
+          </div>
+        </div>
+
+        <div id="subs-table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Название</th>
+                <th>URL подписки</th>
+                <th>Интервал (сек)</th>
+                <th>Активных узлов</th>
+                <th>Время обновления</th>
+                <th style="width: 280px; text-align: center;">Действия</th>
+              </tr>
+            </thead>
+            <tbody id="subs-list">
+              <!-- Сюда подгрузятся подписки -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 6: Пинг-тест -->
+    <div id="tab-content-ping" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          ⚡ Проверка задержки (Ping) прокси-узлов
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btn-ping-all" onclick="pingAllProxies()">⚡ Проверить все</button>
+            <button class="btn" onclick="loadProxiesList()">🔄 Обновить список</button>
+          </div>
+        </div>
+        
+        <div class="controls-row">
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="ping-search-box" oninput="renderProxiesList()" placeholder="Поиск по названию прокси...">
+          </div>
+        </div>
+
+        <div id="ping-table-wrapper">
+          <table>
+            <thead>
+              <tr>
+                <th>Название прокси</th>
+                <th>Тип</th>
+                <th>Адрес сервера</th>
+                <th>Задержка</th>
+                <th style="width: 100px; text-align: center;">Тест</th>
+              </tr>
+            </thead>
+            <tbody id="ping-list">
+              <!-- Сюда подгрузятся прокси -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 7: Tor мосты -->
+    <div id="tab-content-tor" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>🌉 Свежие Tor мосты (из репозитория Delta-Kronecker)</span>
+          <span class="timestamp" id="tor-last-update">Загрузка...</span>
+        </div>
+
+        <div class="controls-row">
+          <div class="search-wrapper" style="max-width: 300px;">
+            <select id="tor-bridge-type" onchange="renderTorBridges()">
+              <option value="obfs4_tested">obfs4 (Проверенные ⚡)</option>
+              <option value="obfs4">obfs4 (Все)</option>
+              <option value="webtunnel_tested">WebTunnel (Проверенные ⚡)</option>
+              <option value="webtunnel">WebTunnel (Все)</option>
+              <option value="vanilla_tested">Vanilla (Проверенные ⚡)</option>
+              <option value="vanilla">Vanilla (Все)</option>
+            </select>
+          </div>
+          <div class="btn-group">
+            <button class="btn" id="btn-tor-force-update">🔄 Обновить с GitHub</button>
+            <button class="btn btn-primary" id="btn-tor-copy">📋 Копировать все мосты</button>
+          </div>
+        </div>
+
+        <div style="position: relative; margin-top: 15px;">
+          <textarea id="tor-bridges-textarea" readonly placeholder="Загрузка мостов..."></textarea>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 8: График трафика -->
+    <div id="tab-content-traffic" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>📊 Трафик в реальном времени</span>
+          <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);" id="traffic-status">Подключение...</span>
+        </div>
+        
+        <div class="traffic-stats-grid">
+          <div class="traffic-stat-card speed-down">
+            <div class="stat-label">⬇️ Скачивание</div>
+            <div class="stat-value" id="speed-download">0 KB/s</div>
+          </div>
+          <div class="traffic-stat-card speed-up">
+            <div class="stat-label">⬆️ Отдача</div>
+            <div class="stat-value" id="speed-upload">0 KB/s</div>
+          </div>
+          <div class="traffic-stat-card vol-vpn">
+            <div class="stat-label">🛡️ VPN Объем</div>
+            <div class="stat-value" id="vol-vpn-bytes">0.00 MB</div>
+          </div>
+          <div class="traffic-stat-card vol-direct">
+            <div class="stat-label">🔌 DIRECT Объем</div>
+            <div class="stat-value" id="vol-direct-bytes">0.00 MB</div>
+          </div>
+        </div>
+
+        <div class="chart-container" style="position: relative; height: 350px; margin-top: 24px;">
+          <canvas id="traffic-speed-chart"></canvas>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 9: Соединения -->
+    <div id="tab-content-connections" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>🔌 Активные сетевые соединения</span>
+          <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);" id="connections-count">Всего: 0</span>
+        </div>
+
+        <div class="controls-row">
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="conn-search-box" placeholder="Поиск по хосту, IP, правилу, прокси...">
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btn-refresh-connections">🔄 Обновить</button>
+            <button class="btn" id="btn-close-all-connections" style="background: rgba(239, 68, 68, 0.1); border-color: rgba(239, 68, 68, 0.2); color: var(--danger);">❌ Разорвать все</button>
+          </div>
+        </div>
+
+        <div id="connections-table-wrapper" style="overflow-x: auto;">
+          <table>
+            <thead>
+              <tr>
+                <th>Источник IP</th>
+                <th>Назначение</th>
+                <th>Протокол</th>
+                <th>Правило</th>
+                <th>Цепочка (Маршрут)</th>
+                <th>Трафик / Скорость</th>
+                <th style="width: 80px; text-align: center;">Действие</th>
+              </tr>
+            </thead>
+            <tbody id="connections-list">
+              <!-- Сюда подгрузятся соединения -->
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 10: Логи ядра -->
+    <div id="tab-content-logs" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>📋 Системные логи ядра Mihomo</span>
+          <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
+            <div class="log-level-tabs" id="log-level-tabs">
+              <button class="log-level-btn" data-level="debug">Debug</button>
+              <button class="log-level-btn active" data-level="info">Info</button>
+              <button class="log-level-btn" data-level="warning">Warning</button>
+              <button class="log-level-btn" data-level="error">Error</button>
+            </div>
+            <label style="font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="log-autoscroll" checked> Автопрокрутка
+            </label>
+            <button class="btn" style="font-size: 0.85rem; padding: 6px 12px;" id="btn-clear-logs">🗑️ Очистить</button>
+          </div>
+        </div>
+
+        <div class="controls-row" style="margin-bottom: 15px;">
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="log-search-box" placeholder="Фильтр по ключевым словам в логах...">
+          </div>
+        </div>
+
+        <div class="console-wrapper">
+          <div class="console-terminal" id="log-console-debug" style="display: none;"></div>
+          <div class="console-terminal" id="log-console-info"></div>
+          <div class="console-terminal" id="log-console-warning" style="display: none;"></div>
+          <div class="console-terminal" id="log-console-error" style="display: none;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка 11: Трассировка -->
+    <div id="tab-content-trace" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          🛰️ Трассировка маршрута правила (Trace Route)
+        </div>
+        <p class="timestamp" style="margin-bottom: 20px; font-size: 0.95rem;">
+          Введите доменное имя, чтобы проверить, под какое правило в цепочке оно попадёт, какие IP адреса разрешатся и какой маршрут (прокси или DIRECT) выберет ядро.
+        </p>
+        
+        <div class="controls-row" style="max-width: 600px;">
+          <input type="text" class="search-input" id="trace-domain-input" placeholder="например: google.com, rutracker.org..." style="flex-grow: 1;">
+          <button class="btn btn-primary" id="btn-run-trace">🛰️ Начать тест</button>
+        </div>
+
+        <div id="trace-loading" style="display: none; padding: 24px; text-align: center; color: var(--text-muted);">
+          <div class="dimmer-spinner" style="width: 32px; height: 32px; margin: 0 auto 12px;"></div>
+          Выполняем DNS-разрешение и симуляцию правил...
+        </div>
+
+        <div id="trace-result-container" style="display: none; margin-top: 24px;">
+          <div class="trace-header-info">
+            <div class="trace-info-item">
+              <span class="info-label">Разрешённые IP:</span>
+              <span class="info-value" id="trace-ips">-</span>
+            </div>
+            <div class="trace-info-item">
+              <span class="info-label">Страна IP:</span>
+              <span class="info-value" id="trace-country">-</span>
+            </div>
+            <div class="trace-info-item">
+              <span class="info-label">Итоговый маршрут:</span>
+              <span class="info-value" id="trace-final-route" style="font-weight: 700; font-family: var(--font-outfit); font-size: 1.2rem;">-</span>
+            </div>
+          </div>
+
+          <h3 style="font-family: var(--font-outfit); margin: 20px 0 12px; font-weight: 600;">Пошаговое прохождение цепочки правил:</h3>
+          <div class="trace-timeline" id="trace-steps-list">
+            <!-- Шаги трассировки -->
+          </div>
+        </div>
+      </div>
+    </div>
+  </main>
+</div>
+
+  <div class="toast-container" id="toast-container"></div>
+</body>
+</html>
