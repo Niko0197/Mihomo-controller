@@ -163,11 +163,32 @@ function initTrafficChart() {
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      interaction: {
+        mode: 'index',
+        intersect: false
+      },
       plugins: {
         legend: {
           labels: {
             color: '#e3e2e6',
             font: { family: 'Inter', weight: '500' }
+          }
+        },
+        tooltip: {
+          callbacks: {
+            title: function() {
+              return ''; // Hide X-axis index/time title as it's not relevant here
+            },
+            label: function(context) {
+              let label = context.dataset.label || '';
+              if (label) {
+                label += ': ';
+              }
+              if (context.parsed.y !== null) {
+                label += formatSpeed(context.parsed.y);
+              }
+              return label;
+            }
           }
         }
       },
