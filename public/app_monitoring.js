@@ -984,6 +984,9 @@ function renderProxyGroups(proxiesData) {
     const icon = typeIcons[group.type.toLowerCase()] || '📡';
     const typeLabel = typeLabels[group.type.toLowerCase()] || group.type;
 
+    // Small group = show buttons always, large group = collapsible
+    const isSmallGroup = totalNodes <= 8;
+
     // --- Header ---
     const header = document.createElement('div');
     header.className = 'pgc-header';
@@ -1012,7 +1015,7 @@ function renderProxyGroups(proxiesData) {
       ${nowDelay > 0 ? '<span class="pgc-sel-delay" style="color:' + getLatencyColor(nowDelay) + '">' + nowDelay + 'ms</span>' : ''}
     `;
 
-    // --- Latency dots row ---
+    // --- Latency dots row (always visible) ---
     const dotsRow = document.createElement('div');
     dotsRow.className = 'pgc-dots';
     group.all.forEach(nodeName => {
@@ -1029,20 +1032,21 @@ function renderProxyGroups(proxiesData) {
       dotsRow.appendChild(dot);
     });
 
-    // --- Expandable node list (Selector only, ≤30 nodes) ---
+    // --- Node buttons panel (for Selector groups) ---
     let nodesPanel = null;
     if (isSelector && totalNodes <= 30) {
       nodesPanel = document.createElement('div');
       nodesPanel.className = 'pgc-nodes-panel';
-      nodesPanel.style.display = 'none';
+      // Small groups (≤8 nodes): always visible. Large groups: collapsed by default.
+      nodesPanel.style.display = isSmallGroup ? 'flex' : 'none';
 
       group.all.forEach(nodeName => {
         const np = proxies[nodeName];
         const d = getLastDelay(np);
-        const nType = np ? np.type : '';
         const isActive = nodeName === group.now;
         const isChildGroup = np && np.all && Array.isArray(np.all);
         const childCount = isChildGroup ? np.all.length : 0;
+        const childType = np ? np.type : '';
 
         const btn = document.createElement('button');
         btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
@@ -1050,18 +1054,21 @@ function renderProxyGroups(proxiesData) {
         btn.innerHTML = `
           <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
           <span class="pgc-nb-name">${nodeName}</span>
-          ${isChildGroup ? '<span class="pgc-nb-type">' + (np.type || '') + '</span>' : ''}
+          ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
           ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
           ${childCount > 0 ? '<span class="pgc-nb-count">' + childCount + '</span>' : ''}
         `;
 
-        btn.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectProxyInGroup(group.name, nodeName);
+        });
         nodesPanel.appendChild(btn);
       });
     }
 
-    // --- Toggle expand on card click (header) ---
-    if (nodesPanel) {
+    // --- Toggle expand on header click (only for large collapsible groups) ---
+    if (nodesPanel && !isSmallGroup) {
       card.classList.add('pgc-expandable');
       header.style.cursor = 'pointer';
       header.addEventListener('click', () => {
