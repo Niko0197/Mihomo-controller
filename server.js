@@ -1263,6 +1263,59 @@ function handleServerRestart(req, res) {
   }
 }
 
+// GET /api/xkeen/proxies
+async function handleGetXkeenProxies(req, res) {
+  try {
+    const mRes = await makeMihomoRequest('GET', '/proxies');
+    res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(mRes.data);
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// PUT /api/xkeen/proxies/:name
+function handlePutXkeenProxy(req, res, name) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body);
+      const mRes = await makeMihomoRequest('PUT', '/proxies/' + encodeURIComponent(name), payload);
+      res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(mRes.data || JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+// GET /api/xkeen/providers
+async function handleGetXkeenProviders(req, res) {
+  try {
+    const mRes = await makeMihomoRequest('GET', '/providers/proxies');
+    res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(mRes.data);
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// GET /api/xkeen/providers/:name/healthcheck
+async function handleGetXkeenProviderHealth(req, res, name) {
+  try {
+    const mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(name) + '/healthcheck');
+    res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(mRes.data);
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
 // Создаем HTTP сервер
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, 'http://' + req.headers.host);
@@ -1380,6 +1433,24 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && pathname === '/api/xkeen/trace') {
     await handleXkeenTrace(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/xkeen/proxies') {
+    await handleGetXkeenProxies(req, res);
+    return;
+  }
+  if (req.method === 'PUT' && pathname.startsWith('/api/xkeen/proxies/')) {
+    const name = pathname.substring('/api/xkeen/proxies/'.length);
+    handlePutXkeenProxy(req, res, decodeURIComponent(name));
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/xkeen/providers') {
+    await handleGetXkeenProviders(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname.startsWith('/api/xkeen/providers/') && pathname.endsWith('/healthcheck')) {
+    const name = pathname.substring('/api/xkeen/providers/'.length, pathname.length - '/healthcheck'.length);
+    await handleGetXkeenProviderHealth(req, res, decodeURIComponent(name));
     return;
   }
 

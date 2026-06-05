@@ -84,6 +84,8 @@ window.switchTab = function(tabId) {
     }
   } else if (tabId === 'logs') {
     reRenderLogs();
+  } else if (tabId === 'proxies-dashboard') {
+    loadProxiesDashboard();
   }
 };
 
@@ -876,3 +878,409 @@ window.addEventListener('load', () => {
     };
   });
 });
+
+// --- 5. Proxy Dashboard (Groups & Providers) ---
+
+let proxyDashboardData = null;
+
+function switchProxySubtab(subtab) {
+  const groupsContent = document.getElementById('proxy-subtab-content-groups');
+  const providersContent = document.getElementById('proxy-subtab-content-providers');
+  const btnGroups = document.getElementById('btn-subtab-groups');
+  const btnProviders = document.getElementById('btn-subtab-providers');
+
+  if (subtab === 'groups') {
+    groupsContent.style.display = 'block';
+    providersContent.style.display = 'none';
+    btnGroups.classList.add('active');
+    btnProviders.classList.remove('active');
+  } else {
+    groupsContent.style.display = 'none';
+    providersContent.style.display = 'block';
+    btnGroups.classList.remove('active');
+    btnProviders.classList.add('active');
+  }
+}
+window.switchProxySubtab = switchProxySubtab;
+
+function getLastDelay(proxy) {
+  if (!proxy || !proxy.history || proxy.history.length === 0) return 0;
+  return proxy.history[proxy.history.length - 1].delay || 0;
+}
+
+function getLatencyDotClass(delay) {
+  if (!delay || delay === 0) return 'lat-none';
+  if (delay < 200) return 'lat-fast';
+  if (delay < 500) return 'lat-medium';
+  return 'lat-slow';
+}
+
+function getLatencyColor(delay) {
+  if (!delay || delay === 0) return 'var(--text-muted)';
+  if (delay < 200) return '#3ddc84';
+  if (delay < 500) return '#ffb74d';
+  return '#ff8a80';
+}
+
+async function loadProxiesDashboard() {
+  try {
+    const [proxiesRes, providersRes] = await Promise.all([
+      fetch('/api/xkeen/proxies'),
+      fetch('/api/xkeen/providers')
+    ]);
+    if (!proxiesRes.ok) throw new Error('Ошибка получения прокси');
+    if (!providersRes.ok) throw new Error('Ошибка получения провайдеров');
+
+    const proxiesData = await proxiesRes.json();
+    const providersData = await providersRes.json();
+    proxyDashboardData = { proxies: proxiesData, providers: providersData };
+
+    renderProxyGroups(proxiesData);
+    renderProxyProviders(providersData, proxiesData);
+  } catch (err) {
+    console.error('Proxy dashboard error:', err);
+    showToast('Ошибка загрузки прокси-панели: ' + err.message, 'error');
+  }
+}
+window.loadProxiesDashboard = loadProxiesDashboard;
+
+function renderProxyGroups(proxiesData) {
+  const container = document.getElementById('proxy-groups-container');
+  if (!container) return;
+
+  const proxies = proxiesData.proxies || {};
+  const excludeNames = ['GLOBAL', 'DIRECT', 'REJECT'];
+  const groups = [];
+
+  for (const [name, proxy] of Object.entries(proxies)) {
+    if (excludeNames.includes(name)) continue;
+    if (proxy.all && Array.isArray(proxy.all)) {
+      groups.push({ name, ...proxy });
+    }
+  }
+
+  if (groups.length === 0) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px 0;">Прокси-группы не найдены в ядре</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+
+  groups.forEach(group => {
+    const card = document.createElement('div');
+    card.className = 'pgc-card';
+    card.dataset.groupName = group.name;
+
+    const isSelector = group.type.toLowerCase() === 'selector';
+    const totalNodes = group.all.length;
+    let aliveCount = 0;
+    group.all.forEach(n => {
+      const np = proxies[n];
+      if (np && getLastDelay(np) > 0) aliveCount++;
+    });
+
+    const typeIcons = { selector: '🔀', urltest: '⚡', 'url-test': '⚡', fallback: '🛡️', loadbalance: '⚖️', 'load-balance': '⚖️', relay: '🔗' };
+    const typeLabels = { selector: 'Selector', urltest: 'URLTest', 'url-test': 'URLTest', fallback: 'Fallback', loadbalance: 'LoadBalance', 'load-balance': 'LoadBalance', relay: 'Relay' };
+    const icon = typeIcons[group.type.toLowerCase()] || '📡';
+    const typeLabel = typeLabels[group.type.toLowerCase()] || group.type;
+
+    // --- Header ---
+    const header = document.createElement('div');
+    header.className = 'pgc-header';
+    header.innerHTML = `
+      <div class="pgc-header-left">
+        <span class="pgc-icon">${icon}</span>
+        <span class="pgc-name">${group.name}</span>
+        <span class="pgc-meta">·&nbsp;${typeLabel}&nbsp;·&nbsp;${aliveCount}/${totalNodes}</span>
+      </div>
+      <div class="pgc-header-right">
+        <span class="pgc-count-badge">${totalNodes}</span>
+      </div>
+    `;
+
+    // --- Selected node ---
+    const nowName = group.now || '—';
+    const nowProxy = proxies[nowName];
+    const nowDelay = getLastDelay(nowProxy);
+
+    const selected = document.createElement('div');
+    selected.className = 'pgc-selected';
+    selected.innerHTML = `
+      <span class="pgc-sel-icon">⊙</span>
+      <span class="pgc-sel-check">✓</span>
+      <span class="pgc-sel-name">${nowName}</span>
+      ${nowDelay > 0 ? '<span class="pgc-sel-delay" style="color:' + getLatencyColor(nowDelay) + '">' + nowDelay + 'ms</span>' : ''}
+    `;
+
+    // --- Latency dots row ---
+    const dotsRow = document.createElement('div');
+    dotsRow.className = 'pgc-dots';
+    group.all.forEach(nodeName => {
+      const np = proxies[nodeName];
+      const d = getLastDelay(np);
+      const dot = document.createElement('span');
+      dot.className = 'pgc-dot ' + getLatencyDotClass(d);
+      dot.title = nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A');
+      if (nodeName === group.now) dot.classList.add('pgc-dot-active');
+      if (isSelector) {
+        dot.style.cursor = 'pointer';
+        dot.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
+      }
+      dotsRow.appendChild(dot);
+    });
+
+    // --- Expandable node list (Selector only, ≤30 nodes) ---
+    let nodesPanel = null;
+    if (isSelector && totalNodes <= 30) {
+      nodesPanel = document.createElement('div');
+      nodesPanel.className = 'pgc-nodes-panel';
+      nodesPanel.style.display = 'none';
+
+      group.all.forEach(nodeName => {
+        const np = proxies[nodeName];
+        const d = getLastDelay(np);
+        const nType = np ? np.type : '';
+        const isActive = nodeName === group.now;
+        const isChildGroup = np && np.all && Array.isArray(np.all);
+        const childCount = isChildGroup ? np.all.length : 0;
+
+        const btn = document.createElement('button');
+        btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
+
+        btn.innerHTML = `
+          <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
+          <span class="pgc-nb-name">${nodeName}</span>
+          ${isChildGroup ? '<span class="pgc-nb-type">' + (np.type || '') + '</span>' : ''}
+          ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
+          ${childCount > 0 ? '<span class="pgc-nb-count">' + childCount + '</span>' : ''}
+        `;
+
+        btn.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
+        nodesPanel.appendChild(btn);
+      });
+    }
+
+    // --- Toggle expand on card click (header) ---
+    if (nodesPanel) {
+      card.classList.add('pgc-expandable');
+      header.style.cursor = 'pointer';
+      header.addEventListener('click', () => {
+        const expanded = nodesPanel.style.display !== 'none';
+        nodesPanel.style.display = expanded ? 'none' : 'flex';
+        card.classList.toggle('pgc-expanded', !expanded);
+      });
+    }
+
+    card.appendChild(header);
+    card.appendChild(selected);
+    card.appendChild(dotsRow);
+    if (nodesPanel) card.appendChild(nodesPanel);
+    container.appendChild(card);
+  });
+}
+
+function renderProxyProviders(providersData, proxiesData) {
+  const container = document.getElementById('proxy-providers-container');
+  if (!container) return;
+
+  const providers = providersData.providers || {};
+  const providerList = Object.values(providers).filter(p => p.vehicleType !== 'Compatible' && p.name !== 'default');
+
+  if (providerList.length === 0) {
+    container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px 0;">Подписочные провайдеры не найдены</div>';
+    return;
+  }
+
+  container.innerHTML = '';
+
+  providerList.forEach(provider => {
+    const card = document.createElement('div');
+    card.className = 'pgc-card pgc-provider';
+
+    const nodesList = provider.proxies || [];
+    const total = nodesList.length;
+    let alive = 0;
+    nodesList.forEach(p => { if (getLastDelay(p) > 0) alive++; });
+
+    const updatedAt = provider.updatedAt ? new Date(provider.updatedAt).toLocaleString('ru-RU') : '—';
+
+    // Subscription info
+    const sub = provider.subscriptionInfo;
+    let subHtml = '';
+    if (sub) {
+      const usedBytes = (sub.Upload || 0) + (sub.Download || 0);
+      const totalBytes = sub.Total || 0;
+      const usedGB = usedBytes / (1024 ** 3);
+      const totalGB = totalBytes / (1024 ** 3);
+      const pct = totalGB > 0 ? Math.min(100, Math.round((usedGB / totalGB) * 100)) : 0;
+      const expDate = sub.Expire ? new Date(sub.Expire * 1000).toLocaleDateString('ru-RU') : null;
+      const barColor = pct > 80 ? '#ff8a80' : pct > 50 ? '#ffb74d' : '#3ddc84';
+
+      subHtml = `<div class="pgc-sub-info">
+        ${totalGB > 0 ? `<div class="pgc-sub-bar-wrap">
+          <div class="pgc-sub-bar"><div class="pgc-sub-bar-fill" style="width:${pct}%;background:${barColor}"></div></div>
+          <span class="pgc-sub-text">${usedGB.toFixed(1)} / ${totalGB.toFixed(0)} GB (${pct}%)</span>
+        </div>` : ''}
+        ${expDate ? `<span class="pgc-sub-expire">⏰ до ${expDate}</span>` : ''}
+      </div>`;
+    }
+
+    // Header
+    const header = document.createElement('div');
+    header.className = 'pgc-header';
+    header.innerHTML = `
+      <div class="pgc-header-left">
+        <span class="pgc-icon">📦</span>
+        <span class="pgc-name">${provider.name}</span>
+        <span class="pgc-meta">·&nbsp;${provider.vehicleType || 'HTTP'}</span>
+      </div>
+      <div class="pgc-header-right">
+        <span class="pgc-count-badge">${total}</span>
+        <button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${provider.name.replace(/'/g, "\\'")}')">🔄</button>
+        <button class="pgc-hc-btn pgc-hc-bolt" title="Healthcheck" onclick="event.stopPropagation();healthcheckProvider('${provider.name.replace(/'/g, "\\'")}')">⚡</button>
+      </div>
+    `;
+
+    // Info row
+    const info = document.createElement('div');
+    info.className = 'pgc-prov-info';
+    info.innerHTML = `
+      <span class="pgc-prov-time">🕐 ${updatedAt}</span>
+      <span class="pgc-prov-alive">${alive} / ${total} живых</span>
+    `;
+
+    // Sub info
+    const subDiv = document.createElement('div');
+    subDiv.innerHTML = subHtml;
+
+    // Dots
+    const dotsRow = document.createElement('div');
+    dotsRow.className = 'pgc-dots';
+    nodesList.forEach(p => {
+      const d = getLastDelay(p);
+      const dot = document.createElement('span');
+      dot.className = 'pgc-dot ' + getLatencyDotClass(d);
+      dot.title = p.name + ': ' + (d > 0 ? d + 'ms' : 'N/A') + ' (' + p.type + ')';
+      dotsRow.appendChild(dot);
+    });
+
+    // Expandable nodes panel
+    const nodesPanel = document.createElement('div');
+    nodesPanel.className = 'pgc-nodes-panel pgc-prov-nodes';
+    nodesPanel.style.display = 'none';
+
+    nodesList.forEach(p => {
+      const d = getLastDelay(p);
+      const nodeDiv = document.createElement('div');
+      nodeDiv.className = 'pgc-prov-node';
+      nodeDiv.innerHTML = `
+        <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
+        <span class="pgc-nb-name">${p.name}</span>
+        <span class="pgc-nb-type">${p.type}</span>
+        ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : '<span class="pgc-nb-delay" style="color:var(--text-muted)">—</span>'}
+      `;
+      nodesPanel.appendChild(nodeDiv);
+    });
+
+    // Toggle expand
+    card.classList.add('pgc-expandable');
+    header.style.cursor = 'pointer';
+    header.addEventListener('click', () => {
+      const expanded = nodesPanel.style.display !== 'none';
+      nodesPanel.style.display = expanded ? 'none' : 'flex';
+      card.classList.toggle('pgc-expanded', !expanded);
+    });
+
+    card.appendChild(header);
+    card.appendChild(info);
+    card.appendChild(subDiv);
+    card.appendChild(dotsRow);
+    card.appendChild(nodesPanel);
+    container.appendChild(card);
+  });
+}
+
+async function selectProxyInGroup(groupName, nodeName) {
+  try {
+    const res = await fetch('/api/xkeen/proxies/' + encodeURIComponent(groupName), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: nodeName })
+    });
+    if (res.ok) {
+      showToast('✅ ' + groupName + ' → ' + nodeName);
+      await loadProxiesDashboard();
+    } else {
+      showToast('Ошибка переключения прокси', 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка сети: ' + err.message, 'error');
+  }
+}
+window.selectProxyInGroup = selectProxyInGroup;
+
+async function healthcheckProvider(providerName) {
+  try {
+    showToast('⚡ Healthcheck: ' + providerName + '...');
+    const res = await fetch('/api/xkeen/providers/' + encodeURIComponent(providerName) + '/healthcheck');
+    if (res.ok) {
+      showToast('✅ Healthcheck ' + providerName + ' завершён');
+      setTimeout(() => loadProxiesDashboard(), 1200);
+    } else {
+      showToast('Ошибка healthcheck: ' + providerName, 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка сети: ' + err.message, 'error');
+  }
+}
+window.healthcheckProvider = healthcheckProvider;
+
+async function updateProviderSub(providerName) {
+  try {
+    showToast('🔄 Обновление подписки: ' + providerName + '...');
+    const res = await fetch('/api/providers/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: providerName })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast('✅ Подписка ' + providerName + ' обновлена');
+      setTimeout(() => loadProxiesDashboard(), 1500);
+    } else {
+      showToast('Ошибка обновления: ' + (data.message || ''), 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка сети: ' + err.message, 'error');
+  }
+}
+window.updateProviderSub = updateProviderSub;
+
+async function healthcheckAllGroups() {
+  const btn = document.getElementById('btn-ping-all-groups');
+  if (btn) { btn.disabled = true; btn.textContent = '⏳ Тестируем...'; }
+  try {
+    const res = await fetch('/api/xkeen/providers');
+    if (!res.ok) throw new Error('Ошибка получения провайдеров');
+    const data = await res.json();
+    const providers = data.providers || {};
+
+    const tasks = [];
+    for (const [name, prov] of Object.entries(providers)) {
+      if (prov.vehicleType !== 'Compatible' && name !== 'default') {
+        tasks.push(
+          fetch('/api/xkeen/providers/' + encodeURIComponent(name) + '/healthcheck')
+            .catch(e => console.error('HC fail:', name, e))
+        );
+      }
+    }
+    await Promise.all(tasks);
+    showToast('✅ Healthcheck всех провайдеров завершён!');
+    setTimeout(() => loadProxiesDashboard(), 1500);
+  } catch (err) {
+    showToast('Ошибка: ' + err.message, 'error');
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '⚡ Тест задержки'; }
+  }
+}
+window.healthcheckAllGroups = healthcheckAllGroups;
