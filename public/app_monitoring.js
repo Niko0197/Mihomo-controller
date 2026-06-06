@@ -1079,6 +1079,34 @@ function renderProxyGroups(proxiesData) {
         const btn = document.createElement('button');
         btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
 
+        btn.innerHTML = `
+          <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
+          <span class="pgc-nb-name">${nodeName}</span>
+          ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
+          ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
+          ${childCount > 0 ? '<span class="pgc-nb-count">' + childCount + '</span>' : ''}
+        `;
+
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          selectProxyInGroup(group.name, nodeName);
+        });
+        nodesPanel.appendChild(btn);
+      });
+    }
+
+    const body = document.createElement('div');
+    body.className = 'pgc-body';
+    body.appendChild(selected);
+    body.appendChild(dotsRow);
+    if (nodesPanel) body.appendChild(nodesPanel);
+
+    card.appendChild(header);
+    card.appendChild(body);
+    container.appendChild(card);
+  });
+}
+
 function renderProxyProviders(providersData, proxiesData) {
   const container = document.getElementById('proxy-providers-container');
   if (!container) return;
