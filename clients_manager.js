@@ -41,6 +41,43 @@ function saveDb() {
   }
 }
 
+// Вспомогательные функции для работы со структурированной БД клиентов (совместимой со строками)
+function getClientData(key) {
+  const entry = clientsDb[key];
+  if (!entry) return { name: '', group: '' };
+  if (typeof entry === 'string') {
+    return { name: entry, group: '' };
+  }
+  return {
+    name: entry.name || '',
+    group: entry.group || ''
+  };
+}
+
+function setClientName(key, name) {
+  if (!clientsDb[key]) {
+    clientsDb[key] = { name: '', group: '' };
+  } else if (typeof clientsDb[key] === 'string') {
+    clientsDb[key] = { name: clientsDb[key], group: '' };
+  }
+  clientsDb[key].name = name.trim();
+  if (!clientsDb[key].name && !clientsDb[key].group) {
+    delete clientsDb[key];
+  }
+}
+
+function setClientGroup(key, group) {
+  if (!clientsDb[key]) {
+    clientsDb[key] = { name: '', group: '' };
+  } else if (typeof clientsDb[key] === 'string') {
+    clientsDb[key] = { name: clientsDb[key], group: '' };
+  }
+  clientsDb[key].group = group.trim();
+  if (!clientsDb[key].name && !clientsDb[key].group) {
+    delete clientsDb[key];
+  }
+}
+
 // Вспомогательная функция для декодирования XML-сущностей
 function unescapeXml(str) {
   if (!str) return '';
@@ -105,12 +142,14 @@ function resolveClientName(ip, mac, hostByMac, hostByIp) {
   const normMac = mac ? mac.toUpperCase() : '';
   
   // 1. Кастомное имя по MAC-адресу из БД
-  if (normMac && clientsDb[normMac]) {
-    return clientsDb[normMac];
+  if (normMac) {
+    const data = getClientData(normMac);
+    if (data.name) return data.name;
   }
   // 2. Кастомное имя по IP-адресу из БД (совместимость)
-  if (ip && clientsDb[ip]) {
-    return clientsDb[ip];
+  if (ip) {
+    const data = getClientData(ip);
+    if (data.name) return data.name;
   }
   
   // Ищем хост в hotspot по MAC или IP
@@ -132,6 +171,20 @@ function resolveClientName(ip, mac, hostByMac, hostByIp) {
   return '';
 }
 
+// Разрешение сохраненной предпочтительной группы
+function resolveClientGroup(ip, mac) {
+  const normMac = mac ? mac.toUpperCase() : '';
+  if (normMac) {
+    const data = getClientData(normMac);
+    if (data.group) return data.group;
+  }
+  if (ip) {
+    const data = getClientData(ip);
+    if (data.group) return data.group;
+  }
+  return '';
+}
+
 // Переименование клиента
 function renameClient(ip, name) {
   if (!ip) return false;
@@ -149,19 +202,153 @@ function renameClient(ip, name) {
   }
 
   const cleanName = name ? name.trim() : '';
-  if (cleanName === '') {
-    delete clientsDb[ip];
-    if (mac) {
-      delete clientsDb[mac];
+  
+  // Сохраняем по IP и по MAC для максимальной стабильности
+  setClientName(ip, cleanName);
+  if (mac) {
+    setClientName(mac, cleanName);
+  }
+  
+  saveDb();
+  return true;
+}
+
+// Считывание текущих правил назначения прокси-групп по клиентам из config.yaml
+function getClientRulesFromConfig() {
+  const rules = new Map(); // IP => groupName
+  try {
+    if (!fs.existsSync(configPath)) return rules;
+    const yamlText = fs.readFileSync(configPath, 'utf8');
+    const lines = yamlText.split(/\r?\n/);
+    
+    let inBypassBlock = false;
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (line === '# --- CLIENTS BYPASS RULES ---') {
+        inBypassBlock = true;
+        continue;
+      }
+      if (line === '# --- END CLIENTS BYPASS RULES ---') {
+        inBypassBlock = false;
+        break;
+      }
+      if (inBypassBlock && line.startsWith('- SRC-IP-CIDR,')) {
+        const parts = line.split(',');
+        if (parts.length >= 3) {
+          const ipWithCidr = parts[1].trim();
+          const ip = ipWithCidr.split('/')[0];
+          const groupName = parts[2].trim().replace(/^['"]|['"]$/g, '');
+          rules.set(ip, groupName);
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Ошибка чтения правил клиентов из конфига:', err.message);
+  }
+  return rules;
+}
+
+// Запись или замена правила для конкретного клиента в config.yaml
+async function setClientRuleInConfig(ip, targetGroup) {
+  if (!ip) throw new Error('IP адрес не указан');
+  if (!targetGroup) throw new Error('Группа не указана');
+  
+  if (!fs.existsSync(configPath)) {
+    throw new Error('Конфиг config.yaml не найден');
+  }
+
+  let yamlText = fs.readFileSync(configPath, 'utf8');
+  let lines = yamlText.split(/\r?\n/);
+  
+  let startMarkerIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
+  let endMarkerIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
+  
+  if (startMarkerIdx === -1 || endMarkerIdx === -1) {
+    const rulesIdx = lines.findIndex(l => l.trim() === 'rules:');
+    if (rulesIdx === -1) {
+      throw new Error('Секция rules: не найдена в конфиге');
+    }
+    
+    lines.splice(rulesIdx + 1, 0, 
+      '  # --- CLIENTS BYPASS RULES ---',
+      '  # --- END CLIENTS BYPASS RULES ---'
+    );
+    
+    startMarkerIdx = rulesIdx + 1;
+    endMarkerIdx = rulesIdx + 2;
+  }
+
+  const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+  let yamlChanged = false;
+  
+  const ruleIdx = lines.findIndex((l, idx) => 
+    idx > startMarkerIdx && 
+    idx < endMarkerIdx && 
+    l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+  );
+
+  if (ruleIdx !== -1) {
+    const currentRule = lines[ruleIdx].trim();
+    const expectedRule = `- SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+    if (currentRule !== expectedRule) {
+      lines[ruleIdx] = newRule;
+      yamlChanged = true;
     }
   } else {
-    // Сохраняем и под IP, и под MAC для максимальной стабильности
-    clientsDb[ip] = cleanName;
-    if (mac) {
-      clientsDb[mac] = cleanName;
+    lines.splice(endMarkerIdx, 0, newRule);
+    yamlChanged = true;
+  }
+
+  if (yamlChanged) {
+    fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
+    
+    // Перезагрузка конфигурации в Mihomo
+    try {
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        throw new Error('Код ответа API: ' + reloadRes.statusCode);
+      }
+    } catch (err) {
+      throw new Error('Не удалось применить настройки в Mihomo: ' + err.message);
     }
   }
+  
+  return true;
+}
+
+// Установка/сохранение предпочтительной группы клиента
+async function setClientGroupPreference(ip, group) {
+  if (!ip) throw new Error('IP адрес не указан');
+  if (!group) throw new Error('Группа не указана');
+  
+  // Пытаемся определить MAC устройства
+  let mac = '';
+  try {
+    const list = getClientsList();
+    const found = list.find(c => c.ip === ip);
+    if (found && found.mac) {
+      mac = found.mac.toUpperCase();
+    }
+  } catch (e) {
+    console.error('Ошибка при определении MAC для смены группы:', e.message);
+  }
+
+  // Сохраняем группу в БД под обоими ключами
+  setClientGroup(ip, group);
+  if (mac) {
+    setClientGroup(mac, group);
+  }
   saveDb();
+
+  // Если VPN в данный момент включен (то есть устройство не идет через DIRECT),
+  // сразу же обновляем правило в config.yaml на новую выбранную группу!
+  const activeRules = getClientRulesFromConfig();
+  const currentRuleGroup = activeRules.get(ip) || '';
+  
+  if (currentRuleGroup !== 'DIRECT') {
+    await setClientRuleInConfig(ip, group);
+  }
+  
   return true;
 }
 
@@ -198,109 +385,28 @@ function makeMihomoRequest(method, endpoint, body = null) {
   });
 }
 
-// Парсинг заблокированных (bypassed) клиентов из config.yaml (между маркерами)
-function getBypassedClients() {
-  const list = new Set();
-  try {
-    if (!fs.existsSync(configPath)) return list;
-    const yamlText = fs.readFileSync(configPath, 'utf8');
-    const lines = yamlText.split(/\r?\n/);
-    
-    let inBypassBlock = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line === '# --- CLIENTS BYPASS RULES ---') {
-        inBypassBlock = true;
-        continue;
-      }
-      if (line === '# --- END CLIENTS BYPASS RULES ---') {
-        inBypassBlock = false;
-        break;
-      }
-      if (inBypassBlock && line.startsWith('- SRC-IP-CIDR,')) {
-        // Формат: - SRC-IP-CIDR,192.168.1.48/32,DIRECT
-        const parts = line.split(',');
-        if (parts.length >= 3) {
-          const ipWithCidr = parts[1].trim();
-          const ip = ipWithCidr.split('/')[0];
-          list.add(ip);
-        }
-      }
-    }
-  } catch (err) {
-    console.error('Ошибка чтения исключенных клиентов из конфига:', err.message);
-  }
-  return list;
-}
-
 // Включение/выключение VPN для клиента (Способ А)
 async function toggleClientVpn(ip, vpnEnabled) {
   if (!ip) throw new Error('IP адрес не указан');
   
-  if (!fs.existsSync(configPath)) {
-    throw new Error('Конфиг config.yaml не найден');
-  }
-
-  let yamlText = fs.readFileSync(configPath, 'utf8');
-  let lines = yamlText.split(/\r?\n/);
-  
-  let startMarkerIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
-  let endMarkerIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
-  
-  // Если маркеров нет, создаем их в начале секции rules:
-  if (startMarkerIdx === -1 || endMarkerIdx === -1) {
-    const rulesIdx = lines.findIndex(l => l.trim() === 'rules:');
-    if (rulesIdx === -1) {
-      throw new Error('Секция rules: не найдена в конфиге');
-    }
-    
-    lines.splice(rulesIdx + 1, 0, 
-      '  # --- CLIENTS BYPASS RULES ---',
-      '  # --- END CLIENTS BYPASS RULES ---'
-    );
-    
-    startMarkerIdx = rulesIdx + 1;
-    endMarkerIdx = rulesIdx + 2;
-  }
-
-  const bypassRule = `  - SRC-IP-CIDR,${ip}/32,DIRECT`;
-  let yamlChanged = false;
-  
-  const ruleIdx = lines.findIndex((l, idx) => 
-    idx > startMarkerIdx && 
-    idx < endMarkerIdx && 
-    l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
-  );
-
   if (vpnEnabled === false) {
-    // Выключаем VPN (добавляем обход DIRECT)
-    if (ruleIdx === -1) {
-      lines.splice(endMarkerIdx, 0, bypassRule);
-      yamlChanged = true;
-    }
+    // Если VPN выключается, направляем трафик через DIRECT
+    return setClientRuleInConfig(ip, 'DIRECT');
   } else {
-    // Включаем VPN обратно (удаляем правило DIRECT)
-    if (ruleIdx !== -1) {
-      lines.splice(ruleIdx, 1);
-      yamlChanged = true;
-    }
-  }
-
-  if (yamlChanged) {
-    fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
-    
-    // Перезагрузка конфигурации в Mihomo
+    // Если VPN включается, восстанавливаем предпочтительную группу или берем дефолтную
+    let mac = '';
     try {
-      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
-      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
-        throw new Error('Код ответа API: ' + reloadRes.statusCode);
+      const list = getClientsList();
+      const found = list.find(c => c.ip === ip);
+      if (found && found.mac) {
+        mac = found.mac.toUpperCase();
       }
-    } catch (err) {
-      throw new Error('Не удалось применить настройки в Mihomo: ' + err.message);
-    }
+    } catch (e) {}
+
+    const preferredGroup = resolveClientGroup(ip, mac);
+    const defaultGroup = '🚀Auto-Best';
+    return setClientRuleInConfig(ip, preferredGroup || defaultGroup);
   }
-  
-  return true;
 }
 
 // Запуск фонового сбора трафика по клиентам (каждые 2 секунды)
@@ -415,8 +521,8 @@ startTrafficTracker();
 function getClientsList() {
   const clientsMap = new Map(); // IP => clientObj
   
-  // 1. Получаем исключенных клиентов из конфига
-  const bypassed = getBypassedClients();
+  // Получаем текущие правила назначения прокси-групп из конфига
+  const activeRules = getClientRulesFromConfig();
 
   // Получаем список hotspot устройств для сопоставления имен
   const hotspotHosts = getHotspotHosts();
@@ -426,6 +532,35 @@ function getClientsList() {
     if (h.mac) hostByMac.set(h.mac, h);
     if (h.ip && h.ip !== '0.0.0.0') hostByIp.set(h.ip, h);
   });
+
+  // Вспомогательная функция для сборки объекта клиента
+  function buildClientObj(ip, mac, active) {
+    const name = resolveClientName(ip, mac, hostByMac, hostByIp);
+    const savedGroup = resolveClientGroup(ip, mac);
+    const currentRuleGroup = activeRules.get(ip) || '';
+    
+    // VPN включен, если текущее правило в конфиге НЕ равно DIRECT
+    const vpnEnabled = currentRuleGroup !== 'DIRECT';
+    
+    // Выбранная группа для выпадающего списка: сохраненное предпочтение, 
+    // либо активное правило в конфиге (если оно не DIRECT), либо по умолчанию '🚀Auto-Best'
+    const group = savedGroup || (currentRuleGroup && currentRuleGroup !== 'DIRECT' ? currentRuleGroup : '🚀Auto-Best');
+    
+    return {
+      ip,
+      mac,
+      name,
+      group,
+      vpnEnabled,
+      active,
+      downSpeed: 0,
+      upSpeed: 0,
+      vpnDownload: 0,
+      vpnUpload: 0,
+      directDownload: 0,
+      directUpload: 0
+    };
+  }
 
   // 2. Сканируем таблицу ARP (ip neigh) для обнаружения активных хостов в локальной сети
   try {
@@ -449,19 +584,7 @@ function getClientsList() {
         }
 
         if (ip && ip !== '192.168.1.1') {
-          clientsMap.set(ip, {
-            ip,
-            mac,
-            name: resolveClientName(ip, mac, hostByMac, hostByIp),
-            vpnEnabled: !bypassed.has(ip),
-            active: line.includes('REACHABLE') || line.includes('DELAY'),
-            downSpeed: 0,
-            upSpeed: 0,
-            vpnDownload: 0,
-            vpnUpload: 0,
-            directDownload: 0,
-            directUpload: 0
-          });
+          clientsMap.set(ip, buildClientObj(ip, mac, line.includes('REACHABLE') || line.includes('DELAY')));
         }
       }
     });
@@ -472,19 +595,7 @@ function getClientsList() {
   // Добавляем активных клиентов из hotspot, которых нет в ARP таблице
   hotspotHosts.forEach(h => {
     if (h.active === 'yes' && h.ip && h.ip !== '0.0.0.0' && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
-      clientsMap.set(h.ip, {
-        ip: h.ip,
-        mac: h.mac,
-        name: resolveClientName(h.ip, h.mac, hostByMac, hostByIp),
-        vpnEnabled: !bypassed.has(h.ip),
-        active: true,
-        downSpeed: 0,
-        upSpeed: 0,
-        vpnDownload: 0,
-        vpnUpload: 0,
-        directDownload: 0,
-        directUpload: 0
-      });
+      clientsMap.set(h.ip, buildClientObj(h.ip, h.mac, true));
     }
   });
 
@@ -493,19 +604,7 @@ function getClientsList() {
     if (!clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '192.168.1.1') {
       const h = hostByIp.get(ip);
       const mac = h ? h.mac : '';
-      clientsMap.set(ip, {
-        ip,
-        mac,
-        name: resolveClientName(ip, mac, hostByMac, hostByIp),
-        vpnEnabled: !bypassed.has(ip),
-        active: false,
-        downSpeed: 0,
-        upSpeed: 0,
-        vpnDownload: 0,
-        vpnUpload: 0,
-        directDownload: 0,
-        directUpload: 0
-      });
+      clientsMap.set(ip, buildClientObj(ip, mac, false));
     }
   }
 
@@ -545,5 +644,6 @@ function getClientsList() {
 module.exports = {
   getClientsList,
   toggleClientVpn,
-  renameClient
+  renameClient,
+  setClientGroupPreference
 };

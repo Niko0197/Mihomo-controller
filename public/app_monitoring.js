@@ -1536,6 +1536,7 @@ function setupSystemMonitorToggle() {
 
 // --- 7. Clients (Devices) Dashboard ---
 let allClients = [];
+let allProxyGroups = [];
 let clientsInterval = null;
 let clientsSilentMode = true;
 
@@ -1567,13 +1568,14 @@ async function loadClients() {
     if (!data.success) throw new Error(data.error || 'Server error');
     
     allClients = data.clients || [];
+    allProxyGroups = data.groups || [];
     renderClientsTable();
   } catch (err) {
     console.error('Error loading clients:', err.message);
     if (!clientsSilentMode) {
       const tbody = document.getElementById('clients-list');
       if (tbody) {
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 30px;">Ошибка: ${err.message}</td></tr>`;
+        tbody.innerHTML = `<tr><td colspan="6" style="text-align: center; color: var(--danger); padding: 30px;">Ошибка: ${err.message}</td></tr>`;
       }
     }
   }
@@ -1609,7 +1611,7 @@ function renderClientsTable() {
   tbody.innerHTML = '';
   
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">Устройства не найдены</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">Устройства не найдены</td></tr>';
     return;
   }
   
@@ -1668,9 +1670,15 @@ function renderClientsTable() {
       tdDirectTraffic.textContent = '—';
     }
     
-    // VPN Toggle
+    // VPN Toggle & Group dropdown select
     const tdToggle = document.createElement('td');
     tdToggle.style.textAlign = 'center';
+    
+    const container = document.createElement('div');
+    container.style.display = 'flex';
+    container.style.alignItems = 'center';
+    container.style.justifyContent = 'center';
+    container.style.gap = '12px';
     
     const label = document.createElement('label');
     label.className = 'switch';
@@ -1678,25 +1686,49 @@ function renderClientsTable() {
     const realInput = document.createElement('input');
     realInput.type = 'checkbox';
     realInput.checked = c.vpnEnabled;
-    realInput.onchange = () => toggleClientVpn(c.ip, realInput);
     
     const slider = document.createElement('span');
     slider.className = 'slider';
     
     label.appendChild(realInput);
     label.appendChild(slider);
-    tdToggle.appendChild(label);
+    container.appendChild(label);
     
-    // Action button
-    const tdAction = document.createElement('td');
-    tdAction.style.textAlign = 'center';
-    const btnRename = document.createElement('button');
-    btnRename.className = 'btn';
-    btnRename.style.padding = '4px 10px';
-    btnRename.style.fontSize = '0.8rem';
-    btnRename.textContent = 'Имя';
-    btnRename.onclick = () => promptRenameClient(c.ip, c.name);
-    tdAction.appendChild(btnRename);
+    const select = document.createElement('select');
+    select.className = 'group-select';
+    select.style.background = 'var(--bg-card)';
+    select.style.color = 'var(--text-primary)';
+    select.style.border = '1px solid var(--border-color)';
+    select.style.borderRadius = '6px';
+    select.style.padding = '4px 8px';
+    select.style.fontSize = '0.85rem';
+    select.style.outline = 'none';
+    select.style.cursor = 'pointer';
+    select.disabled = !c.vpnEnabled;
+    
+    const currentGroup = c.group || '🚀Auto-Best';
+    allProxyGroups.forEach(g => {
+      if (g === 'DIRECT' || g === 'REJECT') return;
+      const opt = document.createElement('option');
+      opt.value = g;
+      opt.textContent = g;
+      if (g === currentGroup) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+    
+    realInput.onchange = async () => {
+      select.disabled = !realInput.checked;
+      await toggleClientVpn(c.ip, realInput);
+    };
+    
+    select.onchange = async () => {
+      await changeClientGroup(c.ip, select.value, select);
+    };
+    
+    container.appendChild(select);
+    tdToggle.appendChild(container);
     
     tr.appendChild(tdDevice);
     tr.appendChild(tdState);
@@ -1704,7 +1736,6 @@ function renderClientsTable() {
     tr.appendChild(tdVpnTraffic);
     tr.appendChild(tdDirectTraffic);
     tr.appendChild(tdToggle);
-    tr.appendChild(tdAction);
     
     tbody.appendChild(tr);
   });
@@ -1731,6 +1762,28 @@ async function toggleClientVpn(ip, checkboxEl) {
     checkboxEl.checked = !vpnEnabled;
   } finally {
     checkboxEl.disabled = false;
+  }
+}
+
+async function changeClientGroup(ip, group, selectEl) {
+  selectEl.disabled = true;
+  try {
+    const res = await fetch('/api/clients/group', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, group })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server error');
+    
+    showToast(`Устройство ${ip} направлено в группу ${group}`);
+    loadClients();
+  } catch (err) {
+    showToast(`Ошибка смены группы: ${err.message}`, 'error');
+    loadClients();
+  } finally {
+    selectEl.disabled = false;
   }
 }
 

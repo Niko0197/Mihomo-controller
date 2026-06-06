@@ -1411,6 +1411,10 @@ const server = http.createServer(async (req, res) => {
     handleRenameClient(req, res);
     return;
   }
+  if (req.method === 'POST' && pathname === '/api/clients/group') {
+    handleSetClientGroup(req, res);
+    return;
+  }
 
   // Маршрутизация API
   if (req.method === 'GET' && pathname === '/api/data') {
@@ -1548,8 +1552,9 @@ function handleGetSystemStats(req, res) {
 function handleGetClients(req, res) {
   try {
     const clients = clientsManager.getClientsList();
+    const groups = getGlobalGroupsFromConfig() || [];
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: true, clients }));
+    res.end(JSON.stringify({ success: true, clients, groups }));
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
@@ -1585,6 +1590,25 @@ function handleRenameClient(req, res) {
       const { ip, name } = payload;
       
       clientsManager.renameClient(ip, name);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+// Установка группы проксирования для клиента
+function handleSetClientGroup(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body);
+      const { ip, group } = payload;
+      
+      await clientsManager.setClientGroupPreference(ip, group);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
     } catch (err) {
