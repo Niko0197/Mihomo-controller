@@ -39,10 +39,8 @@
 Для установки откройте SSH-консоль вашего роутера и выполните одну команду:
 
 ```bash
-sh -c "$(curl -fsSL https://raw.githubusercontent.com/ВАШ_GITHUB_ЛОГИН/mihomo-controller/main/install.sh)"
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/install.sh)"
 ```
-
-> **Примечание**: Перед установкой не забудьте заменить `ВАШ_GITHUB_ЛОГИН` в URL команды (и внутри файла `install.sh`) на имя вашего аккаунта на GitHub, куда вы загрузили файлы.
 
 Панель автоматически установит Node.js (если его нет), скопирует файлы в `/opt/root/mihomo-controller/`, пропишет службу автозапуска в Entware и запустит веб-интерфейс на порту **4000**:
 [http://192.168.1.1:4000](http://192.168.1.1:4000)

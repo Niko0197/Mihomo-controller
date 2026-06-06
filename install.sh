@@ -1,8 +1,8 @@
 #!/bin/sh
 
-# Настройки репозитория (замените на ваш юзернейм после загрузки на GitHub)
+# Настройки репозитория
 GITHUB_USER="Niko0197"
-REPO_NAME="mihomo-controller"
+REPO_NAME="Mihomo-controller"
 BRANCH="main"
 
 INSTALL_DIR="/opt/root/mihomo-controller"

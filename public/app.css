@@ -1565,3 +1565,80 @@ input[type="checkbox"]:checked::before {
     grid-template-columns: 1fr;
   }
 }
+
+/* --- Card Collapse Styles --- */
+.pgc-card.pgc-collapsed {
+  padding-bottom: 16px;
+}
+
+.pgc-card.pgc-collapsed .pgc-body {
+  display: none !important;
+}
+
+.pgc-toggle-arrow {
+  font-size: 0.9rem;
+  color: var(--text-muted);
+  transition: transform 0.25s var(--m3-easing);
+  display: inline-block;
+  margin-left: 6px;
+  user-select: none;
+}
+
+.pgc-prov-toggle-nodes-btn:hover {
+  text-decoration: underline;
+  color: var(--md-sys-color-primary-container) !important;
+}
+
+/* Disable old chevron indicator */
+.pgc-expandable .pgc-header-left::after {
+  display: none !important;
+}
+
+/* --- CodeMirror Dialog Dark Theme Styling --- */
+.CodeMirror-dialog {
+  background: rgba(20, 24, 36, 0.96) !important;
+  color: var(--text) !important;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+  padding: 10px 18px !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 0.85rem !important;
+  backdrop-filter: blur(12px) !important;
+}
+
+.CodeMirror-dialog-top {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.CodeMirror-dialog input {
+  background: rgba(255, 255, 255, 0.06) !important;
+  border: 1px solid rgba(255, 255, 255, 0.1) !important;
+  color: var(--text) !important;
+  border-radius: 8px !important;
+  padding: 4px 10px !important;
+  margin-left: 8px !important;
+  outline: none !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 0.85rem !important;
+}
+
+.CodeMirror-dialog input:focus {
+  border-color: var(--md-sys-color-primary) !important;
+  box-shadow: 0 0 8px rgba(168, 199, 250, 0.25) !important;
+}
+
+.CodeMirror-dialog button {
+  background: var(--md-sys-color-primary) !important;
+  color: var(--md-sys-color-on-primary) !important;
+  border: none !important;
+  border-radius: 6px !important;
+  padding: 4px 12px !important;
+  margin-left: 6px !important;
+  cursor: pointer !important;
+  font-weight: 500 !important;
+  font-size: 0.8rem !important;
+}
+
+.CodeMirror-dialog button:hover {
+  background: var(--md-sys-color-primary-container) !important;
+  color: var(--text) !important;
+}

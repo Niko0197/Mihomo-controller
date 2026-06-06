@@ -97,6 +97,43 @@ function getGlobalGroupsFromConfig() {
   return null;
 }
 
+// Функция для получения абсолютно всех групп из config.yaml (включая группы сервисов)
+function getAllGroupsFromConfig() {
+  try {
+    if (fs.existsSync(configPath)) {
+      const yamlText = fs.readFileSync(configPath, 'utf8');
+      const lines = yamlText.split(/\r?\n/);
+      let inProxyGroups = false;
+      const foundGroups = [];
+      
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const trimmed = line.trim();
+        
+        if (line.startsWith('proxy-groups:')) {
+          inProxyGroups = true;
+          continue;
+        }
+        if (inProxyGroups && (line.startsWith('rules:') || line.startsWith('rule-providers:') || (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')))) {
+          inProxyGroups = false;
+          continue;
+        }
+        
+        if (inProxyGroups && trimmed.startsWith('- name:')) {
+          const name = trimmed.substring(trimmed.indexOf(':') + 1).trim().replace(/^['"]|['"]$/g, '');
+          if (name && name !== 'GLOBAL') {
+            foundGroups.push(name);
+          }
+        }
+      }
+      return foundGroups;
+    }
+  } catch (err) {
+    console.error('Ошибка парсинга config.yaml для получения всех групп:', err.message);
+  }
+  return [];
+}
+
 // Вспомогательная функция для скачивания файлов
 function downloadHttpsFile(url) {
   return new Promise((resolve, reject) => {
@@ -558,9 +595,13 @@ async function handleGetData(req, res) {
       });
     }
 
-    let groups = getGlobalGroupsFromConfig();
+    let groups = getGlobalGroupsFromConfig() || [];
+    const allGroups = getAllGroupsFromConfig();
+    allGroups.forEach(g => {
+      if (!groups.includes(g)) groups.push(g);
+    });
     
-    if (!groups || groups.length === 0) {
+    if (groups.length === 0) {
       groups = ['DIRECT', 'REJECT'];
       try {
         const mRes = await makeMihomoRequest('GET', '/proxies');
@@ -666,7 +707,11 @@ function handleApply(req, res) {
       });
 
       if (newRuleLines.length > 0) {
-        lines.splice(rulesIndex + 1, 0, ...newRuleLines);
+        let insertIndex = lines.findIndex(line => line.includes('RULE-SET,smart_unblock'));
+        if (insertIndex === -1) {
+          insertIndex = rulesIndex + 1;
+        }
+        lines.splice(insertIndex, 0, ...newRuleLines);
       }
 
       if (yamlChanged) {

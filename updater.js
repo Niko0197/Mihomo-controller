@@ -110,9 +110,9 @@ function isRussianDomain(host) {
   ];
 
   return keywords.some(keyword => {
-    if (keyword === 'max') {
-      // Ищем 'max' как отдельный сегмент поддомена, чтобы не ловить maxineapi, hymax и т.д.
-      return host === 'max' || host.startsWith('max.') || host.includes('.max.') || host.endsWith('.max');
+    if (keyword === 'max' || keyword === 'okcdn' || keyword === 'vk') {
+      // Ищем как отдельный сегмент поддомена, чтобы избежать ложных срабатываний (например, tiktokcdn.com)
+      return host === keyword || host.startsWith(keyword + '.') || host.includes('.' + keyword + '.') || host.endsWith('.' + keyword);
     }
     return host.includes(keyword);
   });

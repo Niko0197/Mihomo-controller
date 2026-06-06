@@ -673,7 +673,7 @@ function switchLogLevel(level) {
   activeLogLevel = level;
   
   // Update button active classes
-  const buttons = document.querySelectorAll('.log-level-btn');
+  const buttons = document.querySelectorAll('#log-level-tabs .log-level-btn');
   buttons.forEach(btn => {
     if (btn.dataset.level === level) {
       btn.classList.add('active');
@@ -871,7 +871,7 @@ window.addEventListener('load', () => {
   setupSmartScroll();
   
   // Bind log level segmented buttons
-  const buttons = document.querySelectorAll('.log-level-btn');
+  const buttons = document.querySelectorAll('#log-level-tabs .log-level-btn');
   buttons.forEach(btn => {
     btn.onclick = () => {
       switchLogLevel(btn.dataset.level);
@@ -928,8 +928,17 @@ async function loadProxiesDashboard() {
       fetch('/api/xkeen/proxies'),
       fetch('/api/xkeen/providers')
     ]);
-    if (!proxiesRes.ok) throw new Error('Ошибка получения прокси');
-    if (!providersRes.ok) throw new Error('Ошибка получения провайдеров');
+
+    if (!proxiesRes.ok) {
+      const errBody = await proxiesRes.text();
+      console.error('Proxies API error:', proxiesRes.status, errBody);
+      throw new Error('Прокси API: HTTP ' + proxiesRes.status + ' — ' + (errBody || 'нет ответа').substring(0, 120));
+    }
+    if (!providersRes.ok) {
+      const errBody = await providersRes.text();
+      console.error('Providers API error:', providersRes.status, errBody);
+      throw new Error('Провайдеры API: HTTP ' + providersRes.status + ' — ' + (errBody || 'нет ответа').substring(0, 120));
+    }
 
     const proxiesData = await proxiesRes.json();
     const providersData = await providersRes.json();
@@ -939,7 +948,11 @@ async function loadProxiesDashboard() {
     renderProxyProviders(providersData, proxiesData);
   } catch (err) {
     console.error('Proxy dashboard error:', err);
-    showToast('Ошибка загрузки прокси-панели: ' + err.message, 'error');
+    showToast('Ошибка прокси-панели: ' + err.message, 'error');
+
+    // Show error in containers too
+    const gc = document.getElementById('proxy-groups-container');
+    if (gc) gc.innerHTML = '<div style="text-align:center;color:var(--danger);padding:30px 0;font-size:0.9rem;">' + err.message + '<br><br><button class="btn btn-primary" style="font-size:0.85rem;padding:6px 16px;" onclick="loadProxiesDashboard()">🔄 Повторить</button></div>';
   }
 }
 window.loadProxiesDashboard = loadProxiesDashboard;
@@ -984,8 +997,10 @@ function renderProxyGroups(proxiesData) {
     const icon = typeIcons[group.type.toLowerCase()] || '📡';
     const typeLabel = typeLabels[group.type.toLowerCase()] || group.type;
 
-    // Small group = show buttons always, large group = collapsible
-    const isSmallGroup = totalNodes <= 8;
+    const isCollapsed = localStorage.getItem('pgc-collapsed-' + group.name) === 'true';
+    if (isCollapsed) {
+      card.classList.add('pgc-collapsed');
+    }
 
     // --- Header ---
     const header = document.createElement('div');
@@ -998,8 +1013,22 @@ function renderProxyGroups(proxiesData) {
       </div>
       <div class="pgc-header-right">
         <span class="pgc-count-badge">${totalNodes}</span>
+        <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
       </div>
     `;
+
+    header.style.cursor = 'pointer';
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+        return;
+      }
+      const nowCollapsed = card.classList.toggle('pgc-collapsed');
+      localStorage.setItem('pgc-collapsed-' + group.name, nowCollapsed ? 'true' : 'false');
+      const arrow = header.querySelector('.pgc-toggle-arrow');
+      if (arrow) {
+        arrow.textContent = nowCollapsed ? '▸' : '▾';
+      }
+    });
 
     // --- Selected node ---
     const nowName = group.now || '—';
@@ -1015,7 +1044,7 @@ function renderProxyGroups(proxiesData) {
       ${nowDelay > 0 ? '<span class="pgc-sel-delay" style="color:' + getLatencyColor(nowDelay) + '">' + nowDelay + 'ms</span>' : ''}
     `;
 
-    // --- Latency dots row (always visible) ---
+    // --- Latency dots row (always visible in card body) ---
     const dotsRow = document.createElement('div');
     dotsRow.className = 'pgc-dots';
     group.all.forEach(nodeName => {
@@ -1037,8 +1066,7 @@ function renderProxyGroups(proxiesData) {
     if (isSelector && totalNodes <= 30) {
       nodesPanel = document.createElement('div');
       nodesPanel.className = 'pgc-nodes-panel';
-      // Small groups (≤8 nodes): always visible. Large groups: collapsed by default.
-      nodesPanel.style.display = isSmallGroup ? 'flex' : 'none';
+      nodesPanel.style.display = 'flex'; // Always visible when card is expanded
 
       group.all.forEach(nodeName => {
         const np = proxies[nodeName];
@@ -1050,41 +1078,6 @@ function renderProxyGroups(proxiesData) {
 
         const btn = document.createElement('button');
         btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
-
-        btn.innerHTML = `
-          <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
-          <span class="pgc-nb-name">${nodeName}</span>
-          ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
-          ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
-          ${childCount > 0 ? '<span class="pgc-nb-count">' + childCount + '</span>' : ''}
-        `;
-
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          selectProxyInGroup(group.name, nodeName);
-        });
-        nodesPanel.appendChild(btn);
-      });
-    }
-
-    // --- Toggle expand on header click (only for large collapsible groups) ---
-    if (nodesPanel && !isSmallGroup) {
-      card.classList.add('pgc-expandable');
-      header.style.cursor = 'pointer';
-      header.addEventListener('click', () => {
-        const expanded = nodesPanel.style.display !== 'none';
-        nodesPanel.style.display = expanded ? 'none' : 'flex';
-        card.classList.toggle('pgc-expanded', !expanded);
-      });
-    }
-
-    card.appendChild(header);
-    card.appendChild(selected);
-    card.appendChild(dotsRow);
-    if (nodesPanel) card.appendChild(nodesPanel);
-    container.appendChild(card);
-  });
-}
 
 function renderProxyProviders(providersData, proxiesData) {
   const container = document.getElementById('proxy-providers-container');
@@ -1103,6 +1096,11 @@ function renderProxyProviders(providersData, proxiesData) {
   providerList.forEach(provider => {
     const card = document.createElement('div');
     card.className = 'pgc-card pgc-provider';
+
+    const isCollapsed = localStorage.getItem('pgc-collapsed-' + provider.name) === 'true';
+    if (isCollapsed) {
+      card.classList.add('pgc-collapsed');
+    }
 
     const nodesList = provider.proxies || [];
     const total = nodesList.length;
@@ -1145,8 +1143,22 @@ function renderProxyProviders(providersData, proxiesData) {
         <span class="pgc-count-badge">${total}</span>
         <button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${provider.name.replace(/'/g, "\\'")}')">🔄</button>
         <button class="pgc-hc-btn pgc-hc-bolt" title="Healthcheck" onclick="event.stopPropagation();healthcheckProvider('${provider.name.replace(/'/g, "\\'")}')">⚡</button>
+        <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
       </div>
     `;
+
+    header.style.cursor = 'pointer';
+    header.addEventListener('click', (e) => {
+      if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+        return;
+      }
+      const nowCollapsed = card.classList.toggle('pgc-collapsed');
+      localStorage.setItem('pgc-collapsed-' + provider.name, nowCollapsed ? 'true' : 'false');
+      const arrow = header.querySelector('.pgc-toggle-arrow');
+      if (arrow) {
+        arrow.textContent = nowCollapsed ? '▸' : '▾';
+      }
+    });
 
     // Info row
     const info = document.createElement('div');
@@ -1189,20 +1201,37 @@ function renderProxyProviders(providersData, proxiesData) {
       nodesPanel.appendChild(nodeDiv);
     });
 
-    // Toggle expand
-    card.classList.add('pgc-expandable');
-    header.style.cursor = 'pointer';
-    header.addEventListener('click', () => {
-      const expanded = nodesPanel.style.display !== 'none';
-      nodesPanel.style.display = expanded ? 'none' : 'flex';
-      card.classList.toggle('pgc-expanded', !expanded);
+    // Button to toggle nodes panel inside card body
+    const toggleNodesBtn = document.createElement('button');
+    toggleNodesBtn.className = 'pgc-prov-toggle-nodes-btn';
+    toggleNodesBtn.textContent = 'Показать список узлов';
+    toggleNodesBtn.style.margin = '10px 0 2px';
+    toggleNodesBtn.style.background = 'none';
+    toggleNodesBtn.style.border = 'none';
+    toggleNodesBtn.style.color = 'var(--md-sys-color-primary)';
+    toggleNodesBtn.style.fontSize = '0.8rem';
+    toggleNodesBtn.style.cursor = 'pointer';
+    toggleNodesBtn.style.padding = '0';
+    toggleNodesBtn.style.textAlign = 'left';
+    toggleNodesBtn.style.fontFamily = 'Inter, sans-serif';
+    toggleNodesBtn.style.fontWeight = '500';
+
+    toggleNodesBtn.addEventListener('click', () => {
+      const shown = nodesPanel.style.display !== 'none';
+      nodesPanel.style.display = shown ? 'none' : 'flex';
+      toggleNodesBtn.textContent = shown ? 'Показать список узлов' : 'Скрыть список узлов';
     });
 
+    const body = document.createElement('div');
+    body.className = 'pgc-body';
+    body.appendChild(info);
+    body.appendChild(subDiv);
+    body.appendChild(dotsRow);
+    body.appendChild(toggleNodesBtn);
+    body.appendChild(nodesPanel);
+
     card.appendChild(header);
-    card.appendChild(info);
-    card.appendChild(subDiv);
-    card.appendChild(dotsRow);
-    card.appendChild(nodesPanel);
+    card.appendChild(body);
     container.appendChild(card);
   });
 }
