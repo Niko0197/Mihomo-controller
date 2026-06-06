@@ -66,6 +66,13 @@ window.switchTab = function(tabId) {
     startConnectionsPolling(true); // Silent background polling for stats
   }
   
+  // Update clients polling mode based on current tab
+  if (tabId === 'clients') {
+    startClientsPolling(false); // Active rendering
+  } else {
+    startClientsPolling(true); // Silent background polling
+  }
+  
   // If user switched to traffic tab, initialize and refresh the chart immediately
   if (tabId === 'traffic') {
     const speedDownEl = document.getElementById('speed-download');
@@ -877,6 +884,11 @@ window.addEventListener('load', () => {
       switchLogLevel(btn.dataset.level);
     };
   });
+
+  // Инициализация новых компонентов
+  setupSystemMonitorToggle();
+  startSystemStatsPolling();
+  startClientsPolling(true); // Фоновое обновление списка клиентов
 });
 
 // --- 5. Proxy Dashboard (Groups & Providers) ---
@@ -1348,3 +1360,409 @@ async function healthcheckAllGroups() {
   }
 }
 window.healthcheckAllGroups = healthcheckAllGroups;
+
+// --- 6. Router System Resources Monitor (Sidebar) ---
+let systemStatsInterval = null;
+let systemStatsHistory = {
+  cpu: Array(60).fill(0),
+  ram: Array(60).fill(0),
+  temp: Array(60).fill(0),
+  labels: Array(60).fill('')
+};
+let sysResourceChart = null;
+
+function initSysResourceChart() {
+  const canvas = document.getElementById('sys-resource-chart');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  sysResourceChart = new Chart(ctx, {
+    type: 'line',
+    data: {
+      labels: systemStatsHistory.labels,
+      datasets: [
+        {
+          label: 'ЦП (%)',
+          data: systemStatsHistory.cpu,
+          borderColor: '#a8c7fa',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false
+        },
+        {
+          label: 'ОЗУ (%)',
+          data: systemStatsHistory.ram,
+          borderColor: '#3ddc84',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false
+        },
+        {
+          label: 'Темп (°C)',
+          data: systemStatsHistory.temp,
+          borderColor: '#ffb74d',
+          borderWidth: 1.5,
+          pointRadius: 0,
+          tension: 0.3,
+          fill: false
+        }
+      ]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false,
+      plugins: {
+        legend: { display: false },
+        tooltip: { enabled: true }
+      },
+      scales: {
+        x: { display: false },
+        y: {
+          min: 0,
+          max: 100,
+          ticks: {
+            color: '#9094a6',
+            font: { size: 8 }
+          },
+          grid: { color: 'rgba(255, 255, 255, 0.03)' }
+        }
+      }
+    }
+  });
+}
+
+function startSystemStatsPolling() {
+  const poll = async () => {
+    try {
+      const res = await fetch('/api/system/stats');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (!data.success) return;
+      
+      const stats = data.stats;
+      
+      // Update DOM elements
+      const cpuVal = document.getElementById('sys-cpu-val');
+      const cpuBar = document.getElementById('sys-cpu-bar');
+      if (cpuVal) cpuVal.textContent = stats.cpu + '%';
+      if (cpuBar) {
+        cpuBar.style.width = stats.cpu + '%';
+        if (stats.cpu > 85) {
+          cpuBar.style.background = '#ff8a80';
+        } else {
+          cpuBar.style.background = 'var(--md-sys-color-primary)';
+        }
+      }
+      
+      const ramVal = document.getElementById('sys-ram-val');
+      const ramBar = document.getElementById('sys-ram-bar');
+      if (ramVal) ramVal.textContent = `${stats.ramUsedPercent}% (${stats.ramUsedMb} / ${stats.ramTotalMb} МБ)`;
+      if (ramBar) ramBar.style.width = stats.ramUsedPercent + '%';
+      
+      const tempVal = document.getElementById('sys-temp-val');
+      const tempBar = document.getElementById('sys-temp-bar');
+      if (tempVal) tempVal.textContent = stats.temp + '°C';
+      if (tempBar) {
+        const tempPercent = Math.min(100, Math.round((stats.temp / 100) * 100));
+        tempBar.style.width = tempPercent + '%';
+        if (stats.temp > 75) {
+          tempBar.style.background = '#ff8a80';
+        } else {
+          tempBar.style.background = '#ffb74d';
+        }
+      }
+
+      // Update history for chart
+      systemStatsHistory.cpu.shift();
+      systemStatsHistory.cpu.push(stats.cpu);
+      
+      systemStatsHistory.ram.shift();
+      systemStatsHistory.ram.push(stats.ramUsedPercent);
+      
+      systemStatsHistory.temp.shift();
+      systemStatsHistory.temp.push(stats.temp);
+      
+      if (sysResourceChart) {
+        sysResourceChart.update('none');
+      }
+    } catch (err) {
+      console.error('System stats polling error:', err.message);
+    }
+  };
+  
+  poll();
+  systemStatsInterval = setInterval(poll, 1000);
+}
+
+function setupSystemMonitorToggle() {
+  const toggleBtn = document.getElementById('system-monitor-toggle');
+  const body = document.getElementById('system-monitor-body');
+  const arrow = document.getElementById('system-monitor-arrow');
+  
+  if (!toggleBtn || !body || !arrow) return;
+  
+  const isExpanded = localStorage.getItem('system-monitor-expanded') === 'true';
+  if (isExpanded) {
+    body.style.display = 'block';
+    arrow.textContent = '▾';
+    setTimeout(() => {
+      if (!sysResourceChart) initSysResourceChart();
+    }, 50);
+  } else {
+    body.style.display = 'none';
+    arrow.textContent = '▸';
+  }
+  
+  toggleBtn.addEventListener('click', () => {
+    const isCurrentlyHidden = body.style.display === 'none';
+    if (isCurrentlyHidden) {
+      body.style.display = 'block';
+      arrow.textContent = '▾';
+      localStorage.setItem('system-monitor-expanded', 'true');
+      if (!sysResourceChart) {
+        initSysResourceChart();
+      } else {
+        sysResourceChart.update('none');
+      }
+    } else {
+      body.style.display = 'none';
+      arrow.textContent = '▸';
+      localStorage.setItem('system-monitor-expanded', 'false');
+    }
+  });
+}
+
+
+// --- 7. Clients (Devices) Dashboard ---
+let allClients = [];
+let clientsInterval = null;
+let clientsSilentMode = true;
+
+function startClientsPolling(silent = false) {
+  clientsSilentMode = silent;
+  stopClientsPolling();
+  
+  if (!silent) {
+    const tbody = document.getElementById('clients-list');
+    if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">Инициализация списка устройств...</td></tr>';
+  }
+  
+  loadClients();
+  clientsInterval = setInterval(loadClients, silent ? 10000 : 2000);
+}
+
+function stopClientsPolling() {
+  if (clientsInterval) {
+    clearInterval(clientsInterval);
+    clientsInterval = null;
+  }
+}
+
+async function loadClients() {
+  try {
+    const res = await fetch('/api/clients');
+    if (!res.ok) throw new Error('Failed to fetch clients');
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server error');
+    
+    allClients = data.clients || [];
+    renderClientsTable();
+  } catch (err) {
+    console.error('Error loading clients:', err.message);
+    if (!clientsSilentMode) {
+      const tbody = document.getElementById('clients-list');
+      if (tbody) {
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--danger); padding: 30px;">Ошибка: ${err.message}</td></tr>`;
+      }
+    }
+  }
+}
+
+function renderClientsTable() {
+  // Update stats counter
+  const total = allClients.length;
+  const activeCount = allClients.filter(c => c.active).length;
+  const directCount = allClients.filter(c => !c.vpnEnabled).length;
+  
+  const counterEl = document.getElementById('clients-stats-counter');
+  if (counterEl) {
+    counterEl.textContent = `Всего: ${total} · Активно: ${activeCount} · Обход VPN: ${directCount}`;
+  }
+
+  // If in background silent mode, don't build DOM to save CPU
+  if (clientsSilentMode) return;
+  
+  const tbody = document.getElementById('clients-list');
+  if (!tbody) return;
+  
+  const searchInput = document.getElementById('clients-search-box');
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+  
+  const filtered = allClients.filter(c => {
+    const name = (c.name || '').toLowerCase();
+    const ip = (c.ip || '').toLowerCase();
+    const mac = (c.mac || '').toLowerCase();
+    return name.includes(query) || ip.includes(query) || mac.includes(query);
+  });
+  
+  tbody.innerHTML = '';
+  
+  if (filtered.length === 0) {
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 30px;">Устройства не найдены</td></tr>';
+    return;
+  }
+  
+  filtered.forEach(c => {
+    const tr = document.createElement('tr');
+    
+    // Device info (Name, IP, MAC)
+    const tdDevice = document.createElement('td');
+    
+    const nameSpan = document.createElement('span');
+    nameSpan.className = 'editable-name';
+    nameSpan.title = 'Нажмите, чтобы изменить имя';
+    nameSpan.innerHTML = `${c.name || '<i>Устройство без имени</i>'} <svg width="12" height="12" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
+    nameSpan.onclick = () => promptRenameClient(c.ip, c.name);
+    
+    const detailsDiv = document.createElement('div');
+    detailsDiv.className = 'client-ip-mac';
+    detailsDiv.textContent = `${c.ip} ${c.mac ? '· ' + c.mac : ''}`;
+    
+    tdDevice.appendChild(nameSpan);
+    tdDevice.appendChild(detailsDiv);
+    
+    // State badge
+    const tdState = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = `status-badge ${c.active ? 'active' : 'inactive'}`;
+    badge.textContent = c.active ? 'Активен' : 'STALE';
+    tdState.appendChild(badge);
+    
+    // Current speed
+    const tdSpeed = document.createElement('td');
+    tdSpeed.className = 'client-speed-text';
+    if (c.active && (c.downSpeed > 0 || c.upSpeed > 0)) {
+      tdSpeed.innerHTML = `<span style="color:#a8c7fa;">${formatSpeed(c.downSpeed)} ↓</span><br><span style="color:#3ddc84;">${formatSpeed(c.upSpeed)} ↑</span>`;
+    } else {
+      tdSpeed.innerHTML = '<span style="color:var(--text-muted);">0 KB/s</span>';
+    }
+    
+    // VPN Cumulative traffic
+    const tdVpnTraffic = document.createElement('td');
+    tdVpnTraffic.className = 'client-traffic-text';
+    const vpnTotal = c.vpnDownload + c.vpnUpload;
+    if (vpnTotal > 0) {
+      tdVpnTraffic.innerHTML = `<span>${formatBytes(vpnTotal)}</span><br><span style="font-size:0.75rem;opacity:0.7;">↓ ${formatBytes(c.vpnDownload)} / ↑ ${formatBytes(c.vpnUpload)}</span>`;
+    } else {
+      tdVpnTraffic.textContent = '—';
+    }
+    
+    // DIRECT Cumulative traffic
+    const tdDirectTraffic = document.createElement('td');
+    tdDirectTraffic.className = 'client-traffic-text';
+    const directTotal = c.directDownload + c.directUpload;
+    if (directTotal > 0) {
+      tdDirectTraffic.innerHTML = `<span>${formatBytes(directTotal)}</span><br><span style="font-size:0.75rem;opacity:0.7;">↓ ${formatBytes(c.directDownload)} / ↑ ${formatBytes(c.directUpload)}</span>`;
+    } else {
+      tdDirectTraffic.textContent = '—';
+    }
+    
+    // VPN Toggle
+    const tdToggle = document.createElement('td');
+    tdToggle.style.textAlign = 'center';
+    
+    const label = document.createElement('label');
+    label.className = 'switch';
+    
+    const realInput = document.createElement('input');
+    realInput.type = 'checkbox';
+    realInput.checked = c.vpnEnabled;
+    realInput.onchange = () => toggleClientVpn(c.ip, realInput);
+    
+    const slider = document.createElement('span');
+    slider.className = 'slider';
+    
+    label.appendChild(realInput);
+    label.appendChild(slider);
+    tdToggle.appendChild(label);
+    
+    // Action button
+    const tdAction = document.createElement('td');
+    tdAction.style.textAlign = 'center';
+    const btnRename = document.createElement('button');
+    btnRename.className = 'btn';
+    btnRename.style.padding = '4px 10px';
+    btnRename.style.fontSize = '0.8rem';
+    btnRename.textContent = 'Имя';
+    btnRename.onclick = () => promptRenameClient(c.ip, c.name);
+    tdAction.appendChild(btnRename);
+    
+    tr.appendChild(tdDevice);
+    tr.appendChild(tdState);
+    tr.appendChild(tdSpeed);
+    tr.appendChild(tdVpnTraffic);
+    tr.appendChild(tdDirectTraffic);
+    tr.appendChild(tdToggle);
+    tr.appendChild(tdAction);
+    
+    tbody.appendChild(tr);
+  });
+}
+
+async function toggleClientVpn(ip, checkboxEl) {
+  const vpnEnabled = checkboxEl.checked;
+  checkboxEl.disabled = true;
+  try {
+    const res = await fetch('/api/clients/toggle', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, vpnEnabled })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server error');
+    
+    showToast(`Правила для ${ip} успешно обновлены`);
+    loadClients();
+  } catch (err) {
+    showToast(`Ошибка изменения правил: ${err.message}`, 'error');
+    // revert checkbox back
+    checkboxEl.checked = !vpnEnabled;
+  } finally {
+    checkboxEl.disabled = false;
+  }
+}
+
+async function promptRenameClient(ip, currentName) {
+  const newName = prompt(`Введите имя для устройства (${ip}):`, currentName || '');
+  if (newName === null) return; // cancel pressed
+  
+  try {
+    const res = await fetch('/api/clients/rename', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, name: newName })
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Server error');
+    
+    showToast(`Имя устройства ${ip} обновлено`);
+    loadClients();
+  } catch (err) {
+    showToast(`Ошибка сохранения имени: ${err.message}`, 'error');
+  }
+}
+
+// Bind Clients Dashboard DOM listeners
+const btnRefreshClients = document.getElementById('btn-refresh-clients');
+if (btnRefreshClients) {
+  btnRefreshClients.onclick = () => loadClients();
+}
+
+const clientsSearchBox = document.getElementById('clients-search-box');
+if (clientsSearchBox) {
+  clientsSearchBox.oninput = () => renderClientsTable();
+}
+

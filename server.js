@@ -3,6 +3,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 const yamlUtils = require('./yaml_utils');
+const systemStats = require('./system_stats');
+const clientsManager = require('./clients_manager');
 
 const PORT = 4000;
 const API_PORT = 9090;
@@ -1392,6 +1394,24 @@ const server = http.createServer(async (req, res) => {
   }
 
   // Маршрутизация API
+  if (req.method === 'GET' && pathname === '/api/system/stats') {
+    handleGetSystemStats(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/clients') {
+    handleGetClients(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/clients/toggle') {
+    handleToggleClientVpn(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/clients/rename') {
+    handleRenameClient(req, res);
+    return;
+  }
+
+  // Маршрутизация API
   if (req.method === 'GET' && pathname === '/api/data') {
     await handleGetData(req, res);
     return;
@@ -1508,6 +1528,68 @@ const server = http.createServer(async (req, res) => {
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('404 Not Found');
 });
+
+// Системный мониторинг роутера
+function handleGetSystemStats(req, res) {
+  try {
+    const stats = systemStats.getSystemStats();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, stats }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// Получение списка клиентов
+function handleGetClients(req, res) {
+  try {
+    const clients = clientsManager.getClientsList();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, clients }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// Включение/выключение VPN для клиента
+function handleToggleClientVpn(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body);
+      const { ip, vpnEnabled } = payload;
+      
+      await clientsManager.toggleClientVpn(ip, vpnEnabled);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+// Переименование клиента
+function handleRenameClient(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    try {
+      const payload = JSON.parse(body);
+      const { ip, name } = payload;
+      
+      clientsManager.renameClient(ip, name);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
 
 // Запуск сервера
 server.listen(PORT, '0.0.0.0', () => {
