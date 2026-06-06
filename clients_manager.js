@@ -431,7 +431,7 @@ function startTrafficTracker() {
       connections.forEach(conn => {
         const id = conn.id;
         const ip = conn.metadata.sourceIP;
-        if (!ip) return;
+        if (!ip || !ip.startsWith('192.')) return;
 
         currentActiveIds.add(id);
 
@@ -575,7 +575,7 @@ function getClientsList() {
       if (parts.length >= 4) {
         const ip = parts[0];
         // Валидация IPv4
-        if (!ip.match(/^([0-9]{1,3}\.){3}[0-9]{1,3}$/)) return;
+        if (!ip.startsWith('192.')) return;
         
         let mac = '';
         const lladdrIdx = parts.indexOf('lladdr');
@@ -594,14 +594,14 @@ function getClientsList() {
 
   // Добавляем активных клиентов из hotspot, которых нет в ARP таблице
   hotspotHosts.forEach(h => {
-    if (h.active === 'yes' && h.ip && h.ip !== '0.0.0.0' && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
+    if (h.active === 'yes' && h.ip && h.ip.startsWith('192.') && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
       clientsMap.set(h.ip, buildClientObj(h.ip, h.mac, true));
     }
   });
 
   // 3. Добавляем тех клиентов, которые сейчас не в ip neigh, но по которым шел трафик (если есть)
   for (const ip of cumulativeTraffic.keys()) {
-    if (!clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '192.168.1.1') {
+    if (ip.startsWith('192.') && !clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '192.168.1.1') {
       const h = hostByIp.get(ip);
       const mac = h ? h.mac : '';
       clientsMap.set(ip, buildClientObj(ip, mac, false));

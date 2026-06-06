@@ -1592,6 +1592,11 @@ function renderClientsTable() {
     counterEl.textContent = `Всего: ${total} · Активно: ${activeCount} · Обход VPN: ${directCount}`;
   }
 
+  // If the user is currently interacting with the group select dropdown, skip re-rendering to prevent it from closing
+  if (document.activeElement && document.activeElement.classList.contains('group-select')) {
+    return;
+  }
+
   // If in background silent mode, don't build DOM to save CPU
   if (clientsSilentMode) return;
   
