@@ -41,13 +41,125 @@ function saveDb() {
   }
 }
 
+// Вспомогательная функция для декодирования XML-сущностей
+function unescapeXml(str) {
+  if (!str) return '';
+  return str
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'");
+}
+
+// Парсинг XML ответа hotspot в массив объектов хостов
+function parseHotspotXml(xmlString) {
+  const hosts = [];
+  if (!xmlString) return hosts;
+  
+  const hostRegex = /<host>([\s\S]*?)<\/host>/g;
+  let match;
+  while ((match = hostRegex.exec(xmlString)) !== null) {
+    const hostContent = match[1];
+    
+    const macMatch = hostContent.match(/<mac>([^<]*)<\/mac>/);
+    const ipMatch = hostContent.match(/<ip>([^<]*)<\/ip>/);
+    const hostnameMatch = hostContent.match(/<hostname>([^<]*)<\/hostname>/);
+    const nameMatch = hostContent.match(/<name>([^<]*)<\/name>/);
+    
+    if (macMatch) {
+      hosts.push({
+        mac: macMatch[1].trim().toUpperCase(),
+        ip: ipMatch ? ipMatch[1].trim() : '',
+        hostname: hostnameMatch ? unescapeXml(hostnameMatch[1].trim()) : '',
+        name: nameMatch ? unescapeXml(nameMatch[1].trim()) : ''
+      });
+    }
+  }
+  return hosts;
+}
+
+// Получение списка хостов из Keenetic через ndmq с кэшированием
+let cachedHotspotHosts = [];
+let lastHotspotFetchTime = 0;
+const CACHE_TTL_MS = 15000; // 15 секунд
+
+function getHotspotHosts() {
+  const now = Date.now();
+  if (now - lastHotspotFetchTime < CACHE_TTL_MS && cachedHotspotHosts.length > 0) {
+    return cachedHotspotHosts;
+  }
+  
+  try {
+    const xmlOutput = execSync('/opt/bin/ndmq -x -p "show ip hotspot"', { timeout: 3000 }).toString();
+    cachedHotspotHosts = parseHotspotXml(xmlOutput);
+    lastHotspotFetchTime = now;
+  } catch (err) {
+    console.error('Ошибка получения данных hotspot через ndmq:', err.message);
+  }
+  return cachedHotspotHosts;
+}
+
+// Приоритетное разрешение имени устройства
+function resolveClientName(ip, mac, hostByMac, hostByIp) {
+  const normMac = mac ? mac.toUpperCase() : '';
+  
+  // 1. Кастомное имя по MAC-адресу из БД
+  if (normMac && clientsDb[normMac]) {
+    return clientsDb[normMac];
+  }
+  // 2. Кастомное имя по IP-адресу из БД (совместимость)
+  if (ip && clientsDb[ip]) {
+    return clientsDb[ip];
+  }
+  
+  // Ищем хост в hotspot по MAC или IP
+  let h = null;
+  if (normMac) {
+    h = hostByMac.get(normMac);
+  }
+  if (!h && ip) {
+    h = hostByIp.get(ip);
+  }
+  
+  if (h) {
+    // 3. Заданное пользователем в Keenetic имя (<name>)
+    if (h.name) return h.name;
+    // 4. Заводское имя хоста (<hostname>)
+    if (h.hostname) return h.hostname;
+  }
+  
+  return '';
+}
+
 // Переименование клиента
 function renameClient(ip, name) {
   if (!ip) return false;
-  if (!name || name.trim() === '') {
+  
+  // Пытаемся найти MAC по IP-адресу в текущем списке клиентов
+  let mac = '';
+  try {
+    const list = getClientsList();
+    const found = list.find(c => c.ip === ip);
+    if (found && found.mac) {
+      mac = found.mac.toUpperCase();
+    }
+  } catch (e) {
+    console.error('Ошибка при определении MAC для переименования:', e.message);
+  }
+
+  const cleanName = name ? name.trim() : '';
+  if (cleanName === '') {
     delete clientsDb[ip];
+    if (mac) {
+      delete clientsDb[mac];
+    }
   } else {
-    clientsDb[ip] = name.trim();
+    // Сохраняем и под IP, и под MAC для максимальной стабильности
+    clientsDb[ip] = cleanName;
+    if (mac) {
+      clientsDb[mac] = cleanName;
+    }
   }
   saveDb();
   return true;
@@ -306,6 +418,15 @@ function getClientsList() {
   // 1. Получаем исключенных клиентов из конфига
   const bypassed = getBypassedClients();
 
+  // Получаем список hotspot устройств для сопоставления имен
+  const hotspotHosts = getHotspotHosts();
+  const hostByMac = new Map();
+  const hostByIp = new Map();
+  hotspotHosts.forEach(h => {
+    if (h.mac) hostByMac.set(h.mac, h);
+    if (h.ip && h.ip !== '0.0.0.0') hostByIp.set(h.ip, h);
+  });
+
   // 2. Сканируем таблицу ARP (ip neigh) для обнаружения активных хостов в локальной сети
   try {
     const neighOutput = execSync('ip neigh show', { timeout: 2000 }).toString();
@@ -331,7 +452,7 @@ function getClientsList() {
           clientsMap.set(ip, {
             ip,
             mac,
-            name: clientsDb[ip] || '',
+            name: resolveClientName(ip, mac, hostByMac, hostByIp),
             vpnEnabled: !bypassed.has(ip),
             active: line.includes('REACHABLE') || line.includes('DELAY'),
             downSpeed: 0,
@@ -348,13 +469,34 @@ function getClientsList() {
     console.error('Ошибка выполнения ip neigh:', err.message);
   }
 
+  // Добавляем активных клиентов из hotspot, которых нет в ARP таблице
+  hotspotHosts.forEach(h => {
+    if (h.active === 'yes' && h.ip && h.ip !== '0.0.0.0' && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
+      clientsMap.set(h.ip, {
+        ip: h.ip,
+        mac: h.mac,
+        name: resolveClientName(h.ip, h.mac, hostByMac, hostByIp),
+        vpnEnabled: !bypassed.has(h.ip),
+        active: true,
+        downSpeed: 0,
+        upSpeed: 0,
+        vpnDownload: 0,
+        vpnUpload: 0,
+        directDownload: 0,
+        directUpload: 0
+      });
+    }
+  });
+
   // 3. Добавляем тех клиентов, которые сейчас не в ip neigh, но по которым шел трафик (если есть)
   for (const ip of cumulativeTraffic.keys()) {
     if (!clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '192.168.1.1') {
+      const h = hostByIp.get(ip);
+      const mac = h ? h.mac : '';
       clientsMap.set(ip, {
         ip,
-        mac: '',
-        name: clientsDb[ip] || '',
+        mac,
+        name: resolveClientName(ip, mac, hostByMac, hostByIp),
         vpnEnabled: !bypassed.has(ip),
         active: false,
         downSpeed: 0,

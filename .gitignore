@@ -5,6 +5,7 @@
 *.bak
 *.tmp_bak
 smart_unblock_db.json
+clients_db.json
 tor_bridges.json
 
 # Системные папки

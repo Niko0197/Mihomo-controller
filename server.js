@@ -1398,6 +1398,7 @@ const server = http.createServer(async (req, res) => {
     handleGetSystemStats(req, res);
     return;
   }
+
   if (req.method === 'GET' && pathname === '/api/clients') {
     handleGetClients(req, res);
     return;
@@ -1540,6 +1541,8 @@ function handleGetSystemStats(req, res) {
     res.end(JSON.stringify({ success: false, error: err.message }));
   }
 }
+
+
 
 // Получение списка клиентов
 function handleGetClients(req, res) {
