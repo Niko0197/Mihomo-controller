@@ -92,9 +92,13 @@ window.switchTab = function(tabId) {
       trafficChart.update('none');
     }
   } else if (tabId === 'logs') {
-    reRenderLogs();
+    if (window.isXkeenRunning) {
+      reRenderLogs();
+    }
   } else if (tabId === 'proxies-dashboard') {
-    loadProxiesDashboard();
+    if (window.isXkeenRunning) {
+      loadProxiesDashboard();
+    }
   }
 };
 
@@ -306,6 +310,7 @@ function stopConnectionsPolling() {
 }
 
 async function loadConnections() {
+  if (!window.isXkeenRunning) return;
   try {
     const res = await fetch('/api/xkeen/connections');
     if (!res.ok) throw new Error('Failed to fetch active connections');

@@ -1240,7 +1240,7 @@ function handleGetXkeenStatus(req, res) {
 }
 
 // POST /api/xkeen/toggle
-function handleToggleXkeen(req, res) {
+async function handleToggleXkeen(req, res) {
   try {
     const { execSync } = require('child_process');
     let running = false;
@@ -1256,11 +1256,24 @@ function handleToggleXkeen(req, res) {
       console.error('Ошибка выполнения /opt/etc/init.d/S99xkeen ' + action, cmdErr.message);
     }
 
+    // Ожидаем завершения операции до 4 секунд
     let newRunning = false;
-    try {
-      execSync('pidof mihomo');
-      newRunning = true;
-    } catch (e) {}
+    const targetRunning = action === 'start';
+    
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      let check = false;
+      try {
+        execSync('pidof mihomo');
+        check = true;
+      } catch (e) {}
+      
+      if (check === targetRunning) {
+        newRunning = check;
+        break;
+      }
+      newRunning = check;
+    }
 
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: true, running: newRunning }));
@@ -1271,7 +1284,7 @@ function handleToggleXkeen(req, res) {
 }
 
 // POST /api/xkeen/restart
-function handleRestartXkeen(req, res) {
+async function handleRestartXkeen(req, res) {
   try {
     const { execSync } = require('child_process');
     try {
@@ -1280,11 +1293,16 @@ function handleRestartXkeen(req, res) {
       console.error('Ошибка выполнения /opt/etc/init.d/S99xkeen restart', cmdErr.message);
     }
 
+    // Ожидаем старта процесса до 4 секунд
     let running = false;
-    try {
-      execSync('pidof mihomo');
-      running = true;
-    } catch (e) {}
+    for (let i = 0; i < 8; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try {
+        execSync('pidof mihomo');
+        running = true;
+        break;
+      } catch (e) {}
+    }
 
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: true, running }));
@@ -1479,11 +1497,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
   if (req.method === 'POST' && pathname === '/api/xkeen/toggle') {
-    handleToggleXkeen(req, res);
+    await handleToggleXkeen(req, res);
     return;
   }
   if (req.method === 'POST' && pathname === '/api/xkeen/restart') {
-    handleRestartXkeen(req, res);
+    await handleRestartXkeen(req, res);
     return;
   }
   if (req.method === 'POST' && pathname === '/api/server/restart') {

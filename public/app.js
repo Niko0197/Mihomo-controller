@@ -942,6 +942,8 @@ window.onload = function() {
 };
 
 // === Управление XKeen (запуск, остановка, рестарт) ===
+window.isXkeenRunning = false;
+
 async function updateXkeenStatus() {
   const badge = document.getElementById('xkeen-status-badge');
   const dot = document.getElementById('xkeen-status-dot');
@@ -957,6 +959,9 @@ async function updateXkeenStatus() {
     const data = await res.json();
     
     if (data.success) {
+      window.isXkeenRunning = data.running;
+      updateXkeenTabPlaceholders();
+
       if (data.running) {
         text.textContent = 'Mihomo API подключен';
         badge.style.background = 'var(--success-container)';
@@ -990,7 +995,60 @@ async function updateXkeenStatus() {
   } catch (err) {
     text.textContent = 'Ошибка статуса';
     dot.style.backgroundColor = 'var(--danger)';
+    window.isXkeenRunning = false;
+    updateXkeenTabPlaceholders();
   }
+}
+
+function updateXkeenTabPlaceholders() {
+  const dependentTabs = ['proxies-dashboard', 'ping', 'traffic', 'connections', 'logs', 'trace'];
+  const isRunning = window.isXkeenRunning;
+
+  dependentTabs.forEach(tabId => {
+    const tabEl = document.getElementById('tab-content-' + tabId);
+    if (!tabEl) return;
+
+    tabEl.style.position = 'relative';
+
+    let overlay = tabEl.querySelector('.xkeen-stopped-overlay');
+    if (!overlay) {
+      overlay = document.createElement('div');
+      overlay.className = 'xkeen-stopped-overlay';
+      overlay.innerHTML = `
+        <div style="background:var(--danger-container); border:1px solid rgba(255,138,128,0.15); color:var(--danger); padding:10px 20px; border-radius:30px; font-weight:500; font-size:0.95rem; margin-bottom:16px; display:inline-flex; align-items:center; gap:8px;">
+          <span style="width:8px; height:8px; background:var(--danger); border-radius:50%;"></span>
+          Сервис остановлен
+        </div>
+        <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:20px; max-width:320px; font-family:'Inter', sans-serif; line-height: 1.5;">
+          Для просмотра этой вкладки необходимо запустить прокси-службу Mihomo (XKeen).
+        </p>
+        <button class="btn btn-primary btn-xkeen-start-inline" style="display:inline-flex; align-items:center; gap:8px; padding:10px 20px; font-size:0.9rem; cursor:pointer;">
+          <svg viewBox="0 0 24 24" style="width:18px; height:18px; fill:currentColor;"><path d="M8 5v14l11-7z"/></svg>
+          Запустить службу
+        </button>
+      `;
+      
+      const startBtn = overlay.querySelector('.btn-xkeen-start-inline');
+      if (startBtn) {
+        startBtn.onclick = async () => {
+          startBtn.disabled = true;
+          const mainToggle = document.getElementById('btn-xkeen-toggle');
+          if (mainToggle) {
+            mainToggle.click();
+          }
+        };
+      }
+      tabEl.appendChild(overlay);
+    }
+
+    if (isRunning) {
+      overlay.style.display = 'none';
+      const startBtn = overlay.querySelector('.btn-xkeen-start-inline');
+      if (startBtn) startBtn.disabled = false;
+    } else {
+      overlay.style.display = 'flex';
+    }
+  });
 }
 
 // Обработчики кликов управления XKeen
