@@ -218,6 +218,20 @@ async function loadConfigEditor() {
 
 document.getElementById('btn-reload-config-editor').onclick = loadConfigEditor;
 
+document.getElementById('btn-download-config').onclick = function() {
+  if (!configEditor) return;
+  const configText = configEditor.getValue();
+  const blob = new Blob([configText], { type: 'text/yaml;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', 'config.yaml');
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Конфигурация подготовлена к скачиванию');
+};
+
 document.getElementById('btn-save-config').onclick = async function() {
   if (!configEditor) return;
   const btn = this;

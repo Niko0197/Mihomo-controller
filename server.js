@@ -676,55 +676,73 @@ function handleApply(req, res) {
         throw new Error('Mihomo config.yaml не найден по пути ' + configPath);
       }
 
-      let yamlText = fs.readFileSync(configPath, 'utf8');
-      let lines = yamlText.split(/\r?\n/);
-      let rulesIndex = lines.findIndex(line => line.trim() === 'rules:');
-
-      if (rulesIndex === -1) {
-        throw new Error('Не найдена секция rules: в конфигурационном файле Mihomo');
+      const rulesDir = '/opt/etc/mihomo/rules';
+      if (!fs.existsSync(rulesDir)) {
+        fs.mkdirSync(rulesDir, { recursive: true });
       }
 
-      const newRuleLines = [];
       const appliedDomains = assignments.map(a => a.domain.trim().toLowerCase());
-      let yamlChanged = false;
-
-      assignments.forEach(item => {
+      
+      // Обрабатываем каждое назначение
+      for (const item of assignments) {
         const domain = item.domain.trim().toLowerCase();
         const group = item.group.trim();
-        let ruleUpdated = false;
+        const key = getGroupNameKey(group);
+        const ruleStr = parseDomainOrIp(item.domain);
 
-        for (let i = 0; i < lines.length; i++) {
-          const line = lines[i];
-          const trimmed = line.trim();
-
-          if (trimmed.startsWith('- DOMAIN-SUFFIX,' + domain + ',') || trimmed.startsWith('- DOMAIN,' + domain + ',')) {
-            const leadingSpaces = line.substring(0, line.indexOf('-'));
-            const ruleType = trimmed.startsWith('- DOMAIN-SUFFIX,') ? 'DOMAIN-SUFFIX' : 'DOMAIN';
-            
-            lines[i] = leadingSpaces + '- ' + ruleType + ',' + domain + ',' + group;
-            ruleUpdated = true;
-            yamlChanged = true;
+        // 1. Очищаем этот домен из всех остальных custom_*.yaml файлов для предотвращения дублирования
+        if (fs.existsSync(rulesDir)) {
+          const files = fs.readdirSync(rulesDir).filter(f => f.startsWith('custom_') && f.endsWith('.yaml'));
+          for (const file of files) {
+            const filePath = path.join(rulesDir, file);
+            const fileRules = readRuleProvider(filePath);
+            const filteredRules = fileRules.filter(r => {
+              const parts = r.split(',');
+              const pat = parts[1] ? parts[1].trim().toLowerCase() : '';
+              return pat !== domain;
+            });
+            if (filteredRules.length !== fileRules.length) {
+              writeRuleProvider(filePath, filteredRules);
+            }
           }
         }
 
-        if (!ruleUpdated) {
-          newRuleLines.push('  - DOMAIN-SUFFIX,' + domain + ',' + group);
-          yamlChanged = true;
-        }
-      });
+        // 2. Добавляем правило в целевой файл
+        const targetPath = path.join(rulesDir, `${key}.yaml`);
+        const targetRules = readRuleProvider(targetPath);
+        const ruleExists = targetRules.some(r => {
+          const parts = r.split(',');
+          const pat = parts[1] ? parts[1].trim().toLowerCase() : '';
+          return pat === domain;
+        });
 
-      if (newRuleLines.length > 0) {
-        let insertIndex = lines.findIndex(line => line.includes('RULE-SET,smart_unblock'));
-        if (insertIndex === -1) {
-          insertIndex = rulesIndex + 1;
+        if (!ruleExists) {
+          targetRules.push(ruleStr);
+          writeRuleProvider(targetPath, targetRules);
         }
-        lines.splice(insertIndex, 0, ...newRuleLines);
       }
 
-      if (yamlChanged) {
-        fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
+      // 3. Убеждаемся, что rule-providers и RULE-SET ссылки прописаны в config.yaml
+      const keysAndNames = assignments.map(item => ({
+        key: getGroupNameKey(item.group),
+        group: item.group
+      }));
+      const uniqueKeysAndNames = [];
+      const seenKeys = new Set();
+      for (const item of keysAndNames) {
+        if (!seenKeys.has(item.key)) {
+          seenKeys.add(item.key);
+          uniqueKeysAndNames.push(item);
+        }
       }
 
+      const yamlText = fs.readFileSync(configPath, 'utf8');
+      const ensureRes = ensureCustomRuleProvidersInConfig(yamlText, uniqueKeysAndNames);
+      if (ensureRes.changed) {
+        fs.writeFileSync(configPath, ensureRes.yamlText, 'utf8');
+      }
+
+      // 4. Очищаем логи
       if (fs.existsSync(logRuPath)) {
         let logsText = fs.readFileSync(logRuPath, 'utf8');
         let logLines = logsText.split(/\r?\n/);
@@ -733,8 +751,8 @@ function handleApply(req, res) {
           if (!line.trim() || line.startsWith('#')) return true;
           const match = line.match(/Домен (.*?) пошел/);
           if (match) {
-            const domain = match[1].toLowerCase();
-            return !appliedDomains.includes(domain);
+            const dom = match[1].toLowerCase();
+            return !appliedDomains.includes(dom);
           }
           return true;
         });
@@ -742,6 +760,7 @@ function handleApply(req, res) {
         fs.writeFileSync(logRuPath, updatedLogLines.join('\n'), 'utf8');
       }
 
+      // 5. Перезагружаем конфигурацию Mihomo
       try {
         const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
         if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
@@ -1637,6 +1656,268 @@ function handleSetClientGroup(req, res) {
     }
   });
 }
+
+const groupToNameMap = {
+  'DIRECT': 'custom_direct',
+  'REJECT': 'custom_reject',
+  'GLOBAL': 'custom_global',
+  '🚀Auto-Best': 'custom_autobest',
+  '⚙️Manual 1': 'custom_manual_1',
+  '⚙️Manual 2': 'custom_manual_2'
+};
+
+function getGroupNameKey(group) {
+  if (groupToNameMap[group]) return groupToNameMap[group];
+  const sanitized = group
+    .replace(/[^\w\u0400-\u04FF-]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .toLowerCase();
+  return `custom_${sanitized || 'rules'}`;
+}
+
+function readRuleProvider(filePath) {
+  if (!fs.existsSync(filePath)) {
+    return [];
+  }
+  const content = fs.readFileSync(filePath, 'utf8');
+  const lines = content.split(/\r?\n/);
+  const rules = [];
+  let inPayload = false;
+  for (let line of lines) {
+    const trimmed = line.trim();
+    if (trimmed.startsWith('payload:')) {
+      inPayload = true;
+      continue;
+    }
+    if (inPayload) {
+      if (trimmed.startsWith('-')) {
+        let rule = trimmed.substring(1).trim();
+        rule = rule.replace(/^['"]|['"]$/g, '');
+        if (rule) {
+          rules.push(rule);
+        }
+      } else if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith(' ')) {
+        inPayload = false;
+      }
+    }
+  }
+  return rules;
+}
+
+function writeRuleProvider(filePath, rules) {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  
+  const lines = [
+    '# Generated by VPN Updater',
+    'payload:'
+  ];
+  if (rules.length === 0) {
+    lines.push('  # No rules');
+  } else {
+    const uniqueRules = [...new Set(rules)];
+    for (const r of uniqueRules) {
+      lines.push(`  - '${r}'`);
+    }
+  }
+  fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf8');
+}
+
+function parseDomainOrIp(value) {
+  const clean = value.trim().toLowerCase();
+  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
+  const ipv6Pattern = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(\/\d{1,3})?$/;
+  
+  if (ipPattern.test(clean)) {
+    let rule = clean;
+    if (!clean.includes('/')) {
+      rule = clean + '/32';
+    }
+    return `IP-CIDR,${rule},no-resolve`;
+  } else if (clean.includes(':') && ipv6Pattern.test(clean)) {
+    let rule = clean;
+    if (!clean.includes('/')) {
+      rule = clean + '/128';
+    }
+    return `IP-CIDR6,${rule},no-resolve`;
+  } else {
+    return `DOMAIN-SUFFIX,${clean}`;
+  }
+}
+
+function ensureCustomRuleProvidersInConfig(yamlText, groupKeysAndNames) {
+  let lines = yamlText.split(/\r?\n/);
+  let changed = false;
+
+  // 1. Ensure custom rule-providers are defined
+  let ruleProvidersIndex = lines.findIndex(line => line.trim() === 'rule-providers:');
+  if (ruleProvidersIndex !== -1) {
+    for (const { key } of groupKeysAndNames) {
+      let providerExists = false;
+      for (let i = ruleProvidersIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.trim().startsWith('rules:')) break;
+        if (line.trim().startsWith(key + ':')) {
+          providerExists = true;
+          break;
+        }
+      }
+      if (!providerExists) {
+        const indent = '  ';
+        const providerLines = [
+          `${indent}${key}:`,
+          `${indent}${indent}type: file`,
+          `${indent}${indent}behavior: classical`,
+          `${indent}${indent}path: ./rules/${key}.yaml`
+        ];
+        lines.splice(ruleProvidersIndex + 1, 0, ...providerLines);
+        changed = true;
+        ruleProvidersIndex += providerLines.length;
+      }
+    }
+  }
+
+  // 2. Ensure references are in rules: section
+  let rulesIndex = lines.findIndex(line => line.trim() === 'rules:');
+  if (rulesIndex !== -1) {
+    let customHeaderIndex = lines.findIndex(line => line.includes('--- CUSTOM USER RULES ---'));
+    if (customHeaderIndex === -1) {
+      let bypassEndIndex = lines.findIndex(line => line.includes('--- END CLIENTS BYPASS RULES ---'));
+      if (bypassEndIndex !== -1) {
+        customHeaderIndex = bypassEndIndex + 1;
+      } else {
+        customHeaderIndex = rulesIndex + 1;
+      }
+      lines.splice(customHeaderIndex, 0, '  # --- CUSTOM USER RULES ---');
+      changed = true;
+      if (customHeaderIndex <= rulesIndex) {
+        rulesIndex++;
+      }
+    }
+
+    for (const { key, group } of groupKeysAndNames) {
+      let ruleExists = false;
+      for (let i = rulesIndex + 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.trim().startsWith('- RULE-SET,' + key + ',')) {
+          ruleExists = true;
+          break;
+        }
+      }
+      if (!ruleExists) {
+        const ruleLine = `  - RULE-SET,${key},${group},no-resolve`;
+        lines.splice(customHeaderIndex + 1, 0, ruleLine);
+        changed = true;
+      }
+    }
+  }
+
+  return { yamlText: lines.join('\n'), changed };
+}
+
+function runMigration() {
+  try {
+    if (!fs.existsSync(configPath)) {
+      console.log('[Migration] config.yaml не найден по пути ' + configPath);
+      return;
+    }
+
+    const yamlText = fs.readFileSync(configPath, 'utf8');
+    
+    if (yamlText.includes('# --- CUSTOM USER RULES ---') || yamlText.includes('custom_direct:')) {
+      console.log('[Migration] Миграция правил уже была выполнена ранее.');
+      return;
+    }
+
+    console.log('[Migration] Начинаем извлечение правил из config.yaml...');
+    
+    // Бэкап
+    const backupPath = configPath + '.migration_bak';
+    fs.copyFileSync(configPath, backupPath);
+    console.log('[Migration] Создан резервный бэкап ' + backupPath);
+
+    const lines = yamlText.split(/\r?\n/);
+    const startIndex = lines.findIndex(line => line.includes('--- END CLIENTS BYPASS RULES ---'));
+    const endIndex = lines.findIndex(line => line.includes('RULE-SET,smart_unblock'));
+
+    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
+      console.log('[Migration] Границы блока правил не найдены, миграция пропущена.');
+      return;
+    }
+
+    const customRules = [];
+    const beforeLines = lines.slice(0, startIndex + 1);
+    const afterLines = lines.slice(endIndex);
+    const extractLines = lines.slice(startIndex + 1, endIndex);
+
+    for (const line of extractLines) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      
+      if (trimmed.startsWith('- ')) {
+        const parts = trimmed.substring(2).split(',');
+        if (parts.length >= 3) {
+          const type = parts[0].trim();
+          const pattern = parts[1].trim();
+          const group = parts[2].trim();
+          const noResolve = parts[3] ? parts[3].trim() === 'no-resolve' : false;
+          customRules.push({ type, pattern, group, noResolve });
+        }
+      }
+    }
+
+    console.log(`[Migration] Извлечено правил: ${customRules.length}`);
+
+    const groupedRules = {};
+    const groupKeysAndNames = [];
+
+    for (const rule of customRules) {
+      if (!groupedRules[rule.group]) {
+        groupedRules[rule.group] = [];
+        groupKeysAndNames.push({
+          key: getGroupNameKey(rule.group),
+          group: rule.group
+        });
+      }
+      let ruleStr = `${rule.type},${rule.pattern}`;
+      if (rule.noResolve) {
+        ruleStr += `,no-resolve`;
+      }
+      groupedRules[rule.group].push(ruleStr);
+    }
+
+    const rulesDir = '/opt/etc/mihomo/rules';
+    if (!fs.existsSync(rulesDir)) {
+      fs.mkdirSync(rulesDir, { recursive: true });
+    }
+
+    for (const { key, group } of groupKeysAndNames) {
+      const filePath = path.join(rulesDir, `${key}.yaml`);
+      writeRuleProvider(filePath, groupedRules[group]);
+      console.log(`[Migration] Записано ${groupedRules[group].length} правил в ${filePath}`);
+    }
+
+    let newYamlText = [
+      ...beforeLines,
+      '  # --- CUSTOM USER RULES ---',
+      ...groupKeysAndNames.map(({ key, group }) => `  - RULE-SET,${key},${group},no-resolve`),
+      ...afterLines
+    ].join('\n');
+
+    const res = ensureCustomRuleProvidersInConfig(newYamlText, groupKeysAndNames);
+    
+    fs.writeFileSync(configPath, res.yamlText, 'utf8');
+    console.log('[Migration] Миграция успешно завершена! config.yaml обновлен.');
+  } catch (err) {
+    console.error('[Migration] Ошибка при выполнении миграции:', err);
+  }
+}
+
+// Запуск миграции правил
+runMigration();
 
 // Запуск сервера
 server.listen(PORT, '0.0.0.0', () => {
