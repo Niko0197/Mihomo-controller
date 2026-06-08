@@ -4,6 +4,8 @@ let subGroups = [];
 let proxiesList = [];
 let torData = null;
 let configEditor = null; // Инстанс CodeMirror
+let currentConfigFileId = 'config';
+let configFiles = [];
 
 // Показ уведомлений
 function showToast(message, type = 'success') {
@@ -29,6 +31,7 @@ function switchTab(tabId) {
   if (tabId === 'tor') {
     loadTorBridges();
   } else if (tabId === 'editor') {
+    loadConfigFilesList();
     loadConfigEditor();
     setTimeout(() => {
       if (configEditor) configEditor.refresh();
@@ -202,11 +205,52 @@ document.getElementById('btn-apply').onclick = async function() {
 };
 
 // === ФУНКЦИОНАЛ РЕДАКТОРА YAML ===
+async function loadConfigFilesList() {
+  const container = document.getElementById('config-files-container');
+  if (!container) return;
+  
+  try {
+    const res = await fetch('/api/config/files');
+    if (!res.ok) throw new Error('Не удалось получить список файлов');
+    const data = await res.json();
+    if (data.success && Array.isArray(data.files)) {
+      configFiles = data.files;
+      renderConfigFileChips();
+    }
+  } catch (err) {
+    console.error('Ошибка загрузки списка файлов конфигурации:', err.message);
+  }
+}
+
+function renderConfigFileChips() {
+  const container = document.getElementById('config-files-container');
+  if (!container) return;
+  
+  container.innerHTML = '';
+  configFiles.forEach(file => {
+    const chip = document.createElement('div');
+    chip.className = 'file-chip';
+    if (file.id === currentConfigFileId) {
+      chip.classList.add('active');
+    }
+    chip.textContent = file.name;
+    chip.title = file.path; // Всплывающая подсказка с полным путем
+    chip.onclick = () => {
+      if (file.id === currentConfigFileId) return;
+      currentConfigFileId = file.id;
+      document.querySelectorAll('.file-chip').forEach(c => c.classList.remove('active'));
+      chip.classList.add('active');
+      loadConfigEditor();
+    };
+    container.appendChild(chip);
+  });
+}
+
 async function loadConfigEditor() {
   if (!configEditor) return;
   configEditor.setValue('Загрузка конфигурации с роутера...');
   try {
-    const res = await fetch('/api/config');
+    const res = await fetch('/api/config?file=' + encodeURIComponent(currentConfigFileId));
     if (!res.ok) throw new Error('Не удалось прочитать конфигурацию');
     const text = await res.text();
     configEditor.setValue(text);
@@ -216,7 +260,10 @@ async function loadConfigEditor() {
   }
 }
 
-document.getElementById('btn-reload-config-editor').onclick = loadConfigEditor;
+document.getElementById('btn-reload-config-editor').onclick = async function() {
+  await loadConfigFilesList();
+  await loadConfigEditor();
+};
 
 document.getElementById('btn-download-config').onclick = function() {
   if (!configEditor) return;
@@ -225,11 +272,15 @@ document.getElementById('btn-download-config').onclick = function() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement('a');
   link.href = url;
-  link.setAttribute('download', 'config.yaml');
+  
+  const fileObj = configFiles.find(f => f.id === currentConfigFileId);
+  const filename = fileObj ? fileObj.name.replace(/\//g, '_') + '.yaml' : 'config.yaml';
+  
+  link.setAttribute('download', filename);
   document.body.appendChild(link);
   link.click();
   document.body.removeChild(link);
-  showToast('Конфигурация подготовлена к скачиванию');
+  showToast('Файл подготовлен к скачиванию');
 };
 
 document.getElementById('btn-save-config').onclick = async function() {
@@ -242,7 +293,7 @@ document.getElementById('btn-save-config').onclick = async function() {
     return;
   }
   
-  if (!confirm('Вы уверены, что хотите применить новую конфигурацию? Mihomo будет перезагружен на лету.')) {
+  if (!confirm('Вы уверены, что хотите сохранить этот файл и обновить конфигурацию Mihomo?')) {
     return;
   }
   
@@ -250,7 +301,7 @@ document.getElementById('btn-save-config').onclick = async function() {
   btn.textContent = 'Применяем...';
   
   try {
-    const res = await fetch('/api/config', {
+    const res = await fetch('/api/config?file=' + encodeURIComponent(currentConfigFileId), {
       method: 'POST',
       headers: { 'Content-Type': 'text/plain; charset=utf-8' },
       body: newConfig

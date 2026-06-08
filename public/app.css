@@ -1775,3 +1775,51 @@ input:checked + .slider:before {
   color: var(--text-muted);
 }
 
+/* --- YAML Editor File Switcher Styles --- */
+.file-switcher {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 16px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  scrollbar-width: thin;
+}
+
+.file-switcher::-webkit-scrollbar {
+  height: 4px;
+}
+
+.file-switcher::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 2px;
+}
+
+.file-chip {
+  padding: 6px 14px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.03);
+  color: var(--text-muted);
+  font-size: 0.85rem;
+  font-family: var(--font-outfit);
+  cursor: pointer;
+  transition: all 0.25s var(--m3-easing);
+  border: 1px solid rgba(255, 255, 255, 0.05);
+  white-space: nowrap;
+  user-select: none;
+}
+
+.file-chip:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+
+.file-chip.active {
+  color: var(--md-sys-color-on-primary-container);
+  background: var(--md-sys-color-primary-container);
+  border-color: var(--md-sys-color-primary);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+

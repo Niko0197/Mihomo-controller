@@ -821,16 +821,105 @@ async function handleUpdateTorBridges(req, res) {
   }
 }
 
+function getConfigFilesList() {
+  const files = [];
+  const baseDir = '/opt/etc/mihomo';
+  
+  // 1. Основные файлы в /opt/etc/mihomo
+  if (fs.existsSync(baseDir)) {
+    const baseFiles = fs.readdirSync(baseDir);
+    for (const file of baseFiles) {
+      if (file.endsWith('.yaml')) {
+        const fullPath = path.join(baseDir, file);
+        try {
+          if (fs.statSync(fullPath).isFile()) {
+            const id = file.replace('.yaml', '');
+            files.push({
+              id: id,
+              name: id,
+              path: fullPath
+            });
+          }
+        } catch (e) {}
+      }
+    }
+  }
+  
+  // 2. Файлы правил в /opt/etc/mihomo/rules/
+  const rulesDir = path.join(baseDir, 'rules');
+  if (fs.existsSync(rulesDir)) {
+    const ruleFiles = fs.readdirSync(rulesDir);
+    for (const file of ruleFiles) {
+      if (file.endsWith('.yaml')) {
+        const fullPath = path.join(rulesDir, file);
+        try {
+          if (fs.statSync(fullPath).isFile()) {
+            const id = 'rules_' + file.replace('.yaml', '');
+            files.push({
+              id: id,
+              name: 'rules/' + file.replace('.yaml', ''),
+              path: fullPath
+            });
+          }
+        } catch (e) {}
+      }
+    }
+  }
+  
+  // Всегда возвращаем первым config
+  files.sort((a, b) => {
+    if (a.id === 'config') return -1;
+    if (b.id === 'config') return 1;
+    return a.name.localeCompare(b.name);
+  });
+  
+  return files;
+}
+
+function getFilePathFromId(id) {
+  if (!id || id === 'config') {
+    return configPath;
+  }
+  const files = getConfigFilesList();
+  const file = files.find(f => f.id === id);
+  if (file) {
+    return file.path;
+  }
+  return null;
+}
+
+// GET /api/config/files
+function handleGetConfigFiles(req, res) {
+  try {
+    const files = getConfigFilesList();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, files }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
 // GET /api/config
 function handleGetConfig(req, res) {
   try {
-    if (fs.existsSync(configPath)) {
-      const configText = fs.readFileSync(configPath, 'utf8');
+    const urlObj = new URL(req.url, 'http://' + req.headers.host);
+    const fileId = urlObj.searchParams.get('file') || 'config';
+    const filePath = getFilePathFromId(fileId);
+    
+    if (!filePath) {
+      res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Недопустимый файл конфигурации');
+      return;
+    }
+
+    if (fs.existsSync(filePath)) {
+      const configText = fs.readFileSync(filePath, 'utf8');
       res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end(configText);
     } else {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('Файл конфигурации не найден');
+      res.end('Файл не найден: ' + filePath);
     }
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -840,13 +929,27 @@ function handleGetConfig(req, res) {
 
 // POST /api/config
 function handleSaveConfig(req, res) {
+  const urlObj = new URL(req.url, 'http://' + req.headers.host);
+  const fileId = urlObj.searchParams.get('file') || 'config';
+  const filePath = getFilePathFromId(fileId);
+
+  if (!filePath) {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, message: 'Недопустимый файл конфигурации' }));
+    return;
+  }
+
   let body = '';
   req.on('data', chunk => body += chunk);
   req.on('end', async () => {
-    const backupPath = configPath + '.tmp_bak';
+    const backupPath = filePath + '.tmp_bak';
+    let backupCreated = false;
     try {
-      fs.copyFileSync(configPath, backupPath);
-      fs.writeFileSync(configPath, body, 'utf8');
+      if (fs.existsSync(filePath)) {
+        fs.copyFileSync(filePath, backupPath);
+        backupCreated = true;
+      }
+      fs.writeFileSync(filePath, body, 'utf8');
       
       const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
       if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
@@ -858,14 +961,16 @@ function handleSaveConfig(req, res) {
         throw new Error(errorMsg);
       }
       
-      fs.copyFileSync(backupPath, configPath + '.bak');
-      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+      if (backupCreated) {
+        fs.copyFileSync(backupPath, filePath + '.bak');
+        if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+      }
       
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
     } catch (err) {
-      if (fs.existsSync(backupPath)) {
-        fs.copyFileSync(backupPath, configPath);
+      if (backupCreated && fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, filePath);
         fs.unlinkSync(backupPath);
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
@@ -1469,6 +1574,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && pathname === '/api/tor-bridges/update') {
     await handleUpdateTorBridges(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/config/files') {
+    handleGetConfigFiles(req, res);
     return;
   }
   if (req.method === 'GET' && pathname === '/api/config') {
