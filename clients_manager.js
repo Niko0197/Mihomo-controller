@@ -278,7 +278,6 @@ async function setClientRuleInConfig(ip, targetGroup) {
     endMarkerIdx = rulesIdx + 2;
   }
 
-  const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
   let yamlChanged = false;
   
   const ruleIdx = lines.findIndex((l, idx) => 
@@ -287,16 +286,26 @@ async function setClientRuleInConfig(ip, targetGroup) {
     l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
   );
 
-  if (ruleIdx !== -1) {
-    const currentRule = lines[ruleIdx].trim();
-    const expectedRule = `- SRC-IP-CIDR,${ip}/32,${targetGroup}`;
-    if (currentRule !== expectedRule) {
-      lines[ruleIdx] = newRule;
+  const isDefault = targetGroup.toLowerCase() === 'default';
+
+  if (isDefault) {
+    if (ruleIdx !== -1) {
+      lines.splice(ruleIdx, 1);
       yamlChanged = true;
     }
   } else {
-    lines.splice(endMarkerIdx, 0, newRule);
-    yamlChanged = true;
+    const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+    if (ruleIdx !== -1) {
+      const currentRule = lines[ruleIdx].trim();
+      const expectedRule = `- SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+      if (currentRule !== expectedRule) {
+        lines[ruleIdx] = newRule;
+        yamlChanged = true;
+      }
+    } else {
+      lines.splice(endMarkerIdx, 0, newRule);
+      yamlChanged = true;
+    }
   }
 
   if (yamlChanged) {
@@ -404,7 +413,7 @@ async function toggleClientVpn(ip, vpnEnabled) {
     } catch (e) {}
 
     const preferredGroup = resolveClientGroup(ip, mac);
-    const defaultGroup = '🚀Auto-Best';
+    const defaultGroup = 'default';
     return setClientRuleInConfig(ip, preferredGroup || defaultGroup);
   }
 }
@@ -544,7 +553,7 @@ function getClientsList() {
     
     // Выбранная группа для выпадающего списка: сохраненное предпочтение, 
     // либо активное правило в конфиге (если оно не DIRECT), либо по умолчанию '🚀Auto-Best'
-    const group = savedGroup || (currentRuleGroup && currentRuleGroup !== 'DIRECT' ? currentRuleGroup : '🚀Auto-Best');
+    const group = savedGroup || (currentRuleGroup && currentRuleGroup !== 'DIRECT' ? currentRuleGroup : 'default');
     
     return {
       ip,

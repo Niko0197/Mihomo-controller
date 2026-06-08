@@ -33,22 +33,24 @@ let lastConnBytesMap = new Map();
 
 // Helper to format bytes
 function formatBytes(bytes) {
-  if (bytes === 0) return '0.00 MB';
+  if (isNaN(bytes) || bytes === null || bytes === undefined || bytes <= 0) return '0.00 MB';
   const k = 1024;
   const sizes = ['Bytes', 'KB', 'MB', 'GB', 'TB'];
   const i = Math.floor(Math.log(bytes) / Math.log(k));
-  if (i === 0) return bytes + ' B';
-  return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  if (i < 0) return bytes + ' Bytes';
+  const sizeIdx = Math.min(i, sizes.length - 1);
+  return parseFloat((bytes / Math.pow(k, sizeIdx)).toFixed(2)) + ' ' + sizes[sizeIdx];
 }
 
 // Helper to format speeds
 function formatSpeed(bytesPerSec) {
-  if (bytesPerSec === 0) return '0 KB/s';
+  if (isNaN(bytesPerSec) || bytesPerSec === null || bytesPerSec === undefined || bytesPerSec <= 0) return '0 KB/s';
   const k = 1024;
   const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
   const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-  if (i === 0) return bytesPerSec + ' B/s';
-  return parseFloat((bytesPerSec / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  if (i < 0) return bytesPerSec.toFixed(1) + ' B/s';
+  const sizeIdx = Math.min(i, sizes.length - 1);
+  return parseFloat((bytesPerSec / Math.pow(k, sizeIdx)).toFixed(1)) + ' ' + sizes[sizeIdx];
 }
 
 // --- Dynamic Tab Switching Hook ---
@@ -225,37 +227,52 @@ function startTrafficStream() {
   if (trafficAbortController) return; // Stream is already active in background
   
   const statusEl = document.getElementById('traffic-status');
-  if (statusEl) statusEl.textContent = 'Подключение...';
-  
-  trafficAbortController = new AbortController();
   
   // We also poll connections in the background to calculate volume stats
   startConnectionsPolling(true); // silent background poll
   
-  readHttpStream('/api/xkeen/traffic', (data) => {
-    if (statusEl) statusEl.textContent = 'Поток активен';
-    
-    // Shift history values
-    trafficDownloadHistory.shift();
-    trafficDownloadHistory.push(data.down);
-    trafficUploadHistory.shift();
-    trafficUploadHistory.push(data.up);
-    
-    // Update labels and chart only if currently viewing Traffic tab
-    if (currentTab === 'traffic') {
-      const speedDownEl = document.getElementById('speed-download');
-      const speedUpEl = document.getElementById('speed-upload');
-      if (speedDownEl) speedDownEl.textContent = formatSpeed(data.down);
-      if (speedUpEl) speedUpEl.textContent = formatSpeed(data.up);
-      
-      if (!trafficChart) {
-        initTrafficChart();
+  trafficAbortController = new AbortController();
+  
+  async function runStream() {
+    while (trafficAbortController && !trafficAbortController.signal.aborted) {
+      if (statusEl) statusEl.textContent = 'Подключение...';
+      try {
+        await readHttpStream('/api/xkeen/traffic', (data) => {
+          if (statusEl) statusEl.textContent = 'Поток активен';
+          
+          // Shift history values
+          trafficDownloadHistory.shift();
+          trafficDownloadHistory.push(data.down);
+          trafficUploadHistory.shift();
+          trafficUploadHistory.push(data.up);
+          
+          // Update labels and chart only if currently viewing Traffic tab
+          if (currentTab === 'traffic') {
+            const speedDownEl = document.getElementById('speed-download');
+            const speedUpEl = document.getElementById('speed-upload');
+            if (speedDownEl) speedDownEl.textContent = formatSpeed(data.down);
+            if (speedUpEl) speedUpEl.textContent = formatSpeed(data.up);
+            
+            if (!trafficChart) {
+              initTrafficChart();
+            }
+            if (trafficChart) {
+              trafficChart.update('none'); // Update without transition animation
+            }
+          }
+        }, trafficAbortController.signal);
+      } catch (err) {
+        console.error('Traffic stream failed, retrying in 3s...', err);
       }
-      if (trafficChart) {
-        trafficChart.update('none'); // Update without transition animation
+      
+      if (trafficAbortController && !trafficAbortController.signal.aborted) {
+        if (statusEl) statusEl.textContent = 'Переподключение...';
+        await new Promise(r => setTimeout(r, 3000));
       }
     }
-  }, trafficAbortController.signal);
+  }
+
+  runStream();
 }
 
 function stopTrafficStream() {
@@ -545,21 +562,35 @@ function startLogsStream() {
   
   logsAbortController = new AbortController();
   
-  // Always query with 'debug' level to capture all events in background, then filter client-side
-  readHttpStream('/api/xkeen/logs?level=debug', (logObj) => {
-    // Generate/cache timestamp when received so it stays static
-    if (!logObj.timeStr) {
-      logObj.timeStr = new Date().toLocaleTimeString('ru-RU');
+  async function runStream() {
+    while (logsAbortController && !logsAbortController.signal.aborted) {
+      try {
+        // Always query with 'debug' level to capture all events in background, then filter client-side
+        await readHttpStream('/api/xkeen/logs?level=debug', (logObj) => {
+          // Generate/cache timestamp when received so it stays static
+          if (!logObj.timeStr) {
+            logObj.timeStr = new Date().toLocaleTimeString('ru-RU');
+          }
+          
+          logsCache.push(logObj);
+          if (logsCache.length > 1000) logsCache.shift(); // Keep cache up to 1000 lines
+          
+          // Append to DOM immediately only if user is currently looking at the Logs tab
+          if (currentTab === 'logs') {
+            renderLogLine(logObj);
+          }
+        }, logsAbortController.signal);
+      } catch (err) {
+        console.error('Logs stream failed, retrying in 3s...', err);
+      }
+      
+      if (logsAbortController && !logsAbortController.signal.aborted) {
+        await new Promise(r => setTimeout(r, 3000));
+      }
     }
-    
-    logsCache.push(logObj);
-    if (logsCache.length > 1000) logsCache.shift(); // Keep cache up to 1000 lines
-    
-    // Append to DOM immediately only if user is currently looking at the Logs tab
-    if (currentTab === 'logs') {
-      renderLogLine(logObj);
-    }
-  }, logsAbortController.signal);
+  }
+
+  runStream();
 }
 
 function stopLogsStream() {
@@ -1711,7 +1742,17 @@ function renderClientsTable() {
     select.style.cursor = 'pointer';
     select.disabled = !c.vpnEnabled;
     
-    const currentGroup = c.group || '🚀Auto-Best';
+    const currentGroup = c.group || 'default';
+    
+    // Опция "По умолчанию"
+    const optDefault = document.createElement('option');
+    optDefault.value = 'default';
+    optDefault.textContent = 'По умолчанию';
+    if (currentGroup === 'default') {
+      optDefault.selected = true;
+    }
+    select.appendChild(optDefault);
+
     allProxyGroups.forEach(g => {
       if (g === 'DIRECT' || g === 'REJECT') return;
       const opt = document.createElement('option');

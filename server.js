@@ -1294,6 +1294,7 @@ function handleRestartXkeen(req, res) {
   }
 }
 
+
 // POST /api/server/restart
 function handleServerRestart(req, res) {
   try {
@@ -1489,6 +1490,7 @@ const server = http.createServer(async (req, res) => {
     handleServerRestart(req, res);
     return;
   }
+
   if (req.method === 'GET' && pathname === '/api/xkeen/traffic') {
     handleXkeenTraffic(req, res);
     return;
