@@ -214,6 +214,7 @@ function renameClient(ip, name) {
 }
 
 // Считывание текущих правил назначения прокси-групп по клиентам из config.yaml
+// Считывание текущих правил назначения прокси-групп по клиентам из config.yaml
 function getClientRulesFromConfig() {
   const rules = new Map(); // IP => groupName
   try {
@@ -221,27 +222,33 @@ function getClientRulesFromConfig() {
     const yamlText = fs.readFileSync(configPath, 'utf8');
     const lines = yamlText.split(/\r?\n/);
     
-    let inBypassBlock = false;
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim();
-      if (line === '# --- CLIENTS BYPASS RULES ---') {
-        inBypassBlock = true;
-        continue;
-      }
-      if (line === '# --- END CLIENTS BYPASS RULES ---') {
-        inBypassBlock = false;
-        break;
-      }
-      if (inBypassBlock && line.startsWith('- SRC-IP-CIDR,')) {
-        const parts = line.split(',');
-        if (parts.length >= 3) {
-          const ipWithCidr = parts[1].trim();
-          const ip = ipWithCidr.split('/')[0];
-          const groupName = parts[2].trim().replace(/^['"]|['"]$/g, '');
-          rules.set(ip, groupName);
+    const parseBlock = (startMarker, endMarker) => {
+      let inBlock = false;
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i].trim();
+        if (line === startMarker) {
+          inBlock = true;
+          continue;
+        }
+        if (line === endMarker) {
+          inBlock = false;
+          continue;
+        }
+        if (inBlock && line.startsWith('- SRC-IP-CIDR,')) {
+          const parts = line.split(',');
+          if (parts.length >= 3) {
+            const ipWithCidr = parts[1].trim();
+            const ip = ipWithCidr.split('/')[0];
+            const groupName = parts[2].trim().replace(/^['"]|['"]$/g, '');
+            rules.set(ip, groupName);
+          }
         }
       }
-    }
+    };
+
+    parseBlock('# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---');
+    parseBlock('# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---');
+
   } catch (err) {
     console.error('Ошибка чтения правил клиентов из конфига:', err.message);
   }
@@ -260,50 +267,115 @@ async function setClientRuleInConfig(ip, targetGroup) {
   let yamlText = fs.readFileSync(configPath, 'utf8');
   let lines = yamlText.split(/\r?\n/);
   
-  let startMarkerIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
-  let endMarkerIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
+  // Ищем маркеры для обоих блоков
+  let startBypassIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
+  let endBypassIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
   
-  if (startMarkerIdx === -1 || endMarkerIdx === -1) {
+  let startVpnIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS VPN RULES ---');
+  let endVpnIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS VPN RULES ---');
+  
+  // Инициализация блока DIRECT правил (в самом верху rules:)
+  if (startBypassIdx === -1 || endBypassIdx === -1) {
     const rulesIdx = lines.findIndex(l => l.trim() === 'rules:');
     if (rulesIdx === -1) {
       throw new Error('Секция rules: не найдена в конфиге');
     }
-    
     lines.splice(rulesIdx + 1, 0, 
       '  # --- CLIENTS BYPASS RULES ---',
       '  # --- END CLIENTS BYPASS RULES ---'
     );
-    
-    startMarkerIdx = rulesIdx + 1;
-    endMarkerIdx = rulesIdx + 2;
+    startBypassIdx = rulesIdx + 1;
+    endBypassIdx = rulesIdx + 2;
+    // Корректируем индексы VPN
+    if (startVpnIdx !== -1) startVpnIdx += 2;
+    if (endVpnIdx !== -1) endVpnIdx += 2;
+  }
+  
+  // Инициализация блока VPN правил (в самом низу rules:, перед MATCH)
+  if (startVpnIdx === -1 || endVpnIdx === -1) {
+    let matchIdx = lines.findIndex(l => l.trim().startsWith('- MATCH,'));
+    if (matchIdx === -1) {
+      matchIdx = lines.length - 1;
+    }
+    lines.splice(matchIdx, 0, 
+      '  # --- CLIENTS VPN RULES ---',
+      '  # --- END CLIENTS VPN RULES ---'
+    );
+    startVpnIdx = matchIdx;
+    endVpnIdx = matchIdx + 1;
   }
 
   let yamlChanged = false;
-  
-  const ruleIdx = lines.findIndex((l, idx) => 
-    idx > startMarkerIdx && 
-    idx < endMarkerIdx && 
-    l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
-  );
-
   const isDefault = targetGroup.toLowerCase() === 'default';
+  const isDirect = targetGroup.toLowerCase() === 'direct';
+
+  const removeRuleFromBlock = (startIdx, endIdx) => {
+    const idx = lines.findIndex((l, i) => 
+      i > startIdx && 
+      i < endIdx && 
+      l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+    );
+    if (idx !== -1) {
+      lines.splice(idx, 1);
+      yamlChanged = true;
+      return idx;
+    }
+    return -1;
+  };
 
   if (isDefault) {
-    if (ruleIdx !== -1) {
-      lines.splice(ruleIdx, 1);
-      yamlChanged = true;
+    // Удаляем из обоих блоков
+    const removedBypass = removeRuleFromBlock(startBypassIdx, endBypassIdx);
+    if (removedBypass !== -1) {
+      if (startVpnIdx > removedBypass) startVpnIdx--;
+      if (endVpnIdx > removedBypass) endVpnIdx--;
     }
-  } else {
+    removeRuleFromBlock(startVpnIdx, endVpnIdx);
+  } else if (isDirect) {
+    // Удаляем из блока VPN
+    removeRuleFromBlock(startVpnIdx, endVpnIdx);
+    
+    // Гарантируем наличие в блоке Bypass (DIRECT)
+    let ruleIdx = lines.findIndex((l, idx) => 
+      idx > startBypassIdx && 
+      idx < endBypassIdx && 
+      l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+    );
     const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
     if (ruleIdx !== -1) {
       const currentRule = lines[ruleIdx].trim();
-      const expectedRule = `- SRC-IP-CIDR,${ip}/32,${targetGroup}`;
-      if (currentRule !== expectedRule) {
+      if (currentRule !== `- SRC-IP-CIDR,${ip}/32,${targetGroup}`) {
         lines[ruleIdx] = newRule;
         yamlChanged = true;
       }
     } else {
-      lines.splice(endMarkerIdx, 0, newRule);
+      lines.splice(endBypassIdx, 0, newRule);
+      yamlChanged = true;
+    }
+  } else {
+    // VPN группа
+    // Удаляем из блока Bypass (DIRECT)
+    const removedBypass = removeRuleFromBlock(startBypassIdx, endBypassIdx);
+    if (removedBypass !== -1) {
+      if (startVpnIdx > removedBypass) startVpnIdx--;
+      if (endVpnIdx > removedBypass) endVpnIdx--;
+    }
+    
+    // Гарантируем наличие в блоке VPN
+    let ruleIdx = lines.findIndex((l, idx) => 
+      idx > startVpnIdx && 
+      idx < endVpnIdx && 
+      l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+    );
+    const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+    if (ruleIdx !== -1) {
+      const currentRule = lines[ruleIdx].trim();
+      if (currentRule !== `- SRC-IP-CIDR,${ip}/32,${targetGroup}`) {
+        lines[ruleIdx] = newRule;
+        yamlChanged = true;
+      }
+    } else {
+      lines.splice(endVpnIdx, 0, newRule);
       yamlChanged = true;
     }
   }
@@ -311,7 +383,6 @@ async function setClientRuleInConfig(ip, targetGroup) {
   if (yamlChanged) {
     fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
     
-    // Перезагрузка конфигурации в Mihomo
     try {
       const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
       if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {

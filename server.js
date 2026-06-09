@@ -407,12 +407,19 @@ async function handleXkeenTrace(req, res) {
     function matchesRuleSet(d, providerName) {
       const name = providerName.split('@')[0].toLowerCase();
       
-      if (name === 'smart_unblock') {
+      if (name === 'smart_unblock' || name === 'custom') {
         try {
-          const smartPath = '/opt/etc/mihomo/smart_unblock.yaml';
-          if (fs.existsSync(smartPath)) {
-            const smartText = fs.readFileSync(smartPath, 'utf8');
-            return smartText.toLowerCase().includes(d);
+          const paths = [
+            '/opt/etc/mihomo/smart_unblock.yaml',
+            '/opt/etc/mihomo/rules/custom.yaml'
+          ];
+          for (const p of paths) {
+            if (fs.existsSync(p)) {
+              const text = fs.readFileSync(p, 'utf8');
+              if (text.toLowerCase().includes(d)) {
+                return true;
+              }
+            }
           }
         } catch (e) {}
         return false;
@@ -2028,7 +2035,57 @@ function runMigration() {
 // Запуск миграции правил
 runMigration();
 
-// Запуск сервера
-server.listen(PORT, '0.0.0.0', () => {
-  console.log('[VPN Web Controller] Сервер успешно запущен по адресу http://0.0.0.0:' + PORT + '/');
-});
+// Очистка порта перед запуском (убиваем старый процесс если есть)
+function killOldProcess() {
+  try {
+    const { execSync } = require('child_process');
+    const result = execSync(`fuser ${PORT}/tcp 2>/dev/null || true`).toString().trim();
+    if (result) {
+      const pids = result.split(/\s+/).filter(p => p && p !== String(process.pid));
+      for (const pid of pids) {
+        console.log(`[VPN Web Controller] Завершаем старый процесс на порту ${PORT}: PID=${pid}`);
+        try { execSync(`kill -9 ${pid}`); } catch(e) {}
+      }
+      if (pids.length > 0) {
+        // Ждём пока ОС освободит порт
+        execSync('sleep 1');
+      }
+    }
+  } catch (e) {
+    // fuser может не быть - это нормально
+  }
+}
+
+// Запуск сервера с обработкой EADDRINUSE
+function startServer(attempt) {
+  attempt = attempt || 1;
+  if (attempt > 3) {
+    console.error('[VPN Web Controller] КРИТИЧЕСКАЯ ОШИБКА: Не удалось запустить сервер после 3 попыток.');
+    process.exit(1);
+    return;
+  }
+
+  if (attempt > 1) {
+    console.log('[VPN Web Controller] Попытка запуска #' + attempt + '...');
+  }
+
+  killOldProcess();
+
+  server.listen(PORT, '0.0.0.0', () => {
+    console.log('[VPN Web Controller] Сервер успешно запущен по адресу http://0.0.0.0:' + PORT + '/');
+  });
+
+  server.once('error', (err) => {
+    if (err.code === 'EADDRINUSE') {
+      console.warn('[VPN Web Controller] Порт ' + PORT + ' всё ещё занят. Повтор через 2 сек...');
+      server.close();
+      setTimeout(() => startServer(attempt + 1), 2000);
+    } else {
+      console.error('[VPN Web Controller] Ошибка сервера:', err);
+      process.exit(1);
+    }
+  });
+}
+
+startServer();
+

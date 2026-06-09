@@ -310,7 +310,6 @@ async function main() {
 
   // Проверяем работу веб-сервера и при необходимости запускаем его в фоне
   ensureServerRunning();
-  ensureSmartRouterRunning();
 }
 
 function ensureServerRunning() {
@@ -350,37 +349,6 @@ function ensureServerRunning() {
   req.end();
 }
 
-function ensureSmartRouterRunning() {
-  const pidPath = path.join(__dirname, 'smart_router.pid');
-  let isRunning = false;
-  
-  if (fs.existsSync(pidPath)) {
-    try {
-      const pid = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
-      if (pid) {
-        process.kill(pid, 0); // Проверяем, существует ли процесс
-        isRunning = true;
-      }
-    } catch (err) {
-      isRunning = false;
-    }
-  }
-  
-  if (!isRunning) {
-    const logMsg = `[${getTimestamp()}] Фоновый демон smart_router.js остановлен. Автозапуск в фоне...\n`;
-    fs.appendFileSync(path.join(__dirname, 'log.txt'), logMsg, 'utf8');
-    
-    const spawn = require('child_process').spawn;
-    const out = fs.openSync(path.join(__dirname, 'smart_router_out.log'), 'a');
-    const errFile = fs.openSync(path.join(__dirname, 'smart_router_err.log'), 'a');
-    
-    const child = spawn(process.execPath, [path.join(__dirname, 'smart_router.js')], {
-      detached: true,
-      stdio: ['ignore', out, errFile]
-    });
-    
-    child.unref();
-  }
-}
+
 
 main();
