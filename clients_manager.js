@@ -484,8 +484,8 @@ async function toggleClientVpn(ip, vpnEnabled) {
     } catch (e) {}
 
     const preferredGroup = resolveClientGroup(ip, mac);
-    const defaultGroup = 'default';
-    return setClientRuleInConfig(ip, preferredGroup || defaultGroup);
+    const defaultGroup = '🚀Auto-Best';
+    return setClientRuleInConfig(ip, (preferredGroup && preferredGroup !== 'default') ? preferredGroup : defaultGroup);
   }
 }
 
@@ -624,7 +624,8 @@ function getClientsList() {
     
     // Выбранная группа для выпадающего списка: сохраненное предпочтение, 
     // либо активное правило в конфиге (если оно не DIRECT), либо по умолчанию '🚀Auto-Best'
-    const group = savedGroup || (currentRuleGroup && currentRuleGroup !== 'DIRECT' ? currentRuleGroup : 'default');
+    let group = savedGroup || (currentRuleGroup && currentRuleGroup !== 'DIRECT' ? currentRuleGroup : '🚀Auto-Best');
+    if (group === 'default') group = '🚀Auto-Best';
     
     return {
       ip,

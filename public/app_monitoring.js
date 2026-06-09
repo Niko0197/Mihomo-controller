@@ -1747,16 +1747,8 @@ function renderClientsTable() {
     select.style.cursor = 'pointer';
     select.disabled = !c.vpnEnabled;
     
-    const currentGroup = c.group || 'default';
-    
-    // Опция "По умолчанию"
-    const optDefault = document.createElement('option');
-    optDefault.value = 'default';
-    optDefault.textContent = 'По умолчанию';
-    if (currentGroup === 'default') {
-      optDefault.selected = true;
-    }
-    select.appendChild(optDefault);
+    const currentGroup = c.group || '🚀Auto-Best';
+
 
     allProxyGroups.forEach(g => {
       if (g === 'DIRECT' || g === 'REJECT') return;
