@@ -256,8 +256,9 @@ function getClientRulesFromConfig() {
 }
 
 // Запись или замена правила для конкретного клиента в config.yaml
-async function setClientRuleInConfig(ip, targetGroup) {
-  if (!ip) throw new Error('IP адрес не указан');
+async function setClientRulesInConfig(ipsInput, targetGroup) {
+  const ips = Array.isArray(ipsInput) ? ipsInput : [ipsInput];
+  if (ips.length === 0) return false;
   if (!targetGroup) throw new Error('Группа не указана');
   
   if (!fs.existsSync(configPath)) {
@@ -267,14 +268,17 @@ async function setClientRuleInConfig(ip, targetGroup) {
   let yamlText = fs.readFileSync(configPath, 'utf8');
   let lines = yamlText.split(/\r?\n/);
   
-  // Ищем маркеры для обоих блоков
-  let startBypassIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
-  let endBypassIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
+  const findIndices = () => {
+    return {
+      startBypassIdx: lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---'),
+      endBypassIdx: lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---'),
+      startVpnIdx: lines.findIndex(l => l.trim() === '# --- CLIENTS VPN RULES ---'),
+      endVpnIdx: lines.findIndex(l => l.trim() === '# --- END CLIENTS VPN RULES ---')
+    };
+  };
+
+  let { startBypassIdx, endBypassIdx, startVpnIdx, endVpnIdx } = findIndices();
   
-  let startVpnIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS VPN RULES ---');
-  let endVpnIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS VPN RULES ---');
-  
-  // Инициализация блока DIRECT правил (в самом верху rules:)
   if (startBypassIdx === -1 || endBypassIdx === -1) {
     const rulesIdx = lines.findIndex(l => l.trim() === 'rules:');
     if (rulesIdx === -1) {
@@ -284,14 +288,13 @@ async function setClientRuleInConfig(ip, targetGroup) {
       '  # --- CLIENTS BYPASS RULES ---',
       '  # --- END CLIENTS BYPASS RULES ---'
     );
-    startBypassIdx = rulesIdx + 1;
-    endBypassIdx = rulesIdx + 2;
-    // Корректируем индексы VPN
-    if (startVpnIdx !== -1) startVpnIdx += 2;
-    if (endVpnIdx !== -1) endVpnIdx += 2;
+    const idxs = findIndices();
+    startBypassIdx = idxs.startBypassIdx;
+    endBypassIdx = idxs.endBypassIdx;
+    startVpnIdx = idxs.startVpnIdx;
+    endVpnIdx = idxs.endVpnIdx;
   }
   
-  // Инициализация блока VPN правил (в самом низу rules:, перед MATCH)
   if (startVpnIdx === -1 || endVpnIdx === -1) {
     let matchIdx = lines.findIndex(l => l.trim().startsWith('- MATCH,'));
     if (matchIdx === -1) {
@@ -301,85 +304,114 @@ async function setClientRuleInConfig(ip, targetGroup) {
       '  # --- CLIENTS VPN RULES ---',
       '  # --- END CLIENTS VPN RULES ---'
     );
-    startVpnIdx = matchIdx;
-    endVpnIdx = matchIdx + 1;
+    const idxs = findIndices();
+    startBypassIdx = idxs.startBypassIdx;
+    endBypassIdx = idxs.endBypassIdx;
+    startVpnIdx = idxs.startVpnIdx;
+    endVpnIdx = idxs.endVpnIdx;
   }
 
   let yamlChanged = false;
   const isDefault = targetGroup.toLowerCase() === 'default';
   const isDirect = targetGroup.toLowerCase() === 'direct';
 
-  const isIpv6 = ip.includes(':');
-  const mask = isIpv6 ? '/128' : '/32';
-
-  const removeRuleFromBlock = (startIdx, endIdx) => {
+  const removeRuleFromBlockForIp = (startIdx, endIdx, targetIp) => {
     const idx = lines.findIndex((l, i) => 
       i > startIdx && 
       i < endIdx && 
-      (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
+      (l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/128,`))
     );
     if (idx !== -1) {
       lines.splice(idx, 1);
       yamlChanged = true;
-      return idx;
+      return true;
     }
-    return -1;
+    return false;
   };
 
-  if (isDefault) {
-    // Удаляем из обоих блоков
-    const removedBypass = removeRuleFromBlock(startBypassIdx, endBypassIdx);
-    if (removedBypass !== -1) {
-      if (startVpnIdx > removedBypass) startVpnIdx--;
-      if (endVpnIdx > removedBypass) endVpnIdx--;
-    }
-    removeRuleFromBlock(startVpnIdx, endVpnIdx);
-  } else if (isDirect) {
-    // Удаляем из блока VPN
-    removeRuleFromBlock(startVpnIdx, endVpnIdx);
-    
-    // Гарантируем наличие в блоке Bypass (DIRECT)
-    let ruleIdx = lines.findIndex((l, idx) => 
-      idx > startBypassIdx && 
-      idx < endBypassIdx && 
-      (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
-    );
-    const newRule = `  - SRC-IP-CIDR,${ip}${mask},${targetGroup}`;
-    if (ruleIdx !== -1) {
-      const currentRule = lines[ruleIdx].trim();
-      if (currentRule !== `- SRC-IP-CIDR,${ip}${mask},${targetGroup}`) {
-        lines[ruleIdx] = newRule;
+  for (const ip of ips) {
+    const isIpv6 = ip.includes(':');
+    const mask = isIpv6 ? '/128' : '/32';
+
+    if (isDefault) {
+      const removedBypass = removeRuleFromBlockForIp(startBypassIdx, endBypassIdx, ip);
+      if (removedBypass) {
+        const idxs = findIndices();
+        startBypassIdx = idxs.startBypassIdx;
+        endBypassIdx = idxs.endBypassIdx;
+        startVpnIdx = idxs.startVpnIdx;
+        endVpnIdx = idxs.endVpnIdx;
+      }
+      const removedVpn = removeRuleFromBlockForIp(startVpnIdx, endVpnIdx, ip);
+      if (removedVpn) {
+        const idxs = findIndices();
+        startBypassIdx = idxs.startBypassIdx;
+        endBypassIdx = idxs.endBypassIdx;
+        startVpnIdx = idxs.startVpnIdx;
+        endVpnIdx = idxs.endVpnIdx;
+      }
+    } else if (isDirect) {
+      const removedVpn = removeRuleFromBlockForIp(startVpnIdx, endVpnIdx, ip);
+      if (removedVpn) {
+        const idxs = findIndices();
+        startBypassIdx = idxs.startBypassIdx;
+        endBypassIdx = idxs.endBypassIdx;
+        startVpnIdx = idxs.startVpnIdx;
+        endVpnIdx = idxs.endVpnIdx;
+      }
+      
+      let ruleIdx = lines.findIndex((l, idx) => 
+        idx > startBypassIdx && 
+        idx < endBypassIdx && 
+        (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
+      );
+      const newRule = `  - SRC-IP-CIDR,${ip}${mask},${targetGroup}`;
+      if (ruleIdx !== -1) {
+        const currentRule = lines[ruleIdx].trim();
+        if (currentRule !== `- SRC-IP-CIDR,${ip}${mask},${targetGroup}`) {
+          lines[ruleIdx] = newRule;
+          yamlChanged = true;
+        }
+      } else {
+        lines.splice(endBypassIdx, 0, newRule);
         yamlChanged = true;
+        const idxs = findIndices();
+        startBypassIdx = idxs.startBypassIdx;
+        endBypassIdx = idxs.endBypassIdx;
+        startVpnIdx = idxs.startVpnIdx;
+        endVpnIdx = idxs.endVpnIdx;
       }
     } else {
-      lines.splice(endBypassIdx, 0, newRule);
-      yamlChanged = true;
-    }
-  } else {
-    // VPN группа
-    // Удаляем из блока Bypass (DIRECT)
-    const removedBypass = removeRuleFromBlock(startBypassIdx, endBypassIdx);
-    if (removedBypass !== -1) {
-      if (startVpnIdx > removedBypass) startVpnIdx--;
-      if (endVpnIdx > removedBypass) endVpnIdx--;
-    }
-    
-    // Гарантируем наличие в блоке VPN
-    let ruleIdx = lines.findIndex((l, idx) => 
-      idx > startVpnIdx && 
-      idx < endVpnIdx && 
-      (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
-    );
-    const newRule = `  - SRC-IP-CIDR,${ip}${mask},${targetGroup}`;
-    if (ruleIdx !== -1) {
-      const currentRule = lines[ruleIdx].trim();
-      if (currentRule !== `- SRC-IP-CIDR,${ip}${mask},${targetGroup}`) {
-        lines[ruleIdx] = newRule;
-        yamlChanged = true;
+      const removedBypass = removeRuleFromBlockForIp(startBypassIdx, endBypassIdx, ip);
+      if (removedBypass) {
+        const idxs = findIndices();
+        startBypassIdx = idxs.startBypassIdx;
+        endBypassIdx = idxs.endBypassIdx;
+        startVpnIdx = idxs.startVpnIdx;
+        endVpnIdx = idxs.endVpnIdx;
       }
-    } else {
-      lines.splice(endVpnIdx, 0, newRule);
-      yamlChanged = true;
+      
+      let ruleIdx = lines.findIndex((l, idx) => 
+        idx > startVpnIdx && 
+        idx < endVpnIdx && 
+        (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
+      );
+      const newRule = `  - SRC-IP-CIDR,${ip}${mask},${targetGroup}`;
+      if (ruleIdx !== -1) {
+        const currentRule = lines[ruleIdx].trim();
+        if (currentRule !== `- SRC-IP-CIDR,${ip}${mask},${targetGroup}`) {
+          lines[ruleIdx] = newRule;
+          yamlChanged = true;
+        }
+      } else {
+        lines.splice(endVpnIdx, 0, newRule);
+        yamlChanged = true;
+        const idxs = findIndices();
+        startBypassIdx = idxs.startBypassIdx;
+        endBypassIdx = idxs.endBypassIdx;
+        startVpnIdx = idxs.startVpnIdx;
+        endVpnIdx = idxs.endVpnIdx;
+      }
     }
   }
 
@@ -404,32 +436,33 @@ async function setClientGroupPreference(ip, group) {
   if (!ip) throw new Error('IP адрес не указан');
   if (!group) throw new Error('Группа не указана');
   
-  // Пытаемся определить MAC устройства
   let mac = '';
+  let ips = [ip];
   try {
     const list = getClientsList();
-    const found = list.find(c => c.ip === ip);
-    if (found && found.mac) {
-      mac = found.mac.toUpperCase();
+    const found = list.find(c => c.ip === ip || (c.altIps && c.altIps.includes(ip)));
+    if (found) {
+      if (found.mac) mac = found.mac.toUpperCase();
+      ips = [found.ip, ...(found.altIps || [])];
     }
   } catch (e) {
     console.error('Ошибка при определении MAC для смены группы:', e.message);
   }
 
-  // Сохраняем группу в БД под обоими ключами
   setClientGroup(ip, group);
   if (mac) {
     setClientGroup(mac, group);
   }
+  for (const altIp of ips) {
+    setClientGroup(altIp, group);
+  }
   saveDb();
 
-  // Если VPN в данный момент включен (то есть устройство не идет через DIRECT),
-  // сразу же обновляем правило в config.yaml на новую выбранную группу!
   const activeRules = getClientRulesFromConfig();
   const currentRuleGroup = activeRules.get(ip) || '';
   
   if (currentRuleGroup !== 'DIRECT') {
-    await setClientRuleInConfig(ip, group);
+    await setClientRulesInConfig(ips, group);
   }
   
   return true;
@@ -472,15 +505,22 @@ function makeMihomoRequest(method, endpoint, body = null) {
 async function toggleClientVpn(ip, vpnEnabled) {
   if (!ip) throw new Error('IP адрес не указан');
   
+  let ips = [ip];
+  try {
+    const list = getClientsList();
+    const found = list.find(c => c.ip === ip || (c.altIps && c.altIps.includes(ip)));
+    if (found) {
+      ips = [found.ip, ...(found.altIps || [])];
+    }
+  } catch (e) {}
+
   if (vpnEnabled === false) {
-    // Если VPN выключается, направляем трафик через DIRECT
-    return setClientRuleInConfig(ip, 'DIRECT');
+    return setClientRulesInConfig(ips, 'DIRECT');
   } else {
-    // Если VPN включается, восстанавливаем предпочтительную группу или берем дефолтную
     let mac = '';
     try {
       const list = getClientsList();
-      const found = list.find(c => c.ip === ip);
+      const found = list.find(c => c.ip === ip || (c.altIps && c.altIps.includes(ip)));
       if (found && found.mac) {
         mac = found.mac.toUpperCase();
       }
@@ -488,7 +528,7 @@ async function toggleClientVpn(ip, vpnEnabled) {
 
     const preferredGroup = resolveClientGroup(ip, mac);
     const defaultGroup = '🚀Auto-Best';
-    return setClientRuleInConfig(ip, (preferredGroup && preferredGroup !== 'default') ? preferredGroup : defaultGroup);
+    return setClientRulesInConfig(ips, (preferredGroup && preferredGroup !== 'default') ? preferredGroup : defaultGroup);
   }
 }
 
@@ -699,7 +739,7 @@ function getClientsList() {
     if (speed) {
       client.downSpeed = speed.downSpeed;
       client.upSpeed = speed.upSpeed;
-      client.active = true; // Если есть скорость обмена данными, устройство точно активно
+      client.active = true;
     }
 
     const traffic = cumulativeTraffic.get(client.ip);
@@ -713,15 +753,82 @@ function getClientsList() {
     list.push(client);
   }
 
-  // Сортировка: сначала активные устройства, затем по IP
-  return list.sort((a, b) => {
-    if (a.active !== b.active) return b.active - a.active;
-    const partsA = a.ip.split('.').map(Number);
-    const partsB = b.ip.split('.').map(Number);
-    for (let i = 0; i < 4; i++) {
-      if (partsA[i] !== partsB[i]) return partsA[i] - partsB[i];
+  // --- Группировка по MAC-адресу для устранения дублей IPv6 ---
+  const groupedByMac = new Map();
+  const clientsWithoutMac = [];
+
+  for (const client of list) {
+    if (!client.mac) {
+      clientsWithoutMac.push(client);
+      continue;
     }
-    return 0;
+    const key = client.mac.toUpperCase();
+    if (!groupedByMac.has(key)) {
+      groupedByMac.set(key, []);
+    }
+    groupedByMac.get(key).push(client);
+  }
+
+  const mergedList = [...clientsWithoutMac];
+  const isIpv6 = (ip) => ip.includes(':');
+
+  for (const [mac, groupClients] of groupedByMac.entries()) {
+    if (groupClients.length === 1) {
+      mergedList.push(groupClients[0]);
+      continue;
+    }
+
+    let mainClient = groupClients.find(c => !isIpv6(c.ip));
+    if (!mainClient) {
+      mainClient = groupClients.find(c => isIpv6(c.ip) && !c.ip.toLowerCase().startsWith('fe80:'));
+    }
+    if (!mainClient) {
+      mainClient = groupClients[0];
+    }
+
+    const altIps = [];
+    for (const other of groupClients) {
+      if (other.ip !== mainClient.ip) {
+        altIps.push(other.ip);
+        mainClient.downSpeed += other.downSpeed;
+        mainClient.upSpeed += other.upSpeed;
+        mainClient.vpnDownload += other.vpnDownload;
+        mainClient.vpnUpload += other.vpnUpload;
+        mainClient.directDownload += other.directDownload;
+        mainClient.directUpload += other.directUpload;
+        if (other.active) {
+          mainClient.active = true;
+        }
+      }
+    }
+
+    if (altIps.length > 0) {
+      mainClient.altIps = altIps;
+    }
+
+    mergedList.push(mainClient);
+  }
+
+  // Сортировка: сначала активные устройства, затем IPv4, затем IPv6
+  return mergedList.sort((a, b) => {
+    if (a.active !== b.active) return b.active - a.active;
+    
+    const isA_ipv6 = a.ip.includes(':');
+    const isB_ipv6 = b.ip.includes(':');
+    
+    if (isA_ipv6 && !isB_ipv6) return 1;
+    if (!isA_ipv6 && isB_ipv6) return -1;
+    
+    if (!isA_ipv6 && !isB_ipv6) {
+      const partsA = a.ip.split('.').map(Number);
+      const partsB = b.ip.split('.').map(Number);
+      for (let i = 0; i < 4; i++) {
+        if (partsA[i] !== partsB[i]) return partsA[i] - partsB[i];
+      }
+      return 0;
+    }
+    
+    return a.ip.localeCompare(b.ip);
   });
 }
 
