@@ -854,7 +854,8 @@ input[type="checkbox"]:checked::before {
 .console-line-time {
   color: #5c6370;
   margin-right: 10px;
-  user-select: none;
+  user-select: text;
+  -webkit-user-select: text;
 }
 
 .log-debug {
