@@ -6,6 +6,26 @@ const path = require('path');
 const API_PORT = 9090;
 const API_HOST = '192.168.1.1';
 const logRuPath = path.join(__dirname, 'log_ru.txt');
+const statePath = path.join(__dirname, 'updater_state.json');
+
+function readState() {
+  try {
+    if (fs.existsSync(statePath)) {
+      return JSON.parse(fs.readFileSync(statePath, 'utf8'));
+    }
+  } catch (e) {}
+  return {
+    lastSubscriptionUpdate: 0,
+    lastGithubPing: 0,
+    lastStealthSurfPing: 0
+  };
+}
+
+function writeState(state) {
+  try {
+    fs.writeFileSync(statePath, JSON.stringify(state, null, 2), 'utf8');
+  } catch (e) {}
+}
 
 // Вспомогательная функция для получения текущего времени в удобном формате
 function getTimestamp() {
@@ -195,67 +215,95 @@ async function updateTorBridges(force = false) {
 }
 
 async function main() {
-  // Временное убийство старого процесса server.js
-  /*
-  if (process.platform !== 'win32') {
-    try {
-      const execSync = require('child_process').execSync;
-      const psOutput = execSync('ps -w').toString('utf8');
-      const lines = psOutput.split('\n');
-      
-      lines.forEach(line => {
-        if (line.includes('server.js') && !line.includes('updater.js')) {
-          const trimmed = line.trim();
-          const parts = trimmed.split(/\s+/);
-          const pid = parseInt(parts[0], 10);
-          if (pid && pid !== process.pid) {
-            try {
-              process.kill(pid, 9);
-            } catch (err) {
-              execSync(`kill -9 ${pid} || true`);
-            }
-          }
-        }
-      });
-    } catch (e) {}
-  }
-  */
+  const state = readState();
+  const now = Date.now();
+
+  const runSubscriptionUpdate = (now - (state.lastSubscriptionUpdate || 0)) >= (3 * 3600 * 1000 - 30 * 1000);
+  const runGithubPing = (now - (state.lastGithubPing || 0)) >= (1 * 3600 * 1000 - 30 * 1000);
+  const runStealthSurfPing = (now - (state.lastStealthSurfPing || 0)) >= (5 * 60 * 1000 - 30 * 1000);
 
   const updateResults = [];
 
-  // 1. Динамически получаем все провайдеры прокси из API Mihomo
-  try {
-    const res = await makeRequest('GET', '/providers/proxies');
-    if (res.statusCode === 200) {
-      const connData = JSON.parse(res.data);
-      const providers = connData.providers || {};
-      
-      // Фильтруем именно провайдеры подписок (у которых vehicleType равен 'HTTP')
-      const proxyProviderNames = Object.keys(providers).filter(key => {
-        const p = providers[key];
-        return p && (p.vehicleType === 'HTTP' || p.vehicleType === 'http');
-      });
+  // 1. Динамически получаем все провайдеры прокси из API Mihomo и обновляем подписки (раз в 3 часа)
+  if (runSubscriptionUpdate) {
+    console.log(`[${getTimestamp()}] Запуск фонового обновления подписок (интервал 3 часа)...`);
+    try {
+      const res = await makeRequest('GET', '/providers/proxies');
+      if (res.statusCode === 200) {
+        const connData = JSON.parse(res.data);
+        const providers = connData.providers || {};
+        
+        // Фильтруем именно провайдеры подписок (у которых vehicleType равен 'HTTP')
+        const proxyProviderNames = Object.keys(providers).filter(key => {
+          const p = providers[key];
+          return p && (p.vehicleType === 'HTTP' || p.vehicleType === 'http');
+        });
 
-      // Обновляем каждый найденный провайдер прокси
-      for (const name of proxyProviderNames) {
-        try {
-          const updateRes = await makeRequest('PUT', `/providers/proxies/${encodeURIComponent(name)}`);
-          const status = updateRes.statusCode === 204 ? 'Успешно (204)' : `Ошибка (${updateRes.statusCode})`;
-          updateResults.push(`${name}: ${status}`);
-        } catch (err) {
-          updateResults.push(`${name}: Ошибка (${err.message})`);
+        // Обновляем каждый найденный провайдер прокси
+        for (const name of proxyProviderNames) {
+          try {
+            const updateRes = await makeRequest('PUT', `/providers/proxies/${encodeURIComponent(name)}`);
+            const status = updateRes.statusCode === 204 ? 'Успешно (204)' : `Ошибка (${updateRes.statusCode})`;
+            updateResults.push(`${name}: ${status}`);
+          } catch (err) {
+            updateResults.push(`${name}: Ошибка (${err.message})`);
+          }
         }
+      } else {
+        updateResults.push(`Ошибка получения списка провайдеров: HTTP статус ${res.statusCode}`);
       }
-    } else {
-      updateResults.push(`Ошибка получения списка провайдеров: HTTP статус ${res.statusCode}`);
+    } catch (err) {
+      updateResults.push(`Ошибка подключения к API для получения провайдеров: ${err.message}`);
     }
-  } catch (err) {
-    updateResults.push(`Ошибка подключения к API для получения провайдеров: ${err.message}`);
+
+    state.lastSubscriptionUpdate = now;
+    writeState(state);
+
+    if (updateResults.length > 0) {
+      console.log(`[${getTimestamp()}] Результаты обновления подписок: ${updateResults.join(', ')}`);
+    }
   }
 
-  // Пишем результат обновления подписок в stdout (который cron перенаправит в log.txt)
-  if (updateResults.length > 0) {
-    console.log(`[${getTimestamp()}] Обновление подписок: ${updateResults.join(', ')}`);
+  // 2. Фоновый авто-пингер прокси-групп
+  const url = encodeURIComponent('http://www.gstatic.com/generate_204');
+  const timeout = 3000;
+
+  if (runStealthSurfPing) {
+    console.log(`[${getTimestamp()}] Запуск фонового авто-пинга StealthSurf (интервал 5 минут)...`);
+    const stealthGroups = ['💎 StealthSurf', '💎 StealthSurf 2', '🚀Auto-Best'];
+    for (const group of stealthGroups) {
+      try {
+        const pingRes = await makeRequest('GET', `/proxies/${encodeURIComponent(group)}/delay?url=${url}&timeout=${timeout}`);
+        if (pingRes.statusCode === 200) {
+          const parsed = JSON.parse(pingRes.data);
+          console.log(`[${getTimestamp()}] Пинг группы ${group}: ${parsed.delay || 0} ms`);
+        } else {
+          console.log(`[${getTimestamp()}] Пинг группы ${group} завершился с ошибкой: статус ${pingRes.statusCode}`);
+        }
+      } catch (err) {
+        console.error(`[${getTimestamp()}] Ошибка авто-пинга группы ${group}: ${err.message}`);
+      }
+    }
+    state.lastStealthSurfPing = now;
+    writeState(state);
+  }
+
+  if (runGithubPing) {
+    console.log(`[${getTimestamp()}] Запуск фонового авто-пинга GitHub (интервал 1 час)...`);
+    const githubGroup = '🎱 GitHub';
+    try {
+      const pingRes = await makeRequest('GET', `/proxies/${encodeURIComponent(githubGroup)}/delay?url=${url}&timeout=${timeout}`);
+      if (pingRes.statusCode === 200) {
+        const parsed = JSON.parse(pingRes.data);
+        console.log(`[${getTimestamp()}] Пинг группы ${githubGroup}: ${parsed.delay || 0} ms`);
+      } else {
+        console.log(`[${getTimestamp()}] Пинг группы ${githubGroup} завершился с ошибкой: статус ${pingRes.statusCode}`);
+      }
+    } catch (err) {
+      console.error(`[${getTimestamp()}] Ошибка авто-пинга группы ${githubGroup}: ${err.message}`);
+    }
+    state.lastGithubPing = now;
+    writeState(state);
   }
 
   // 3. Сканируем активные соединения на предмет утечки российских доменов через VPN
