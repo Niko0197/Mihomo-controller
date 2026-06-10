@@ -1145,8 +1145,8 @@ function renderProxyGroups(proxiesData) {
 
     const nowName = group.now || '—';
     const nowProxy = proxies[nowName];
-    const nowDelay = getLastDelay(nowProxy);
     const resolvedActiveDelay = resolveSelectedProxyDelay(group.name, proxies);
+    const nowDelay = resolvedActiveDelay;
     const delayText = resolvedActiveDelay > 0 ? `${resolvedActiveDelay} ms` : '—';
 
     // --- Header ---
@@ -1204,7 +1204,8 @@ function renderProxyGroups(proxiesData) {
     dotsRow.className = 'pgc-dots';
     group.all.forEach(nodeName => {
       const np = proxies[nodeName];
-      const d = getLastDelay(np);
+      const isChild = np && np.all && Array.isArray(np.all);
+      const d = isChild ? resolveSelectedProxyDelay(nodeName, proxies) : getLastDelay(np);
       const dot = document.createElement('span');
       dot.className = 'pgc-dot ' + getLatencyDotClass(d);
       dot.title = nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A');
@@ -1225,11 +1226,11 @@ function renderProxyGroups(proxiesData) {
 
       group.all.forEach(nodeName => {
         const np = proxies[nodeName];
-        const d = getLastDelay(np);
         const isActive = nodeName === group.now;
         const isChildGroup = np && np.all && Array.isArray(np.all);
         const childType = np ? np.type : '';
         const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
+        const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
 
         const btn = document.createElement('button');
         btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
@@ -1239,7 +1240,7 @@ function renderProxyGroups(proxiesData) {
           <span class="pgc-nb-name">${nodeName}</span>
           ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
           ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
-          ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(resolvedChildDelay)};background:${getLatencyBgColor(resolvedChildDelay)}">${resolvedChildDelay > 0 ? resolvedChildDelay + ' ms' : '—'}</span>` : ''}
+          ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
         `;
 
         btn.addEventListener('click', (e) => {
