@@ -1590,7 +1590,11 @@ input[type="checkbox"]:checked::before {
   padding-bottom: 16px;
 }
 
-.pgc-card.pgc-collapsed .pgc-body {
+.pgc-card.pgc-collapsed .pgc-nodes-panel {
+  display: none !important;
+}
+
+.pgc-card.pgc-provider.pgc-collapsed .pgc-body {
   display: none !important;
 }
 

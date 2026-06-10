@@ -1006,6 +1006,48 @@ function getLastDelay(proxy) {
   return proxy.history[proxy.history.length - 1].delay || 0;
 }
 
+function resolveSelectedProxyDelay(proxyName, proxies) {
+  let current = proxies[proxyName];
+  if (!current) return 0;
+  
+  let limit = 5;
+  while (current && current.now && limit > 0) {
+    const next = proxies[current.now];
+    if (!next) break;
+    current = next;
+    limit--;
+  }
+  return getLastDelay(current);
+}
+
+function getLatencyBgColor(delay) {
+  if (!delay || delay === 0) return 'rgba(255, 255, 255, 0.05)';
+  if (delay < 200) return 'rgba(61, 220, 132, 0.15)';
+  if (delay < 500) return 'rgba(255, 183, 77, 0.15)';
+  return 'rgba(255, 138, 128, 0.15)';
+}
+
+async function pingProxyNode(nodeName) {
+  try {
+    showToast(`⚡ Измеряем пинг для ${nodeName}...`);
+    const res = await fetch('/api/proxies/ping', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: nodeName })
+    });
+    if (!res.ok) throw new Error('Ошибка HTTP ' + res.status);
+    const data = await res.json();
+    if (data.success && data.delay > 0) {
+      showToast(`✅ Пинг ${nodeName}: ${data.delay} ms`, 'success');
+    } else {
+      showToast(`❌ Пинг ${nodeName}: таймаут или ошибка`, 'error');
+    }
+    loadProxiesDashboard();
+  } catch (err) {
+    showToast('Ошибка пинга: ' + err.message, 'error');
+  }
+}
+
 function getLatencyDotClass(delay) {
   if (!delay || delay === 0) return 'lat-none';
   if (delay < 200) return 'lat-fast';
@@ -1095,10 +1137,17 @@ function renderProxyGroups(proxiesData) {
     const icon = typeIcons[group.type.toLowerCase()] || '📡';
     const typeLabel = typeLabels[group.type.toLowerCase()] || group.type;
 
-    const isCollapsed = localStorage.getItem('pgc-collapsed-' + group.name) === 'true';
+    const localVal = localStorage.getItem('pgc-collapsed-' + group.name);
+    const isCollapsed = localVal !== null ? localVal === 'true' : true;
     if (isCollapsed) {
       card.classList.add('pgc-collapsed');
     }
+
+    const nowName = group.now || '—';
+    const nowProxy = proxies[nowName];
+    const nowDelay = getLastDelay(nowProxy);
+    const resolvedActiveDelay = resolveSelectedProxyDelay(group.name, proxies);
+    const delayText = resolvedActiveDelay > 0 ? `${resolvedActiveDelay} ms` : '—';
 
     // --- Header ---
     const header = document.createElement('div');
@@ -1110,14 +1159,15 @@ function renderProxyGroups(proxiesData) {
         <span class="pgc-meta">·&nbsp;${typeLabel}&nbsp;·&nbsp;${aliveCount}/${totalNodes}</span>
       </div>
       <div class="pgc-header-right">
-        <span class="pgc-count-badge">${totalNodes}</span>
+        <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
         <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
       </div>
     `;
 
-    header.style.cursor = 'pointer';
-    header.addEventListener('click', (e) => {
-      if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+    // Toggle collapse on left click
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', (e) => {
+      if (e.target.closest('.pgc-node-btn') || e.target.closest('.pgc-dot') || e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
       const nowCollapsed = card.classList.toggle('pgc-collapsed');
@@ -1128,10 +1178,17 @@ function renderProxyGroups(proxiesData) {
       }
     });
 
-    // --- Selected node ---
-    const nowName = group.now || '—';
-    const nowProxy = proxies[nowName];
-    const nowDelay = getLastDelay(nowProxy);
+    // Ping selected proxy on right click
+    card.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('.pgc-node-btn') || e.target.closest('.pgc-dot') || e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+        return;
+      }
+      e.preventDefault();
+      const targetName = group.now || '—';
+      if (targetName && targetName !== '—') {
+        pingProxyNode(targetName);
+      }
+    });
 
     const selected = document.createElement('div');
     selected.className = 'pgc-selected';
@@ -1171,8 +1228,8 @@ function renderProxyGroups(proxiesData) {
         const d = getLastDelay(np);
         const isActive = nodeName === group.now;
         const isChildGroup = np && np.all && Array.isArray(np.all);
-        const childCount = isChildGroup ? np.all.length : 0;
         const childType = np ? np.type : '';
+        const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
 
         const btn = document.createElement('button');
         btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
@@ -1181,8 +1238,8 @@ function renderProxyGroups(proxiesData) {
           <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
           <span class="pgc-nb-name">${nodeName}</span>
           ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
-          ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
-          ${childCount > 0 ? '<span class="pgc-nb-count">' + childCount + '</span>' : ''}
+          ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
+          ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(resolvedChildDelay)};background:${getLatencyBgColor(resolvedChildDelay)}">${resolvedChildDelay > 0 ? resolvedChildDelay + ' ms' : '—'}</span>` : ''}
         `;
 
         btn.addEventListener('click', (e) => {
@@ -1223,7 +1280,8 @@ function renderProxyProviders(providersData, proxiesData) {
     const card = document.createElement('div');
     card.className = 'pgc-card pgc-provider';
 
-    const isCollapsed = localStorage.getItem('pgc-collapsed-' + provider.name) === 'true';
+    const localVal = localStorage.getItem('pgc-collapsed-' + provider.name);
+    const isCollapsed = localVal !== null ? localVal === 'true' : true;
     if (isCollapsed) {
       card.classList.add('pgc-collapsed');
     }
@@ -1273,8 +1331,8 @@ function renderProxyProviders(providersData, proxiesData) {
       </div>
     `;
 
-    header.style.cursor = 'pointer';
-    header.addEventListener('click', (e) => {
+    card.style.cursor = 'pointer';
+    card.addEventListener('click', (e) => {
       if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
@@ -1284,6 +1342,14 @@ function renderProxyProviders(providersData, proxiesData) {
       if (arrow) {
         arrow.textContent = nowCollapsed ? '▸' : '▾';
       }
+    });
+
+    card.addEventListener('contextmenu', (e) => {
+      if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
+        return;
+      }
+      e.preventDefault();
+      healthcheckProvider(provider.name);
     });
 
     // Info row
