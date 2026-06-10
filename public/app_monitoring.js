@@ -1204,7 +1204,6 @@ function renderProxyGroups(proxiesData) {
       <span class="pgc-sel-icon">⊙</span>
       <span class="pgc-sel-check">✓</span>
       <span class="pgc-sel-name">${nowName}</span>
-      ${nowDelay > 0 ? '<span class="pgc-sel-delay" style="color:' + getLatencyColor(nowDelay) + '">' + nowDelay + 'ms</span>' : ''}
     `;
 
     // --- Latency dots row (always visible in card body) ---
