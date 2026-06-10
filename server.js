@@ -407,22 +407,26 @@ async function handleXkeenTrace(req, res) {
     function matchesRuleSet(d, providerName) {
       const name = providerName.split('@')[0].toLowerCase();
       
-      if (name === 'smart_unblock' || name === 'custom') {
+      if (name.startsWith('custom') || name === 'smart_unblock') {
         try {
-          const paths = [
-            '/opt/etc/mihomo/smart_unblock.yaml',
-            '/opt/etc/mihomo/rules/custom.yaml'
-          ];
-          for (const p of paths) {
+          const filesToCheck = [];
+          if (name === 'smart_unblock') {
+            filesToCheck.push('/opt/etc/mihomo/smart_unblock.yaml');
+          } else if (name === 'custom') {
+            filesToCheck.push('/opt/etc/mihomo/rules/custom.yaml');
+          } else {
+            filesToCheck.push(`/opt/etc/mihomo/rules/${name}.yaml`);
+          }
+          for (const p of filesToCheck) {
             if (fs.existsSync(p)) {
               const text = fs.readFileSync(p, 'utf8');
-              if (text.toLowerCase().includes(d)) {
+              if (text.toLowerCase().includes(d.toLowerCase())) {
                 return true;
               }
             }
           }
         } catch (e) {}
-        return false;
+        if (name === 'custom') return false;
       }
       
       if (name === 'youtube' && (d.includes('youtube') || d.includes('youtu.be') || d.includes('ytimg') || d.includes('ggpht'))) return true;

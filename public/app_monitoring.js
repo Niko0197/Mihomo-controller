@@ -791,10 +791,60 @@ function setupSmartScroll() {
   }
 }
 
+// Helper to extract logs text according to the current tab and filter
+function getFilteredLogsText() {
+  const levels = ['debug', 'info', 'warning', 'error'];
+  const currentIdx = levels.indexOf(activeLogLevel);
+  if (currentIdx === -1) return '';
+  
+  const queryInput = document.getElementById('log-search-box');
+  const query = queryInput ? queryInput.value.toLowerCase() : '';
+  
+  const filteredLines = [];
+  logsCache.forEach(logObj => {
+    const logType = logObj.type.toLowerCase();
+    const typeIdx = levels.indexOf(logType);
+    if (typeIdx === -1 || typeIdx < currentIdx) return;
+    
+    if (query && !logObj.payload.toLowerCase().includes(query)) return;
+    
+    filteredLines.push(`[${logObj.timeStr}] [${logObj.type.toUpperCase()}] ${logObj.payload}`);
+  });
+  
+  // Get last 1000 lines of filtered logs
+  return filteredLines.slice(-1000).join('\n');
+}
+
+function downloadActiveLogs() {
+  const text = getFilteredLogsText();
+  if (!text) {
+    showToast('Нет логов для скачивания', 'error');
+    return;
+  }
+  
+  const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  
+  const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+  link.download = `mihomo-logs-${activeLogLevel}-${timestamp}.txt`;
+  link.href = url;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+  showToast('Файл логов скачивается', 'success');
+}
+
 // Bind logs controls
 const logSearchBox = document.getElementById('log-search-box');
 if (logSearchBox) {
   logSearchBox.oninput = reRenderLogs;
+}
+
+const btnDownloadLogs = document.getElementById('btn-download-logs');
+if (btnDownloadLogs) {
+  btnDownloadLogs.onclick = downloadActiveLogs;
 }
 
 const btnClearLogs = document.getElementById('btn-clear-logs');
