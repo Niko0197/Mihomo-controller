@@ -44,13 +44,14 @@ function formatBytes(bytes) {
 
 // Helper to format speeds
 function formatSpeed(bytesPerSec) {
-  if (isNaN(bytesPerSec) || bytesPerSec === null || bytesPerSec === undefined || bytesPerSec <= 0) return '0 KB/s';
-  const k = 1024;
-  const sizes = ['B/s', 'KB/s', 'MB/s', 'GB/s'];
-  const i = Math.floor(Math.log(bytesPerSec) / Math.log(k));
-  if (i < 0) return bytesPerSec.toFixed(1) + ' B/s';
+  if (isNaN(bytesPerSec) || bytesPerSec === null || bytesPerSec === undefined || bytesPerSec <= 0) return '0.0 Кбит/с';
+  const bitsPerSec = bytesPerSec * 8;
+  const k = 1000;
+  const sizes = ['бит/с', 'Кбит/с', 'Мбит/с', 'Гбит/с'];
+  const i = Math.floor(Math.log(bitsPerSec) / Math.log(k));
+  if (i < 0) return bitsPerSec.toFixed(1) + ' бит/с';
   const sizeIdx = Math.min(i, sizes.length - 1);
-  return parseFloat((bytesPerSec / Math.pow(k, sizeIdx)).toFixed(1)) + ' ' + sizes[sizeIdx];
+  return parseFloat((bitsPerSec / Math.pow(k, sizeIdx)).toFixed(1)) + ' ' + sizes[sizeIdx];
 }
 
 // --- Dynamic Tab Switching Hook ---
