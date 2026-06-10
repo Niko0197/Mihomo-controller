@@ -309,11 +309,14 @@ async function setClientRuleInConfig(ip, targetGroup) {
   const isDefault = targetGroup.toLowerCase() === 'default';
   const isDirect = targetGroup.toLowerCase() === 'direct';
 
+  const isIpv6 = ip.includes(':');
+  const mask = isIpv6 ? '/128' : '/32';
+
   const removeRuleFromBlock = (startIdx, endIdx) => {
     const idx = lines.findIndex((l, i) => 
       i > startIdx && 
       i < endIdx && 
-      l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+      (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
     );
     if (idx !== -1) {
       lines.splice(idx, 1);
@@ -339,12 +342,12 @@ async function setClientRuleInConfig(ip, targetGroup) {
     let ruleIdx = lines.findIndex((l, idx) => 
       idx > startBypassIdx && 
       idx < endBypassIdx && 
-      l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+      (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
     );
-    const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+    const newRule = `  - SRC-IP-CIDR,${ip}${mask},${targetGroup}`;
     if (ruleIdx !== -1) {
       const currentRule = lines[ruleIdx].trim();
-      if (currentRule !== `- SRC-IP-CIDR,${ip}/32,${targetGroup}`) {
+      if (currentRule !== `- SRC-IP-CIDR,${ip}${mask},${targetGroup}`) {
         lines[ruleIdx] = newRule;
         yamlChanged = true;
       }
@@ -365,12 +368,12 @@ async function setClientRuleInConfig(ip, targetGroup) {
     let ruleIdx = lines.findIndex((l, idx) => 
       idx > startVpnIdx && 
       idx < endVpnIdx && 
-      l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`)
+      (l.trim().startsWith(`- SRC-IP-CIDR,${ip}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${ip}/128,`))
     );
-    const newRule = `  - SRC-IP-CIDR,${ip}/32,${targetGroup}`;
+    const newRule = `  - SRC-IP-CIDR,${ip}${mask},${targetGroup}`;
     if (ruleIdx !== -1) {
       const currentRule = lines[ruleIdx].trim();
-      if (currentRule !== `- SRC-IP-CIDR,${ip}/32,${targetGroup}`) {
+      if (currentRule !== `- SRC-IP-CIDR,${ip}${mask},${targetGroup}`) {
         lines[ruleIdx] = newRule;
         yamlChanged = true;
       }
@@ -511,7 +514,7 @@ function startTrafficTracker() {
       connections.forEach(conn => {
         const id = conn.id;
         const ip = conn.metadata.sourceIP;
-        if (!ip || !ip.startsWith('192.')) return;
+        if (!ip || ip === '127.0.0.1' || ip === '::1' || ip === 'localhost' || ip === '192.168.1.1') return;
 
         currentActiveIds.add(id);
 
@@ -655,8 +658,8 @@ function getClientsList() {
       const parts = line.trim().split(/\s+/);
       if (parts.length >= 4) {
         const ip = parts[0];
-        // Валидация IPv4
-        if (!ip.startsWith('192.')) return;
+        // Валидация IP (исключаем loopback)
+        if (ip.startsWith('127.') || ip === '::1') return;
         
         let mac = '';
         const lladdrIdx = parts.indexOf('lladdr');
@@ -675,14 +678,14 @@ function getClientsList() {
 
   // Добавляем активных клиентов из hotspot, которых нет в ARP таблице
   hotspotHosts.forEach(h => {
-    if (h.active === 'yes' && h.ip && h.ip.startsWith('192.') && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
+    if (h.active === 'yes' && h.ip && h.ip !== '127.0.0.1' && h.ip !== '::1' && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
       clientsMap.set(h.ip, buildClientObj(h.ip, h.mac, true));
     }
   });
 
   // 3. Добавляем тех клиентов, которые сейчас не в ip neigh, но по которым шел трафик (если есть)
   for (const ip of cumulativeTraffic.keys()) {
-    if (ip.startsWith('192.') && !clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '192.168.1.1') {
+    if (!clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '::1' && ip !== '192.168.1.1') {
       const h = hostByIp.get(ip);
       const mac = h ? h.mac : '';
       clientsMap.set(ip, buildClientObj(ip, mac, false));
