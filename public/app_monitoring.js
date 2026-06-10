@@ -1007,17 +1007,25 @@ function getLastDelay(proxy) {
 }
 
 function resolveSelectedProxyDelay(proxyName, proxies) {
-  let current = proxies[proxyName];
+  const current = proxies[proxyName];
   if (!current) return 0;
   
+  const directDelay = getLastDelay(current);
+  if (directDelay > 0) {
+    return directDelay;
+  }
+  
+  let active = current;
   let limit = 5;
-  while (current && current.now && limit > 0) {
-    const next = proxies[current.now];
+  while (active && active.now && limit > 0) {
+    const next = proxies[active.now];
     if (!next) break;
-    current = next;
+    active = next;
+    const d = getLastDelay(active);
+    if (d > 0) return d;
     limit--;
   }
-  return getLastDelay(current);
+  return 0;
 }
 
 function getLatencyBgColor(delay) {
