@@ -725,9 +725,71 @@ function getClientsList() {
   });
 }
 
+// Отключение VPN для всех клиентов (перевод в DIRECT)
+async function disableVpnForAllClients() {
+  if (!fs.existsSync(configPath)) {
+    throw new Error('Конфиг config.yaml не найден');
+  }
+
+  let yamlText = fs.readFileSync(configPath, 'utf8');
+  let lines = yamlText.split(/\r?\n/);
+  
+  let startBypassIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
+  let endBypassIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
+  
+  let startVpnIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS VPN RULES ---');
+  let endVpnIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS VPN RULES ---');
+  
+  if (startBypassIdx === -1 || endBypassIdx === -1 || startVpnIdx === -1 || endVpnIdx === -1) {
+    return false;
+  }
+
+  // Находим все правила в блоке VPN
+  const vpnRules = [];
+  for (let i = startVpnIdx + 1; i < endVpnIdx; i++) {
+    const line = lines[i].trim();
+    if (line.startsWith('- SRC-IP-CIDR,')) {
+      vpnRules.push(line);
+    }
+  }
+
+  if (vpnRules.length === 0) return false; // Нет клиентов с включенным VPN
+
+  // Удаляем их из блока VPN
+  lines.splice(startVpnIdx + 1, endVpnIdx - startVpnIdx - 1);
+  
+  // Пересчитываем индексы
+  startBypassIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
+  endBypassIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
+
+  // Преобразуем правила в DIRECT и добавляем в Bypass блок
+  const directRules = vpnRules.map(r => {
+    const parts = r.split(',');
+    parts[2] = 'DIRECT';
+    return '  ' + parts.join(',');
+  });
+
+  // Отфильтровываем дубликаты
+  const existingBypassRules = lines.slice(startBypassIdx + 1, endBypassIdx);
+  const newDirectRules = directRules.filter(newRule => {
+    const newIp = newRule.split(',')[1];
+    return !existingBypassRules.some(extRule => extRule.split(',')[1] === newIp);
+  });
+
+  lines.splice(endBypassIdx, 0, ...newDirectRules);
+
+  // Сохраняем файл
+  fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
+
+  // Перезагружаем конфиг в Mihomo
+  await makeMihomoRequest('PUT', '/configs', { path: configPath });
+  return true;
+}
+
 module.exports = {
   getClientsList,
   toggleClientVpn,
   renameClient,
-  setClientGroupPreference
+  setClientGroupPreference,
+  disableVpnForAllClients
 };

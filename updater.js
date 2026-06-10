@@ -17,7 +17,9 @@ function readState() {
   return {
     lastSubscriptionUpdate: 0,
     lastGithubPing: 0,
-    lastStealthSurfPing: 0
+    lastStealthSurfPing: 0,
+    allDownSince: 0,
+    stealthWasDown: false
   };
 }
 
@@ -264,47 +266,98 @@ async function main() {
     }
   }
 
-  // 2. Фоновый авто-пингер прокси-групп
+  // 2. Измерение пинга для всех трех групп на каждой минуте (для Failover)
   const url = encodeURIComponent('http://www.gstatic.com/generate_204');
   const timeout = 3000;
+  
+  let stealth1Delay = 0;
+  let stealth2Delay = 0;
+  let githubDelay = 0;
 
+  try {
+    const res1 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf')}/delay?url=${url}&timeout=${timeout}`);
+    if (res1.statusCode === 200) {
+      stealth1Delay = JSON.parse(res1.data).delay || 0;
+    }
+  } catch (e) {}
+
+  try {
+    const res2 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf 2')}/delay?url=${url}&timeout=${timeout}`);
+    if (res2.statusCode === 200) {
+      stealth2Delay = JSON.parse(res2.data).delay || 0;
+    }
+  } catch (e) {}
+
+  try {
+    const res3 = await makeRequest('GET', `/proxies/${encodeURIComponent('🎱 GitHub')}/delay?url=${url}&timeout=${timeout}`);
+    if (res3.statusCode === 200) {
+      githubDelay = JSON.parse(res3.data).delay || 0;
+    }
+  } catch (e) {}
+
+  const isStealth1Alive = stealth1Delay > 0;
+  const isStealth2Alive = stealth2Delay > 0;
+  const isGithubAlive = githubDelay > 0;
+
+  // Логирование пингов по расписанию для отчетов в консоли
   if (runStealthSurfPing) {
-    console.log(`[${getTimestamp()}] Запуск фонового авто-пинга StealthSurf (интервал 5 минут)...`);
-    const stealthGroups = ['💎 StealthSurf', '💎 StealthSurf 2', '🚀Auto-Best'];
-    for (const group of stealthGroups) {
+    console.log(`[${getTimestamp()}] Фоновый опрос пинга StealthSurf: 1-й: ${stealth1Delay} ms | 2-й: ${stealth2Delay} ms`);
+    state.lastStealthSurfPing = now;
+  }
+  if (runGithubPing) {
+    console.log(`[${getTimestamp()}] Фоновый опрос пинга GitHub: ${githubDelay} ms`);
+    state.lastGithubPing = now;
+  }
+
+  // --- Логика Failover ---
+  // Проверка падения основного StealthSurf
+  const isStealthBothDown = !isStealth1Alive && !isStealth2Alive;
+  if (isStealthBothDown && isGithubAlive) {
+    if (!state.stealthWasDown) {
+      console.log(`[${getTimestamp()}] ВНИМАНИЕ: Оба прокси StealthSurf недоступны. Резервный канал GitHub активен.`);
+      state.stealthWasDown = true;
+    }
+  } else if (!isStealthBothDown) {
+    if (state.stealthWasDown) {
+      console.log(`[${getTimestamp()}] ИНФО: Основной прокси-канал StealthSurf восстановлен.`);
+      state.stealthWasDown = false;
+    }
+  }
+
+  // Проверка полного падения всех каналов
+  const isAllDown = isStealthBothDown && !isGithubAlive;
+  if (isAllDown) {
+    if (state.allDownSince === 0) {
+      state.allDownSince = now;
+      console.log(`[${getTimestamp()}] ВНИМАНИЕ: Все VPN-каналы (StealthSurf 1/2, GitHub) недоступны. Начало отсчета (1 минута до сброса в DIRECT)...`);
+    } else if (state.allDownSince !== -1 && (now - state.allDownSince) >= 50 * 1000) {
+      console.log(`[${getTimestamp()}] КРИТИЧЕСКАЯ ОШИБКА: Все VPN-каналы недоступны более 1 минуты. Отключаем VPN для всех клиентов (перевод в DIRECT).`);
       try {
-        const pingRes = await makeRequest('GET', `/proxies/${encodeURIComponent(group)}/delay?url=${url}&timeout=${timeout}`);
-        if (pingRes.statusCode === 200) {
-          const parsed = JSON.parse(pingRes.data);
-          console.log(`[${getTimestamp()}] Пинг группы ${group}: ${parsed.delay || 0} ms`);
+        const clientsManager = require('./clients_manager');
+        const triggered = await clientsManager.disableVpnForAllClients();
+        if (triggered) {
+          console.log(`[${getTimestamp()}] Успешно: Маршруты всех VPN-клиентов сброшены в DIRECT.`);
         } else {
-          console.log(`[${getTimestamp()}] Пинг группы ${group} завершился с ошибкой: статус ${pingRes.statusCode}`);
+          console.log(`[${getTimestamp()}] Инфо: Нет клиентов с активным VPN для отключения.`);
         }
       } catch (err) {
-        console.error(`[${getTimestamp()}] Ошибка авто-пинга группы ${group}: ${err.message}`);
+        console.error(`[${getTimestamp()}] Ошибка при сбросе правил клиентов: ${err.message}`);
       }
+      state.allDownSince = -1; // Чтобы зафиксировать сброс и не спамить
     }
-    state.lastStealthSurfPing = now;
-    writeState(state);
+  } else {
+    // Если хотя бы один канал поднялся
+    if (state.allDownSince !== 0) {
+      if (state.allDownSince === -1) {
+        console.log(`[${getTimestamp()}] ИНФО: Сетевые VPN-каналы восстановили работу.`);
+      } else {
+        console.log(`[${getTimestamp()}] ИНФО: Угроза отключения снята, каналы частично доступны.`);
+      }
+      state.allDownSince = 0;
+    }
   }
 
-  if (runGithubPing) {
-    console.log(`[${getTimestamp()}] Запуск фонового авто-пинга GitHub (интервал 1 час)...`);
-    const githubGroup = '🎱 GitHub';
-    try {
-      const pingRes = await makeRequest('GET', `/proxies/${encodeURIComponent(githubGroup)}/delay?url=${url}&timeout=${timeout}`);
-      if (pingRes.statusCode === 200) {
-        const parsed = JSON.parse(pingRes.data);
-        console.log(`[${getTimestamp()}] Пинг группы ${githubGroup}: ${parsed.delay || 0} ms`);
-      } else {
-        console.log(`[${getTimestamp()}] Пинг группы ${githubGroup} завершился с ошибкой: статус ${pingRes.statusCode}`);
-      }
-    } catch (err) {
-      console.error(`[${getTimestamp()}] Ошибка авто-пинга группы ${githubGroup}: ${err.message}`);
-    }
-    state.lastGithubPing = now;
-    writeState(state);
-  }
+  writeState(state);
 
   // 3. Сканируем активные соединения на предмет утечки российских доменов через VPN
   try {

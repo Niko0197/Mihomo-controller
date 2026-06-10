@@ -7,6 +7,7 @@
 smart_unblock_db.json
 clients_db.json
 tor_bridges.json
+updater_state.json
 
 # Системные папки
 node_modules/
