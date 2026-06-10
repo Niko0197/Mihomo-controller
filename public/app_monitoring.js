@@ -1667,11 +1667,11 @@ function startSystemStatsPolling() {
 }
 
 function setupSystemMonitorToggle() {
-  const toggleBtn = document.getElementById('system-monitor-toggle');
+  const card = document.querySelector('.system-monitor-card');
   const body = document.getElementById('system-monitor-body');
   const arrow = document.getElementById('system-monitor-arrow');
   
-  if (!toggleBtn || !body || !arrow) return;
+  if (!card || !body || !arrow) return;
   
   const isExpanded = localStorage.getItem('system-monitor-expanded') === 'true';
   if (isExpanded) {
@@ -1685,7 +1685,7 @@ function setupSystemMonitorToggle() {
     arrow.textContent = '▸';
   }
   
-  toggleBtn.addEventListener('click', () => {
+  card.addEventListener('click', () => {
     const isCurrentlyHidden = body.style.display === 'none';
     if (isCurrentlyHidden) {
       body.style.display = 'block';
