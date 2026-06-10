@@ -1221,6 +1221,11 @@ function renderProxyGroups(proxiesData) {
       if (isSelector) {
         dot.style.cursor = 'pointer';
         dot.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
+        dot.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pingProxyNode(nodeName);
+        });
       }
       dotsRow.appendChild(dot);
     });
@@ -1254,6 +1259,11 @@ function renderProxyGroups(proxiesData) {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           selectProxyInGroup(group.name, nodeName);
+        });
+        btn.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pingProxyNode(nodeName);
         });
         nodesPanel.appendChild(btn);
       });
