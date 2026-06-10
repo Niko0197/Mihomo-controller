@@ -1121,6 +1121,34 @@ function renderProxyGroups(proxiesData) {
     }
   }
 
+  // Сортировка групп в нужном порядке:
+  // 1 ряд: Auto-Best, Manual 1, Manual 2, StealthSurf
+  // 2 ряд и далее: StealthSurf 2, затем сервисы (Zoom, GitHub и др.) по алфавиту
+  const priorityOrder = [
+    '🚀Auto-Best',
+    '⚙️Manual 1',
+    '⚙️Manual 2',
+    '💎 StealthSurf',
+    '💎 StealthSurf 2',
+    '🎱 GitHub',
+    'Google',
+    'TikTok',
+    'YouTube'
+  ];
+
+  groups.sort((a, b) => {
+    const idxA = priorityOrder.indexOf(a.name);
+    const idxB = priorityOrder.indexOf(b.name);
+    
+    if (idxA !== -1 && idxB !== -1) {
+      return idxA - idxB;
+    }
+    if (idxA !== -1) return -1;
+    if (idxB !== -1) return 1;
+    
+    return a.name.localeCompare(b.name);
+  });
+
   if (groups.length === 0) {
     container.innerHTML = '<div style="text-align:center;color:var(--text-muted);padding:40px 0;">Прокси-группы не найдены в ядре</div>';
     return;
