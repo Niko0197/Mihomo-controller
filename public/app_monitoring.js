@@ -191,6 +191,13 @@ function initTrafficChart() {
           }
         },
         tooltip: {
+          backgroundColor: 'rgba(15, 18, 25, 0.95)',
+          bodyFont: { family: 'Inter', size: 13.5, weight: '500' },
+          padding: 10,
+          boxWidth: 10,
+          boxHeight: 10,
+          boxPadding: 6,
+          cornerRadius: 6,
           callbacks: {
             title: function() {
               return ''; // Hide X-axis index/time title as it's not relevant here
@@ -1613,7 +1620,16 @@ function initSysResourceChart() {
       maintainAspectRatio: false,
       plugins: {
         legend: { display: false },
-        tooltip: { enabled: true }
+        tooltip: {
+          enabled: true,
+          backgroundColor: 'rgba(15, 18, 25, 0.95)',
+          bodyFont: { family: 'Inter', size: 13.5, weight: '500' },
+          padding: 10,
+          boxWidth: 10,
+          boxHeight: 10,
+          boxPadding: 6,
+          cornerRadius: 6
+        }
       },
       scales: {
         x: { display: false },
