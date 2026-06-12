@@ -57,8 +57,8 @@ body {
   -webkit-user-select: none;
 }
 
-/* Allow text selection in inputs, textareas, dropdowns, and CodeMirror editor */
-input, textarea, select, .CodeMirror, .CodeMirror * {
+/* Allow text selection in inputs, textareas, dropdowns, CodeMirror editor, table cells, code blocks, and logs */
+input, textarea, select, .CodeMirror, .CodeMirror *, td, th, pre, code, .selectable, .log-line, .log-container {
   user-select: text;
   -webkit-user-select: text;
 }
