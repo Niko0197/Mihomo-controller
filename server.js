@@ -1375,43 +1375,42 @@ function handleGetXkeenStatus(req, res) {
 }
 
 // POST /api/xkeen/toggle
-async function handleToggleXkeen(req, res) {
+function handleToggleXkeen(req, res) {
   try {
-    const { execSync } = require('child_process');
-    let running = false;
-    try {
-      execSync('pidof mihomo');
-      running = true;
-    } catch (e) {}
-
-    const action = running ? 'stop' : 'start';
-    try {
-      execSync('/opt/etc/init.d/S99xkeen ' + action);
-    } catch (cmdErr) {
-      console.error('Ошибка выполнения /opt/etc/init.d/S99xkeen ' + action, cmdErr.message);
-    }
-
-    // Ожидаем завершения операции до 4 секунд
-    let newRunning = false;
-    const targetRunning = action === 'start';
+    const { exec } = require('child_process');
     
-    for (let i = 0; i < 8; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      let check = false;
-      try {
-        execSync('pidof mihomo');
-        check = true;
-      } catch (e) {}
-      
-      if (check === targetRunning) {
-        newRunning = check;
-        break;
-      }
-      newRunning = check;
-    }
+    // Проверяем текущее состояние
+    exec('pidof mihomo', (err, stdout, stderr) => {
+      const running = !err && stdout.trim().length > 0;
+      const action = running ? 'stop' : 'start';
+      const targetRunning = action === 'start';
 
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: true, running: newRunning }));
+      console.log(`[Toggle XKeen] Текущее состояние: ${running ? 'запущен' : 'остановлен'}. Выполняем: ${action}`);
+
+      // Запускаем команду в фоне асинхронно
+      exec('/opt/etc/init.d/S99xkeen ' + action, (cmdErr, cmdStdout, cmdStderr) => {
+        if (cmdErr) {
+          console.error(`Ошибка выполнения /opt/etc/init.d/S99xkeen ${action} в фоне:`, cmdErr.message);
+        }
+      });
+
+      // Асинхронно опрашиваем состояние mihomo до 8 раз с интервалом 500мс
+      let attempts = 0;
+      const checkInterval = setInterval(() => {
+        exec('pidof mihomo', (checkErr, checkStdout, checkStderr) => {
+          const checkRunning = !checkErr && checkStdout.trim().length > 0;
+          attempts++;
+
+          if (checkRunning === targetRunning || attempts >= 8) {
+            clearInterval(checkInterval);
+            console.log(`[Toggle XKeen] Переключение завершено. Новый статус: ${checkRunning ? 'запущен' : 'остановлен'}`);
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: true, running: checkRunning }));
+          }
+        });
+      }, 500);
+    });
+
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
