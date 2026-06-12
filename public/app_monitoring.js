@@ -162,7 +162,11 @@ function initTrafficChart() {
           fill: true,
           tension: 0,
           borderWidth: 2,
-          pointRadius: 0
+          pointRadius: 0,
+          pointHoverRadius: 7,
+          pointHoverBorderWidth: 3,
+          pointHoverBackgroundColor: '#0d0f14',
+          pointHoverBorderColor: '#a8c7fa'
         },
         {
           label: 'Отдача (Upload)',
@@ -172,7 +176,11 @@ function initTrafficChart() {
           fill: true,
           tension: 0,
           borderWidth: 2,
-          pointRadius: 0
+          pointRadius: 0,
+          pointHoverRadius: 7,
+          pointHoverBorderWidth: 3,
+          pointHoverBackgroundColor: '#0d0f14',
+          pointHoverBorderColor: '#3ddc84'
         }
       ]
     },
