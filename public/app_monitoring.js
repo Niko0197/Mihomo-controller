@@ -206,6 +206,7 @@ function initTrafficChart() {
           boxHeight: 10,
           boxPadding: 6,
           cornerRadius: 6,
+          caretPadding: 10,
           callbacks: {
             title: function() {
               return ''; // Hide X-axis index/time title as it's not relevant here
