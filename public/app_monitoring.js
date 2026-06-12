@@ -160,7 +160,7 @@ function initTrafficChart() {
           borderColor: '#a8c7fa',
           backgroundColor: 'rgba(168, 199, 250, 0.04)',
           fill: true,
-          tension: 0.4,
+          tension: 0,
           borderWidth: 2,
           pointRadius: 0
         },
@@ -170,7 +170,7 @@ function initTrafficChart() {
           borderColor: '#3ddc84',
           backgroundColor: 'rgba(61, 220, 132, 0.04)',
           fill: true,
-          tension: 0.4,
+          tension: 0,
           borderWidth: 2,
           pointRadius: 0
         }
