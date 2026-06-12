@@ -1419,28 +1419,28 @@ async function handleToggleXkeen(req, res) {
 }
 
 // POST /api/xkeen/restart
-async function handleRestartXkeen(req, res) {
+function handleRestartXkeen(req, res) {
   try {
-    const { execSync } = require('child_process');
-    try {
-      execSync('/opt/etc/init.d/S99xkeen restart');
-    } catch (cmdErr) {
-      console.error('Ошибка выполнения /opt/etc/init.d/S99xkeen restart', cmdErr.message);
-    }
-
-    // Ожидаем старта процесса до 4 секунд
-    let running = false;
-    for (let i = 0; i < 8; i++) {
-      await new Promise(r => setTimeout(r, 500));
-      try {
-        execSync('pidof mihomo');
-        running = true;
-        break;
-      } catch (e) {}
-    }
-
+    // Отправляем ответ клиенту немедленно, чтобы избежать таймаутов и обрывов соединения
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: true, running }));
+    res.end(JSON.stringify({ success: true, message: 'Служба XKeen перезапускается в фоне...' }));
+
+    // Выполняем перезапуск в фоне с задержкой в 1 секунду, чтобы дать соединению закрыться
+    setTimeout(() => {
+      try {
+        const { exec } = require('child_process');
+        exec('/opt/etc/init.d/S99xkeen restart', (err, stdout, stderr) => {
+          if (err) {
+            console.error('Ошибка выполнения /opt/etc/init.d/S99xkeen restart в фоне:', err.message);
+          } else {
+            console.log('Служба XKeen успешно перезапущена в фоне.');
+          }
+        });
+      } catch (cmdErr) {
+        console.error('Критическая ошибка запуска перезапуска XKeen:', cmdErr.message);
+      }
+    }, 1000);
+
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
