@@ -28,6 +28,9 @@ const cumulativeTraffic = new Map();
 // Текущие скорости клиентов (байт в сек): IP => { downSpeed, upSpeed }
 const currentSpeeds = new Map();
 
+// Кэш привязок IP к MAC адресам (в памяти)
+const ipToMacCache = new Map();
+
 // Последние зафиксированные байты активных соединений (для расчета дельт)
 // id => { ip, isVpn, download, upload }
 const trackedConnections = new Map();
@@ -652,8 +655,13 @@ function getClientsList() {
   const hostByMac = new Map();
   const hostByIp = new Map();
   hotspotHosts.forEach(h => {
-    if (h.mac) hostByMac.set(h.mac, h);
-    if (h.ip && h.ip !== '0.0.0.0') hostByIp.set(h.ip, h);
+    if (h.mac) hostByMac.set(h.mac.toUpperCase(), h);
+    if (h.ip && h.ip !== '0.0.0.0') {
+      hostByIp.set(h.ip, h);
+      if (h.mac) {
+        ipToMacCache.set(h.ip, h.mac.toUpperCase());
+      }
+    }
   });
 
   // Вспомогательная функция для сборки объекта клиента
@@ -708,6 +716,9 @@ function getClientsList() {
         }
 
         if (ip && ip !== '192.168.1.1') {
+          if (mac) {
+            ipToMacCache.set(ip, mac);
+          }
           clientsMap.set(ip, buildClientObj(ip, mac, line.includes('REACHABLE') || line.includes('DELAY')));
         }
       }
@@ -727,14 +738,52 @@ function getClientsList() {
   for (const ip of cumulativeTraffic.keys()) {
     if (!clientsMap.has(ip) && ip !== '127.0.0.1' && ip !== '::1' && ip !== '192.168.1.1') {
       const h = hostByIp.get(ip);
-      const mac = h ? h.mac : '';
+      let mac = h ? h.mac : '';
+      if (!mac) {
+        mac = ipToMacCache.get(ip) || '';
+      }
       clientsMap.set(ip, buildClientObj(ip, mac, false));
     }
   }
 
-  // 4. Подтягиваем скорости и кумулятивный трафик
+  // Вспомогательная функция для проверки приватных IPv4 адресов (RFC 1918)
+  function isPrivateIp(ip) {
+    if (!ip) return false;
+    if (ip.startsWith('192.168.')) return true;
+    if (ip.startsWith('172.')) {
+      const parts = ip.split('.');
+      if (parts.length >= 2) {
+        const second = Number(parts[1]);
+        return second >= 16 && second <= 31;
+      }
+    }
+    if (ip.startsWith('10.') && !ip.startsWith('100.')) return true;
+    return false;
+  }
+
+  // 4. Подтягиваем скорости и кумулятивный трафик, применяя жесткую очистку
   const list = [];
   for (const client of clientsMap.values()) {
+    const normMac = client.mac ? client.mac.toUpperCase() : '';
+    const hasCustomName = getClientData(normMac).name || getClientData(client.ip).name;
+    const isInHotspot = normMac && hostByMac.has(normMac);
+    const isLocal = isPrivateIp(client.ip);
+
+    // ФИЛЬТР 1: Полностью скрываем устройства без MAC-адреса, если для них нет кастомного имени
+    if (!normMac && !hasCustomName) {
+      continue;
+    }
+
+    // ФИЛЬТР 2: Скрываем внешних соседей провайдера (если они не в хотспоте роутера, не имеют имени и IP не приватный локальный)
+    if (!isInHotspot && !hasCustomName && !isLocal) {
+      continue;
+    }
+
+    // ФИЛЬТР 3: Скрываем link-local IPv6 адреса самого роутера (fe80::) если нет кастомного имени
+    if (client.ip.toLowerCase().startsWith('fe80:') && !isInHotspot && !hasCustomName) {
+      continue;
+    }
+
     const speed = currentSpeeds.get(client.ip);
     if (speed) {
       client.downSpeed = speed.downSpeed;
