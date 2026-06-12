@@ -1874,8 +1874,13 @@ function renderClientsTable() {
     const tdVpnTraffic = document.createElement('td');
     tdVpnTraffic.className = 'client-traffic-text';
     const vpnTotal = c.vpnDownload + c.vpnUpload;
-    if (vpnTotal > 0) {
-      tdVpnTraffic.innerHTML = `<span>${formatBytes(vpnTotal)}</span><br><span style="font-size:0.75rem;opacity:0.7;">↓ ${formatBytes(c.vpnDownload)} / ↑ ${formatBytes(c.vpnUpload)}</span>`;
+    const vpnTotalAll = c.vpnDownloadTotal + c.vpnUploadTotal;
+    if (vpnTotalAll > 0) {
+      tdVpnTraffic.innerHTML = `
+        <span title="Трафик за текущий месяц" style="font-weight: 500;">${formatBytes(vpnTotal)} <span style="font-size:0.7rem; opacity:0.6; font-weight:normal;">(мес)</span></span><br>
+        <span title="Трафик за всё время" style="font-size:0.75rem; opacity:0.75;">${formatBytes(vpnTotalAll)} <span style="font-size:0.7rem; opacity:0.6;">(всего)</span></span><br>
+        <span style="font-size:0.72rem; opacity:0.6;">↓ ${formatBytes(c.vpnDownload)} / ↑ ${formatBytes(c.vpnUpload)}</span>
+      `;
     } else {
       tdVpnTraffic.textContent = '—';
     }
@@ -1884,8 +1889,13 @@ function renderClientsTable() {
     const tdDirectTraffic = document.createElement('td');
     tdDirectTraffic.className = 'client-traffic-text';
     const directTotal = c.directDownload + c.directUpload;
-    if (directTotal > 0) {
-      tdDirectTraffic.innerHTML = `<span>${formatBytes(directTotal)}</span><br><span style="font-size:0.75rem;opacity:0.7;">↓ ${formatBytes(c.directDownload)} / ↑ ${formatBytes(c.directUpload)}</span>`;
+    const directTotalAll = c.directDownloadTotal + c.directUploadTotal;
+    if (directTotalAll > 0) {
+      tdDirectTraffic.innerHTML = `
+        <span title="Трафик за текущий месяц" style="font-weight: 500;">${formatBytes(directTotal)} <span style="font-size:0.7rem; opacity:0.6; font-weight:normal;">(мес)</span></span><br>
+        <span title="Трафик за всё время" style="font-size:0.75rem; opacity:0.75;">${formatBytes(directTotalAll)} <span style="font-size:0.7rem; opacity:0.6;">(всего)</span></span><br>
+        <span style="font-size:0.72rem; opacity:0.6;">↓ ${formatBytes(c.directDownload)} / ↑ ${formatBytes(c.directUpload)}</span>
+      `;
     } else {
       tdDirectTraffic.textContent = '—';
     }

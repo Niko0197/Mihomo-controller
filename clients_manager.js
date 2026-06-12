@@ -44,6 +44,172 @@ function saveDb() {
   }
 }
 
+// --- База данных накопленного трафика ---
+const trafficDbPath = path.join(__dirname, 'traffic_db.json');
+let trafficDb = { lastUpdated: new Date().toISOString(), clients: {} };
+
+try {
+  if (fs.existsSync(trafficDbPath)) {
+    trafficDb = JSON.parse(fs.readFileSync(trafficDbPath, 'utf8'));
+    if (!trafficDb.clients) {
+      trafficDb.clients = {};
+    }
+  } else {
+    fs.writeFileSync(trafficDbPath, JSON.stringify(trafficDb, null, 2), 'utf8');
+  }
+} catch (e) {
+  console.error('Ошибка загрузки базы данных трафика:', e.message);
+}
+
+// Временное хранилище последнего сохраненного состояния cumulativeTraffic
+const lastSavedTraffic = new Map();
+
+function getYearMonthString() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}`;
+}
+
+function saveTrafficDbSync() {
+  try {
+    const monthKey = getYearMonthString();
+    let updated = false;
+
+    for (const [ip, current] of cumulativeTraffic.entries()) {
+      const last = lastSavedTraffic.get(ip) || { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+      
+      const dVpnDn = Math.max(0, current.vpnDownload - last.vpnDownload);
+      const dVpnUp = Math.max(0, current.vpnUpload - last.vpnUpload);
+      const dDirDn = Math.max(0, current.directDownload - last.directDownload);
+      const dDirUp = Math.max(0, current.directUpload - last.directUpload);
+
+      if (dVpnDn > 0 || dVpnUp > 0 || dDirDn > 0 || dDirUp > 0) {
+        let mac = ipToMacCache.get(ip);
+        if (!mac) {
+          try {
+            const hosts = getHotspotHosts();
+            const found = hosts.find(h => h.ip === ip);
+            if (found && found.mac) {
+              mac = found.mac.toUpperCase();
+              ipToMacCache.set(ip, mac);
+            }
+          } catch (e) {}
+        }
+        
+        const key = mac ? mac.toUpperCase() : ip;
+        
+        if (!trafficDb.clients[key]) {
+          trafficDb.clients[key] = { monthly: {}, total: { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 } };
+        }
+        const clientEntry = trafficDb.clients[key];
+        if (!clientEntry.monthly) clientEntry.monthly = {};
+        if (!clientEntry.total) clientEntry.total = { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+        
+        if (!clientEntry.monthly[monthKey]) {
+          clientEntry.monthly[monthKey] = { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+        }
+        
+        const m = clientEntry.monthly[monthKey];
+        m.vpnDownload += dVpnDn;
+        m.vpnUpload += dVpnUp;
+        m.directDownload += dDirDn;
+        m.directUpload += dDirUp;
+
+        const t = clientEntry.total;
+        t.vpnDownload += dVpnDn;
+        t.vpnUpload += dVpnUp;
+        t.directDownload += dDirDn;
+        t.directUpload += dDirUp;
+
+        lastSavedTraffic.set(ip, {
+          vpnDownload: current.vpnDownload,
+          vpnUpload: current.vpnUpload,
+          directDownload: current.directDownload,
+          directUpload: current.directUpload
+        });
+        
+        updated = true;
+      }
+    }
+
+    trafficDb.lastUpdated = new Date().toISOString();
+    fs.writeFileSync(trafficDbPath, JSON.stringify(trafficDb, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Ошибка сохранения базы данных трафика (sync):', err.message);
+  }
+}
+
+async function saveTrafficDb() {
+  try {
+    const monthKey = getYearMonthString();
+    let updated = false;
+
+    for (const [ip, current] of cumulativeTraffic.entries()) {
+      const last = lastSavedTraffic.get(ip) || { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+      
+      const dVpnDn = Math.max(0, current.vpnDownload - last.vpnDownload);
+      const dVpnUp = Math.max(0, current.vpnUpload - last.vpnUpload);
+      const dDirDn = Math.max(0, current.directDownload - last.directDownload);
+      const dDirUp = Math.max(0, current.directUpload - last.directUpload);
+
+      if (dVpnDn > 0 || dVpnUp > 0 || dDirDn > 0 || dDirUp > 0) {
+        let mac = ipToMacCache.get(ip);
+        if (!mac) {
+          try {
+            const hosts = getHotspotHosts();
+            const found = hosts.find(h => h.ip === ip);
+            if (found && found.mac) {
+              mac = found.mac.toUpperCase();
+              ipToMacCache.set(ip, mac);
+            }
+          } catch (e) {}
+        }
+        
+        const key = mac ? mac.toUpperCase() : ip;
+        
+        if (!trafficDb.clients[key]) {
+          trafficDb.clients[key] = { monthly: {}, total: { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 } };
+        }
+        const clientEntry = trafficDb.clients[key];
+        if (!clientEntry.monthly) clientEntry.monthly = {};
+        if (!clientEntry.total) clientEntry.total = { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+        
+        if (!clientEntry.monthly[monthKey]) {
+          clientEntry.monthly[monthKey] = { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+        }
+        
+        const m = clientEntry.monthly[monthKey];
+        m.vpnDownload += dVpnDn;
+        m.vpnUpload += dVpnUp;
+        m.directDownload += dDirDn;
+        m.directUpload += dDirUp;
+
+        const t = clientEntry.total;
+        t.vpnDownload += dVpnDn;
+        t.vpnUpload += dVpnUp;
+        t.directDownload += dDirDn;
+        t.directUpload += dDirUp;
+
+        lastSavedTraffic.set(ip, {
+          vpnDownload: current.vpnDownload,
+          vpnUpload: current.vpnUpload,
+          directDownload: current.directDownload,
+          directUpload: current.directUpload
+        });
+        
+        updated = true;
+      }
+    }
+
+    trafficDb.lastUpdated = new Date().toISOString();
+    await fs.promises.writeFile(trafficDbPath, JSON.stringify(trafficDb, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Ошибка сохранения базы данных трафика:', err.message);
+  }
+}
+
+
 // Вспомогательные функции для работы со структурированной БД клиентов (совместимой со строками)
 function getClientData(key) {
   const entry = clientsDb[key];
@@ -690,7 +856,11 @@ function getClientsList() {
       vpnDownload: 0,
       vpnUpload: 0,
       directDownload: 0,
-      directUpload: 0
+      directUpload: 0,
+      vpnDownloadTotal: 0,
+      vpnUploadTotal: 0,
+      directDownloadTotal: 0,
+      directUploadTotal: 0
     };
   }
 
@@ -791,14 +961,6 @@ function getClientsList() {
       client.active = true;
     }
 
-    const traffic = cumulativeTraffic.get(client.ip);
-    if (traffic) {
-      client.vpnDownload = traffic.vpnDownload;
-      client.vpnUpload = traffic.vpnUpload;
-      client.directDownload = traffic.directDownload;
-      client.directUpload = traffic.directUpload;
-    }
-
     list.push(client);
   }
 
@@ -841,10 +1003,6 @@ function getClientsList() {
         altIps.push(other.ip);
         mainClient.downSpeed += other.downSpeed;
         mainClient.upSpeed += other.upSpeed;
-        mainClient.vpnDownload += other.vpnDownload;
-        mainClient.vpnUpload += other.vpnUpload;
-        mainClient.directDownload += other.directDownload;
-        mainClient.directUpload += other.directUpload;
         if (other.active) {
           mainClient.active = true;
         }
@@ -856,6 +1014,51 @@ function getClientsList() {
     }
 
     mergedList.push(mainClient);
+  }
+
+  // --- Наполнение трафиком из базы данных и несохраненных дельт ---
+  const monthKey = getYearMonthString();
+  for (const client of mergedList) {
+    const key = client.mac ? client.mac.toUpperCase() : client.ip;
+    const dbEntry = trafficDb.clients[key];
+    
+    const dbVpnDownload = dbEntry?.monthly?.[monthKey]?.vpnDownload || 0;
+    const dbVpnUpload = dbEntry?.monthly?.[monthKey]?.vpnUpload || 0;
+    const dbDirectDownload = dbEntry?.monthly?.[monthKey]?.directDownload || 0;
+    const dbDirectUpload = dbEntry?.monthly?.[monthKey]?.directUpload || 0;
+
+    const dbVpnDownloadTotal = dbEntry?.total?.vpnDownload || 0;
+    const dbVpnUploadTotal = dbEntry?.total?.vpnUpload || 0;
+    const dbDirectDownloadTotal = dbEntry?.total?.directDownload || 0;
+    const dbDirectUploadTotal = dbEntry?.total?.directUpload || 0;
+
+    // Считаем несохраненные дельты по всем IP-адресам этого клиента
+    const ips = [client.ip, ...(client.altIps || [])];
+    let unsavedVpnDownload = 0;
+    let unsavedVpnUpload = 0;
+    let unsavedDirectDownload = 0;
+    let unsavedDirectUpload = 0;
+
+    for (const ip of ips) {
+      const current = cumulativeTraffic.get(ip);
+      if (current) {
+        const last = lastSavedTraffic.get(ip) || { vpnDownload: 0, vpnUpload: 0, directDownload: 0, directUpload: 0 };
+        unsavedVpnDownload += Math.max(0, current.vpnDownload - last.vpnDownload);
+        unsavedVpnUpload += Math.max(0, current.vpnUpload - last.vpnUpload);
+        unsavedDirectDownload += Math.max(0, current.directDownload - last.directDownload);
+        unsavedDirectUpload += Math.max(0, current.directUpload - last.directUpload);
+      }
+    }
+
+    client.vpnDownload = dbVpnDownload + unsavedVpnDownload;
+    client.vpnUpload = dbVpnUpload + unsavedVpnUpload;
+    client.directDownload = dbDirectDownload + unsavedDirectDownload;
+    client.directUpload = dbDirectUpload + unsavedDirectUpload;
+
+    client.vpnDownloadTotal = dbVpnDownloadTotal + unsavedVpnDownload;
+    client.vpnUploadTotal = dbVpnUploadTotal + unsavedVpnUpload;
+    client.directDownloadTotal = dbDirectDownloadTotal + unsavedDirectDownload;
+    client.directUploadTotal = dbDirectUploadTotal + unsavedDirectUpload;
   }
 
   // Сортировка: сначала активные устройства, затем IPv4, затем IPv6
@@ -942,10 +1145,31 @@ async function disableVpnForAllClients() {
   return true;
 }
 
+// Периодическое сохранение БД трафика каждые 5 минут
+setInterval(saveTrafficDb, 5 * 60 * 1000);
+
+// Обработчики завершения процесса для сохранения перед выходом
+let isSavingOnExit = false;
+function handleExitSave(signal) {
+  if (isSavingOnExit) return;
+  isSavingOnExit = true;
+  console.log(`Получен сигнал ${signal}. Сохраняем БД трафика...`);
+  saveTrafficDbSync();
+  process.exit(0);
+}
+
+process.on('SIGINT', () => handleExitSave('SIGINT'));
+process.on('SIGTERM', () => handleExitSave('SIGTERM'));
+process.on('exit', () => {
+  saveTrafficDbSync();
+});
+
 module.exports = {
   getClientsList,
   toggleClientVpn,
   renameClient,
   setClientGroupPreference,
-  disableVpnForAllClients
+  disableVpnForAllClients,
+  saveTrafficDb,
+  saveTrafficDbSync
 };

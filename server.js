@@ -1454,6 +1454,14 @@ function handleServerRestart(req, res) {
     res.end(JSON.stringify({ success: true, message: 'Сервер перезапускается...' }));
     
     setTimeout(() => {
+      try {
+        if (clientsManager && typeof clientsManager.saveTrafficDbSync === 'function') {
+          clientsManager.saveTrafficDbSync();
+        }
+      } catch (e) {
+        console.error('Ошибка сохранения трафика перед перезапуском:', e.message);
+      }
+      
       const { spawn } = require('child_process');
       const child = spawn('sh', ['-c', 'sleep 1 && /opt/etc/init.d/S99vpn-updater-web restart'], {
         detached: true,
