@@ -1213,7 +1213,7 @@ function renderProxyGroups(proxiesData) {
       </div>
       <div class="pgc-header-right">
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
-        <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
+        <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
     `;
 
@@ -1223,11 +1223,37 @@ function renderProxyGroups(proxiesData) {
       if (e.target.closest('.pgc-node-btn') || e.target.closest('.pgc-dot') || e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
-      const nowCollapsed = card.classList.toggle('pgc-collapsed');
-      localStorage.setItem('pgc-collapsed-' + group.name, nowCollapsed ? 'true' : 'false');
+      const nodesPanel = card.querySelector('.pgc-nodes-panel');
       const arrow = header.querySelector('.pgc-toggle-arrow');
-      if (arrow) {
-        arrow.textContent = nowCollapsed ? '▸' : '▾';
+      const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
+      
+      if (isCurrentlyCollapsed) {
+        card.classList.remove('pgc-collapsed');
+        if (arrow) arrow.classList.add('rotated');
+        if (nodesPanel) {
+          const height = nodesPanel.scrollHeight;
+          nodesPanel.style.maxHeight = height + 'px';
+          nodesPanel.style.opacity = '1';
+          const onTransitionEnd = (evt) => {
+            if (evt.propertyName === 'max-height') {
+              nodesPanel.style.maxHeight = 'none';
+              nodesPanel.removeEventListener('transitionend', onTransitionEnd);
+            }
+          };
+          nodesPanel.addEventListener('transitionend', onTransitionEnd);
+        }
+        localStorage.setItem('pgc-collapsed-' + group.name, 'false');
+      } else {
+        if (nodesPanel) {
+          const height = nodesPanel.scrollHeight;
+          nodesPanel.style.maxHeight = height + 'px';
+          nodesPanel.offsetHeight; // force reflow
+          nodesPanel.style.maxHeight = '0px';
+          nodesPanel.style.opacity = '0';
+        }
+        if (arrow) arrow.classList.remove('rotated');
+        card.classList.add('pgc-collapsed');
+        localStorage.setItem('pgc-collapsed-' + group.name, 'true');
       }
     });
 
@@ -1276,10 +1302,21 @@ function renderProxyGroups(proxiesData) {
 
     // --- Node buttons panel (for Selector groups) ---
     let nodesPanel = null;
-    if (isSelector && totalNodes <= 30) {
+    if (isSelector) {
       nodesPanel = document.createElement('div');
-      nodesPanel.className = 'pgc-nodes-panel';
-      nodesPanel.style.display = 'flex'; // Always visible when card is expanded
+      if (totalNodes >= 9) {
+        nodesPanel.className = 'pgc-nodes-panel grid-3-columns';
+      } else {
+        nodesPanel.className = 'pgc-nodes-panel';
+      }
+      
+      if (isCollapsed) {
+        nodesPanel.style.maxHeight = '0px';
+        nodesPanel.style.opacity = '0';
+      } else {
+        nodesPanel.style.maxHeight = 'none';
+        nodesPanel.style.opacity = '1';
+      }
 
       group.all.forEach(nodeName => {
         const np = proxies[nodeName];
@@ -1390,7 +1427,7 @@ function renderProxyProviders(providersData, proxiesData) {
         <span class="pgc-count-badge">${total}</span>
         <button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${provider.name.replace(/'/g, "\\'")}')">🔄</button>
         <button class="pgc-hc-btn pgc-hc-bolt" title="Healthcheck" onclick="event.stopPropagation();healthcheckProvider('${provider.name.replace(/'/g, "\\'")}')">⚡</button>
-        <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
+        <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
     `;
 
@@ -1399,11 +1436,37 @@ function renderProxyProviders(providersData, proxiesData) {
       if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
-      const nowCollapsed = card.classList.toggle('pgc-collapsed');
-      localStorage.setItem('pgc-collapsed-' + provider.name, nowCollapsed ? 'true' : 'false');
+      const pgcBody = card.querySelector('.pgc-body');
       const arrow = header.querySelector('.pgc-toggle-arrow');
-      if (arrow) {
-        arrow.textContent = nowCollapsed ? '▸' : '▾';
+      const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
+      
+      if (isCurrentlyCollapsed) {
+        card.classList.remove('pgc-collapsed');
+        if (arrow) arrow.classList.add('rotated');
+        if (pgcBody) {
+          const height = pgcBody.scrollHeight;
+          pgcBody.style.maxHeight = height + 'px';
+          pgcBody.style.opacity = '1';
+          const onTransitionEnd = (evt) => {
+            if (evt.propertyName === 'max-height') {
+              pgcBody.style.maxHeight = 'none';
+              pgcBody.removeEventListener('transitionend', onTransitionEnd);
+            }
+          };
+          pgcBody.addEventListener('transitionend', onTransitionEnd);
+        }
+        localStorage.setItem('pgc-collapsed-' + provider.name, 'false');
+      } else {
+        if (pgcBody) {
+          const height = pgcBody.scrollHeight;
+          pgcBody.style.maxHeight = height + 'px';
+          pgcBody.offsetHeight; // force reflow
+          pgcBody.style.maxHeight = '0px';
+          pgcBody.style.opacity = '0';
+        }
+        if (arrow) arrow.classList.remove('rotated');
+        card.classList.add('pgc-collapsed');
+        localStorage.setItem('pgc-collapsed-' + provider.name, 'true');
       }
     });
 
@@ -1479,6 +1542,13 @@ function renderProxyProviders(providersData, proxiesData) {
 
     const body = document.createElement('div');
     body.className = 'pgc-body';
+    if (isCollapsed) {
+      body.style.maxHeight = '0px';
+      body.style.opacity = '0';
+    } else {
+      body.style.maxHeight = 'none';
+      body.style.opacity = '1';
+    }
     body.appendChild(info);
     body.appendChild(subDiv);
     body.appendChild(dotsRow);
