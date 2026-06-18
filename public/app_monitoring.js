@@ -1828,10 +1828,6 @@ function setupSystemMonitorToggle() {
   }
   
   card.addEventListener('click', (e) => {
-    // Avoid toggling the accordion when clicking inside the body (e.g. interacting with chart)
-    if (body.contains(e.target)) {
-      return;
-    }
     
     const isCurrentlyExpanded = body.classList.contains('expanded');
     if (!isCurrentlyExpanded) {
