@@ -1334,6 +1334,7 @@ function renderProxyGroups(proxiesData) {
 
         const btn = document.createElement('button');
         btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
+        btn.setAttribute('data-tooltip', nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A'));
 
         btn.innerHTML = `
           <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
@@ -1522,6 +1523,7 @@ function renderProxyProviders(providersData, proxiesData) {
       const d = getLastDelay(p);
       const nodeDiv = document.createElement('div');
       nodeDiv.className = 'pgc-prov-node';
+      nodeDiv.setAttribute('data-tooltip', p.name + ': ' + (d > 0 ? d + 'ms' : 'N/A') + ' (' + p.type + ')');
       nodeDiv.innerHTML = `
         <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
         <span class="pgc-nb-name">${p.name}</span>
