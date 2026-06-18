@@ -110,12 +110,15 @@ function getSystemStats() {
     console.error('Ошибка чтения температуры:', err.message);
   }
 
+  const memUsage = process.memoryUsage();
   return {
     cpu: currentCpuLoad,
     ramUsedPercent,
     ramUsedMb,
     ramTotalMb,
-    temp
+    temp,
+    controllerRamMb: Math.round(memUsage.rss / 1024 / 1024),
+    controllerHeapUsedMb: Math.round(memUsage.heapUsed / 1024 / 1024)
   };
 }
 

@@ -1529,6 +1529,420 @@ async function handleGetXkeenProviderHealth(req, res, name) {
   }
 }
 
+// GET /api/config/routing-groups
+function handleGetRoutingGroups(req, res) {
+  try {
+    const groups = getAllGroupsFromConfig();
+    const targets = Array.from(new Set(['DIRECT', 'REJECT', ...groups]));
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, targets }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// Helper to parse dynamic rules from YAML text
+function parseDynamicRules(yamlText) {
+  const lines = yamlText.split(/\r?\n/);
+  let inBlock = false;
+  const rules = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (line === '# --- DYNAMIC RULES ---') {
+      inBlock = true;
+      continue;
+    }
+    if (line === '# --- END DYNAMIC RULES ---') {
+      inBlock = false;
+      continue;
+    }
+    if (inBlock) {
+      if (line.startsWith('-')) {
+        const rulePart = line.substring(1).trim();
+        const parts = rulePart.split(',').map(p => p.trim());
+        if (parts.length >= 3) {
+          const type = parts[0];
+          const value = parts[1];
+          const target = parts[2];
+          const noResolve = parts.includes('no-resolve');
+          rules.push({ type, value, target, noResolve });
+        }
+      }
+    }
+  }
+  return rules;
+}
+
+// Helper to update dynamic rules in YAML text
+function updateDynamicRulesInYaml(yamlText, newRules) {
+  const lines = yamlText.split(/\r?\n/);
+  const startIdx = lines.findIndex(line => line.trim() === '# --- DYNAMIC RULES ---');
+  const endIdx = lines.findIndex(line => line.trim() === '# --- END DYNAMIC RULES ---');
+  
+  const ruleLines = [
+    '  # --- DYNAMIC RULES ---',
+    ...newRules.map(r => {
+      let lineStr = `  - ${r.type},${r.value},${r.target}`;
+      if (r.noResolve) {
+        lineStr += ',no-resolve';
+      }
+      return lineStr;
+    }),
+    '  # --- END DYNAMIC RULES ---'
+  ];
+
+  if (startIdx !== -1 && endIdx !== -1 && startIdx <= endIdx) {
+    lines.splice(startIdx, endIdx - startIdx + 1, ...ruleLines);
+  } else {
+    const customIdx = lines.findIndex(line => line.trim() === '# --- CUSTOM USER RULES ---');
+    if (customIdx !== -1) {
+      lines.splice(customIdx + 1, 0, ...ruleLines);
+    } else {
+      const rulesIdx = lines.findIndex(line => line.trim() === 'rules:');
+      if (rulesIdx !== -1) {
+        lines.splice(rulesIdx + 1, 0, ...ruleLines);
+      } else {
+        lines.push('rules:', ...ruleLines);
+      }
+    }
+  }
+  return lines.join('\n');
+}
+
+// Helper to parse all rules in order from YAML text
+function parseAllRules(yamlText) {
+  const lines = yamlText.split(/\r?\n/);
+  const rules = [];
+  let inRulesSection = false;
+  let inDynamicBlock = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    
+    if (line === '# --- DYNAMIC RULES ---') {
+      inDynamicBlock = true;
+      continue;
+    }
+    if (line === '# --- END DYNAMIC RULES ---') {
+      inDynamicBlock = false;
+      continue;
+    }
+
+    if (line === 'rules:') {
+      inRulesSection = true;
+      continue;
+    }
+
+    if (inRulesSection) {
+      if (lines[i].length > 0 && !lines[i].startsWith(' ') && !lines[i].startsWith('-')) {
+        inRulesSection = false;
+        break;
+      }
+      
+      if (line.startsWith('-')) {
+        const rulePart = line.substring(1).trim();
+        const commentIdx = rulePart.indexOf('#');
+        let ruleClean = rulePart;
+        if (commentIdx !== -1) {
+          ruleClean = rulePart.substring(0, commentIdx).trim();
+        }
+        
+        const parts = ruleClean.split(',').map(p => p.trim());
+        
+        if (parts.length >= 2) {
+          const type = parts[0];
+          let target = parts[parts.length - 1];
+          let noResolve = false;
+          let value = '';
+          
+          if (target === 'no-resolve') {
+            noResolve = true;
+            target = parts[parts.length - 2];
+            value = parts.slice(1, parts.length - 2).join(',');
+          } else {
+            value = parts.slice(1, parts.length - 1).join(',');
+          }
+
+          rules.push({
+            type,
+            value: value || parts[1] || '',
+            target: target || parts[2] || '',
+            noResolve,
+            dynamic: inDynamicBlock,
+            lineIndex: i,
+            originalLine: lines[i]
+          });
+        }
+      }
+    }
+  }
+  return rules;
+}
+
+// GET /api/config/dynamic-rules
+function handleGetDynamicRules(req, res) {
+  try {
+    if (!fs.existsSync(configPath)) {
+      throw new Error('Config file config.yaml not found');
+    }
+    const yamlText = fs.readFileSync(configPath, 'utf8');
+    const rules = parseAllRules(yamlText);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, rules }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// POST /api/config/dynamic-rules
+function handleAddDynamicRule(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    const backupPath = configPath + '.tmp_bak';
+    try {
+      const payload = JSON.parse(body);
+      const { type, value, target } = payload;
+
+      if (!type || !value || !target) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Параметры type, value и target обязательны' }));
+        return;
+      }
+
+      let val = value.trim();
+      let noResolve = false;
+
+      if (type === 'IP-CIDR') {
+        noResolve = true;
+        if (!val.includes('/')) {
+          if (/^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$/.test(val)) {
+            val = val + '/32';
+          } else {
+            throw new Error('Некорректный IPv4-адрес или подсеть');
+          }
+        }
+      } else if (type === 'IP-CIDR6') {
+        noResolve = true;
+        if (!val.includes('/')) {
+          if (/^[0-9a-fA-F:]+$/.test(val)) {
+            val = val + '/128';
+          } else {
+            throw new Error('Некорректный IPv6-адрес или подсеть');
+          }
+        }
+      }
+
+      if (!fs.existsSync(configPath)) {
+        throw new Error('Config file config.yaml not found');
+      }
+
+      fs.copyFileSync(configPath, backupPath);
+
+      let yamlText = fs.readFileSync(configPath, 'utf8');
+      const rules = parseDynamicRules(yamlText);
+
+      const isDuplicate = rules.some(r => r.type === type && r.value.toLowerCase() === val.toLowerCase() && r.target === target);
+      if (isDuplicate) {
+        throw new Error('Такое правило уже существует');
+      }
+
+      rules.push({ type, value: val, target, noResolve });
+
+      yamlText = updateDynamicRulesInYaml(yamlText, rules);
+      fs.writeFileSync(configPath, yamlText, 'utf8');
+
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
+        try {
+          const parsedError = JSON.parse(reloadRes.data);
+          if (parsedError.message) errorMsg = parsedError.message;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      fs.copyFileSync(backupPath, configPath + '.bak');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+
+    } catch (err) {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, configPath);
+        fs.unlinkSync(backupPath);
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+// DELETE /api/config/dynamic-rules
+function handleDeleteDynamicRule(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    const backupPath = configPath + '.tmp_bak';
+    try {
+      const payload = JSON.parse(body);
+      const { type, value, target } = payload;
+
+      if (!type || !target) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Параметры type и target обязательны' }));
+        return;
+      }
+
+      if (!fs.existsSync(configPath)) {
+        throw new Error('Config file config.yaml not found');
+      }
+
+      fs.copyFileSync(configPath, backupPath);
+
+      let yamlText = fs.readFileSync(configPath, 'utf8');
+      const dynamicRules = parseDynamicRules(yamlText);
+
+      const origLength = dynamicRules.length;
+      const updatedDynamicRules = dynamicRules.filter(r => 
+        !(r.type === type && r.value === value && r.target === target)
+      );
+
+      if (updatedDynamicRules.length === origLength) {
+        throw new Error('Правило не найдено среди пользовательских правил');
+      }
+
+      yamlText = updateDynamicRulesInYaml(yamlText, updatedDynamicRules);
+      fs.writeFileSync(configPath, yamlText, 'utf8');
+
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
+        try {
+          const parsedError = JSON.parse(reloadRes.data);
+          if (parsedError.message) errorMsg = parsedError.message;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      fs.copyFileSync(backupPath, configPath + '.bak');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+
+    } catch (err) {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, configPath);
+        fs.unlinkSync(backupPath);
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+// Helper to safely modify rule target in yaml line
+function modifyRuleLine(originalLine, newTarget) {
+  const trimmed = originalLine.trim();
+  if (!trimmed.startsWith('-')) return originalLine;
+
+  const indent = originalLine.match(/^\s*/)[0];
+  const rulePart = trimmed.substring(1).trim();
+  
+  // Separate comment
+  const commentIdx = rulePart.indexOf('#');
+  let ruleClean = rulePart;
+  let commentStr = '';
+  if (commentIdx !== -1) {
+    ruleClean = rulePart.substring(0, commentIdx).trim();
+    commentStr = ' ' + rulePart.substring(commentIdx);
+  }
+
+  const parts = ruleClean.split(',').map(p => p.trim());
+  if (parts.length < 2) return originalLine;
+
+  // If last part is no-resolve
+  if (parts[parts.length - 1] === 'no-resolve') {
+    if (parts.length >= 3) {
+      parts[parts.length - 2] = newTarget;
+    }
+  } else {
+    parts[parts.length - 1] = newTarget;
+  }
+
+  return `${indent}- ${parts.join(',')}${commentStr}`;
+}
+
+// PUT /api/config/dynamic-rules
+function handleUpdateDynamicRuleTarget(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    const backupPath = configPath + '.tmp_bak';
+    try {
+      const payload = JSON.parse(body);
+      const { lineIndex, originalLine, newTarget } = payload;
+
+      if (lineIndex === undefined || originalLine === undefined || !newTarget) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Параметры lineIndex, originalLine и newTarget обязательны' }));
+        return;
+      }
+
+      if (!fs.existsSync(configPath)) {
+        throw new Error('Config file config.yaml not found');
+      }
+
+      fs.copyFileSync(configPath, backupPath);
+
+      let yamlText = fs.readFileSync(configPath, 'utf8');
+      const lines = yamlText.split(/\r?\n/);
+
+      if (lineIndex < 0 || lineIndex >= lines.length) {
+        throw new Error('Некорректный индекс строки правила');
+      }
+
+      const currentLine = lines[lineIndex];
+      if (currentLine.trim() !== originalLine.trim()) {
+        throw new Error('Конфигурация изменилась, перезагрузите страницу');
+      }
+
+      lines[lineIndex] = modifyRuleLine(currentLine, newTarget);
+      yamlText = lines.join('\n');
+      
+      fs.writeFileSync(configPath, yamlText, 'utf8');
+
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
+        try {
+          const parsedError = JSON.parse(reloadRes.data);
+          if (parsedError.message) errorMsg = parsedError.message;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      fs.copyFileSync(backupPath, configPath + '.bak');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+
+    } catch (err) {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, configPath);
+        fs.unlinkSync(backupPath);
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
 // Создаем HTTP сервер
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, 'http://' + req.headers.host);
@@ -1692,6 +2106,28 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && pathname.startsWith('/api/xkeen/providers/') && pathname.endsWith('/healthcheck')) {
     const name = pathname.substring('/api/xkeen/providers/'.length, pathname.length - '/healthcheck'.length);
     await handleGetXkeenProviderHealth(req, res, decodeURIComponent(name));
+    return;
+  }
+
+  // Динамические правила
+  if (req.method === 'GET' && pathname === '/api/config/routing-groups') {
+    handleGetRoutingGroups(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/config/dynamic-rules') {
+    handleGetDynamicRules(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/config/dynamic-rules') {
+    handleAddDynamicRule(req, res);
+    return;
+  }
+  if (req.method === 'DELETE' && pathname === '/api/config/dynamic-rules') {
+    handleDeleteDynamicRule(req, res);
+    return;
+  }
+  if (req.method === 'PUT' && pathname === '/api/config/dynamic-rules') {
+    handleUpdateDynamicRuleTarget(req, res);
     return;
   }
 

@@ -1678,7 +1678,6 @@ function startSystemStatsPolling() {
           cpuBar.style.background = 'var(--md-sys-color-primary)';
         }
       }
-      
       const ramVal = document.getElementById('sys-ram-val');
       const ramBar = document.getElementById('sys-ram-bar');
       if (ramVal) ramVal.textContent = `${stats.ramUsedPercent}% (${stats.ramUsedMb} / ${stats.ramTotalMb} МБ)`;
@@ -1728,30 +1727,54 @@ function setupSystemMonitorToggle() {
   
   const isExpanded = localStorage.getItem('system-monitor-expanded') === 'true';
   if (isExpanded) {
-    body.style.display = 'block';
-    arrow.textContent = '▾';
+    body.classList.add('expanded');
+    arrow.classList.add('rotated');
+    setTimeout(() => {
+      body.style.maxHeight = body.scrollHeight + 'px';
+      body.style.opacity = '1';
+    }, 0);
     setTimeout(() => {
       if (!sysResourceChart) initSysResourceChart();
     }, 50);
   } else {
-    body.style.display = 'none';
-    arrow.textContent = '▸';
+    body.classList.remove('expanded');
+    body.style.maxHeight = '0px';
+    body.style.opacity = '0';
+    arrow.classList.remove('rotated');
   }
   
-  card.addEventListener('click', () => {
-    const isCurrentlyHidden = body.style.display === 'none';
-    if (isCurrentlyHidden) {
-      body.style.display = 'block';
-      arrow.textContent = '▾';
+  card.addEventListener('click', (e) => {
+    // Avoid toggling the accordion when clicking inside the body (e.g. interacting with chart)
+    if (body.contains(e.target)) {
+      return;
+    }
+    
+    const isCurrentlyExpanded = body.classList.contains('expanded');
+    if (!isCurrentlyExpanded) {
+      body.classList.add('expanded');
+      arrow.classList.add('rotated');
+      
+      const height = body.scrollHeight;
+      body.style.maxHeight = height + 'px';
+      body.style.opacity = '1';
+      
       localStorage.setItem('system-monitor-expanded', 'true');
+      
       if (!sysResourceChart) {
         initSysResourceChart();
       } else {
         sysResourceChart.update('none');
       }
     } else {
-      body.style.display = 'none';
-      arrow.textContent = '▸';
+      const height = body.scrollHeight;
+      body.style.maxHeight = height + 'px';
+      body.offsetHeight; // force reflow
+      
+      body.style.maxHeight = '0px';
+      body.style.opacity = '0';
+      arrow.classList.remove('rotated');
+      body.classList.remove('expanded');
+      
       localStorage.setItem('system-monitor-expanded', 'false');
     }
   });
@@ -1774,7 +1797,7 @@ function startClientsPolling(silent = false) {
   }
   
   loadClients();
-  clientsInterval = setInterval(loadClients, silent ? 10000 : 2000);
+  clientsInterval = setInterval(loadClients, silent ? 10000 : 1000);
 }
 
 function stopClientsPolling() {

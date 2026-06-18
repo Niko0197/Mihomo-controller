@@ -156,7 +156,7 @@ header {
   padding: 32px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
   margin-bottom: 24px;
-  transition: transform 0.4s var(--m3-easing), box-shadow 0.4s var(--m3-easing), border-color 0.4s var(--m3-easing);
+  transition: transform 0.25s var(--m3-easing), box-shadow 0.25s var(--m3-easing), border-color 0.25s var(--m3-easing);
 }
 
 .card:hover {
@@ -317,7 +317,7 @@ header {
 
 .tab-content.active {
   display: block;
-  animation: tabSlideIn 0.5s var(--m3-easing) forwards;
+  animation: tabSlideIn 0.22s var(--m3-easing) forwards;
 }
 
 @keyframes tabSlideIn {
@@ -394,6 +394,11 @@ select {
   outline: none;
   cursor: pointer;
   transition: all 0.3s var(--m3-easing);
+}
+
+select option {
+  background-color: #141824;
+  color: #ffffff;
 }
 
 select:focus {
@@ -1096,7 +1101,10 @@ input[type="checkbox"]:checked::before {
   cursor: pointer;
   padding: 12px 20px;
   border-radius: 100px;
-  transition: all 0.25s var(--m3-easing);
+  transition: background 0.18s cubic-bezier(0.25, 1, 0.5, 1),
+              color 0.18s cubic-bezier(0.25, 1, 0.5, 1),
+              transform 0.18s cubic-bezier(0.25, 1, 0.5, 1),
+              box-shadow 0.18s cubic-bezier(0.25, 1, 0.5, 1);
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1829,4 +1837,151 @@ input:checked + .slider:before {
   font-weight: 600;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
 }
+
+/* --- Quick Rules Manager Styles --- */
+.rule-type-badge {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 8px;
+  font-family: var(--font-outfit);
+  font-weight: 700;
+  font-size: 0.75rem;
+  text-align: center;
+  line-height: 1.2;
+}
+
+.rule-type-badge.domain-suffix {
+  background-color: rgba(66, 133, 244, 0.15);
+  color: #8ab4f8;
+  border: 1px solid rgba(66, 133, 244, 0.3);
+}
+
+.rule-type-badge.domain {
+  background-color: rgba(0, 204, 255, 0.15);
+  color: #64d8ff;
+  border: 1px solid rgba(0, 204, 255, 0.3);
+}
+
+.rule-type-badge.domain-keyword {
+  background-color: rgba(160, 32, 240, 0.15);
+  color: #d182ff;
+  border: 1px solid rgba(160, 32, 240, 0.3);
+}
+
+.rule-type-badge.ip-cidr {
+  background-color: rgba(52, 168, 83, 0.15);
+  color: #81c995;
+  border: 1px solid rgba(52, 168, 83, 0.3);
+}
+
+.rule-type-badge.ip-cidr6 {
+  background-color: rgba(244, 180, 0, 0.15);
+  color: #fdd663;
+  border: 1px solid rgba(244, 180, 0, 0.3);
+}
+
+.target-badge {
+  display: inline-block;
+  padding: 4px 12px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: var(--font-inter);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.rule-target-select-inline {
+  display: inline-block;
+  padding: 4px 10px;
+  border-radius: 10px;
+  background-color: #141824;
+  color: var(--text);
+  font-size: 0.82rem;
+  font-family: var(--font-inter);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  cursor: pointer;
+  outline: none;
+  width: auto;
+  min-width: 130px;
+  transition: all 0.3s var(--m3-easing);
+}
+
+.rule-target-select-inline:focus {
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 2px rgba(168, 199, 250, 0.15);
+}
+
+.rule-target-select-inline option {
+  background-color: #141824;
+  color: #ffffff;
+}
+
+/* Custom Tooltip */
+.custom-tooltip {
+  position: fixed;
+  background-color: rgba(20, 24, 36, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: var(--text);
+  padding: 6px 12px;
+  border-radius: 8px;
+  font-family: var(--font-inter);
+  font-size: 0.8rem;
+  pointer-events: none;
+  z-index: 9999;
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity 0.12s var(--m3-easing), transform 0.12s var(--m3-easing);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(4px);
+  -webkit-backdrop-filter: blur(4px);
+  line-height: 1.4;
+}
+.custom-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Tactile Responsiveness Updates */
+.pgc-node-btn:active {
+  transform: scale(0.96) !important;
+}
+.pgc-hc-btn:active {
+  transform: scale(0.88) !important;
+}
+.tabs-vertical .tab-btn:active {
+  transform: scale(0.96);
+  transition: transform 0.06s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.btn-xkeen-toggle:active, .icon-btn:active {
+  transform: scale(0.92);
+  transition: transform 0.06s cubic-bezier(0.25, 1, 0.5, 1);
+}
+.rule-target-select-inline:active {
+  transform: scale(0.98);
+  transition: transform 0.06s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* --- System Monitor Accordion Transition (iOS Style) --- */
+#system-monitor-body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease;
+}
+
+#system-monitor-body.expanded {
+  opacity: 1;
+}
+
+#system-monitor-arrow {
+  display: inline-block;
+  transform-origin: center;
+  transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+#system-monitor-arrow.rotated {
+  transform: rotate(90deg);
+}
+
 

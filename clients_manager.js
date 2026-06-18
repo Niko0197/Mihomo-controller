@@ -803,7 +803,7 @@ function startTrafficTracker() {
     } catch (err) {
       // Игнорируем временные ошибки API при перезапуске Mihomo
     }
-  }, 2000);
+  }, 1000);
 }
 
 // Запуск трекера

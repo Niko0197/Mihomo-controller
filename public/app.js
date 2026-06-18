@@ -42,6 +42,8 @@ function switchTab(tabId) {
     loadSubscriptions();
   } else if (tabId === 'ping') {
     loadProxiesList();
+  } else if (tabId === 'rules') {
+    loadDynamicRulesTab();
   } else {
     loadData();
   }
@@ -1003,6 +1005,7 @@ window.onload = function() {
   });
   loadData();
   updateXkeenStatus();
+  initCustomTooltips();
   setInterval(updateXkeenStatus, 15000); // Опрос раз в 15 секунд
 };
 
@@ -1164,3 +1167,311 @@ document.getElementById('btn-xkeen-restart').onclick = async function() {
     await updateXkeenStatus();
   }
 };
+
+// --- ДИНАМИЧЕСКИЕ ПРАВИЛА ---
+let dynamicRulesList = [];
+let routingTargetsList = [];
+
+async function loadDynamicRulesTab() {
+  await loadRoutingGroups();
+  await loadDynamicRules();
+}
+
+async function loadRoutingGroups() {
+  try {
+    const res = await fetch('/api/config/routing-groups');
+    if (!res.ok) throw new Error('Ошибка при загрузке направлений');
+    const data = await res.json();
+    if (data.success) {
+      routingTargetsList = data.targets || [];
+      const select = document.getElementById('rule-target-select');
+      select.innerHTML = '';
+      routingTargetsList.forEach(t => {
+        const opt = document.createElement('option');
+        opt.value = t;
+        opt.textContent = t;
+        if (t === '🚀Auto-Best' || t === 'Auto-Best') {
+          opt.selected = true;
+        }
+        select.appendChild(opt);
+      });
+    }
+  } catch (err) {
+    showToast('Не удалось загрузить прокси-группы: ' + err.message, 'error');
+  }
+}
+
+async function loadDynamicRules() {
+  const tbody = document.getElementById('dynamic-rules-list');
+  const emptyState = document.getElementById('rules-empty-state');
+  
+  tbody.innerHTML = '<tr><td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Загрузка правил...</td></tr>';
+  emptyState.style.display = 'none';
+  tbody.parentElement.style.display = 'table';
+
+  try {
+    const res = await fetch('/api/config/dynamic-rules');
+    if (!res.ok) throw new Error('Ошибка при загрузке правил');
+    const data = await res.json();
+    
+    if (data.success) {
+      dynamicRulesList = data.rules || [];
+      renderRulesTable();
+    }
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" style="text-align: center; color: var(--md-sys-color-error); padding: 30px 0;">Ошибка: ${err.message}</td></tr>`;
+    showToast('Не удалось загрузить быстрые правила: ' + err.message, 'error');
+  }
+}
+
+function renderRulesTable() {
+  const tbody = document.getElementById('dynamic-rules-list');
+  const countText = document.getElementById('rules-count-text');
+  const emptyState = document.getElementById('rules-empty-state');
+  const searchVal = document.getElementById('rules-search-box').value.toLowerCase();
+
+  const filtered = dynamicRulesList.filter(r => 
+    r.value.toLowerCase().includes(searchVal) || 
+    r.target.toLowerCase().includes(searchVal) ||
+    r.type.toLowerCase().includes(searchVal)
+  );
+
+  const dynamicCount = filtered.filter(r => r.dynamic).length;
+  countText.textContent = `Всего: ${filtered.length} (пользовательских: ${dynamicCount})`;
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = '';
+    tbody.parentElement.style.display = 'none';
+    emptyState.style.display = 'block';
+    return;
+  }
+
+  tbody.parentElement.style.display = 'table';
+  emptyState.style.display = 'none';
+  tbody.innerHTML = '';
+
+  filtered.forEach(r => {
+    const tr = document.createElement('tr');
+    if (!r.dynamic) {
+      tr.style.opacity = '0.7';
+    }
+
+    const tdType = document.createElement('td');
+    const badge = document.createElement('span');
+    badge.className = 'rule-type-badge ' + r.type.toLowerCase();
+    badge.textContent = r.type;
+    tdType.appendChild(badge);
+
+    const tdValue = document.createElement('td');
+    tdValue.style.fontWeight = '500';
+    tdValue.style.fontFamily = 'monospace';
+    tdValue.textContent = r.value || '(Все домены / MATCH)';
+
+    const tdTarget = document.createElement('td');
+    const select = document.createElement('select');
+    select.className = 'rule-target-select-inline';
+    
+    const targetsToUse = routingTargetsList.includes(r.target) ? routingTargetsList : [r.target, ...routingTargetsList];
+    targetsToUse.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t;
+      opt.textContent = t;
+      if (t === r.target) {
+        opt.selected = true;
+      }
+      select.appendChild(opt);
+    });
+
+    select.onchange = async () => {
+      const newTarget = select.value;
+      if (newTarget !== r.target) {
+        await updateDynamicRuleTarget(r, newTarget);
+      }
+    };
+
+    tdTarget.appendChild(select);
+
+    const tdAction = document.createElement('td');
+    tdAction.style.textAlign = 'center';
+    
+    if (r.dynamic) {
+      const deleteBtn = document.createElement('button');
+      deleteBtn.className = 'btn btn-danger';
+      deleteBtn.style.padding = '4px 10px';
+      deleteBtn.style.fontSize = '0.85rem';
+      deleteBtn.innerHTML = '🗑️';
+      deleteBtn.onclick = () => deleteDynamicRule(r);
+      tdAction.appendChild(deleteBtn);
+    } else {
+      const lockSpan = document.createElement('span');
+      lockSpan.style.color = 'var(--text-muted)';
+      lockSpan.style.fontSize = '0.9rem';
+      lockSpan.title = 'Системное правило (только чтение)';
+      lockSpan.textContent = '🔒';
+      tdAction.appendChild(lockSpan);
+    }
+
+    tr.appendChild(tdType);
+    tr.appendChild(tdValue);
+    tr.appendChild(tdTarget);
+    tr.appendChild(tdAction);
+
+    tbody.appendChild(tr);
+  });
+}
+
+function filterRulesTable() {
+  renderRulesTable();
+}
+
+async function submitAddRule() {
+  const type = document.getElementById('rule-type-select').value;
+  const valueInput = document.getElementById('rule-value-input');
+  const target = document.getElementById('rule-target-select').value;
+  const value = valueInput.value.trim();
+
+  if (!value) return;
+
+  showToast('Добавление правила и обновление конфигурации...', 'info');
+
+  try {
+    const res = await fetch('/api/config/dynamic-rules', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ type, value, target })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast('Правило успешно добавлено и применено!', 'success');
+      valueInput.value = '';
+      await loadDynamicRules();
+    } else {
+      showToast('Ошибка при добавлении правила: ' + data.error, 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка сети: ' + err.message, 'error');
+  }
+}
+
+async function deleteDynamicRule(rule) {
+  if (!confirm('Вы уверены, что хотите удалить это правило?')) return;
+
+  showToast('Удаление правила и обновление конфигурации...', 'info');
+
+  try {
+    const res = await fetch('/api/config/dynamic-rules', {
+      method: 'DELETE',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ type: rule.type, value: rule.value, target: rule.target })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast('Правило успешно удалено!', 'success');
+      await loadDynamicRules();
+    } else {
+      showToast('Ошибка при удалении правила: ' + data.error, 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка сети: ' + err.message, 'error');
+  }
+}
+
+async function updateDynamicRuleTarget(rule, newTarget) {
+  showToast('Обновление направления правила...', 'info');
+  try {
+    const res = await fetch('/api/config/dynamic-rules', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        lineIndex: rule.lineIndex,
+        originalLine: rule.originalLine,
+        newTarget: newTarget
+      })
+    });
+
+    const data = await res.json();
+    if (data.success) {
+      showToast('Направление успешно обновлено!', 'success');
+      await loadDynamicRules();
+    } else {
+      showToast('Ошибка при обновлении направления: ' + data.error, 'error');
+      await loadDynamicRules();
+    }
+  } catch (err) {
+    showToast('Ошибка сети: ' + err.message, 'error');
+    await loadDynamicRules();
+  }
+}
+
+// Инициализация кастомных быстрых подсказок
+function initCustomTooltips() {
+  let tooltipEl = document.getElementById('global-custom-tooltip');
+  if (!tooltipEl) {
+    tooltipEl = document.createElement('div');
+    tooltipEl.id = 'global-custom-tooltip';
+    tooltipEl.className = 'custom-tooltip';
+    document.body.appendChild(tooltipEl);
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('.pgc-dot, [data-tooltip]');
+    if (!target) return;
+
+    let text = '';
+    if (target.hasAttribute('data-tooltip')) {
+      text = target.getAttribute('data-tooltip');
+    } else if (target.hasAttribute('title')) {
+      text = target.getAttribute('title');
+      target.setAttribute('data-tooltip', text);
+      target.removeAttribute('title');
+    }
+
+    if (!text) return;
+
+    tooltipEl.innerHTML = text;
+    tooltipEl.classList.add('visible');
+
+    const updatePosition = (event) => {
+      const x = event.clientX + 12;
+      const y = event.clientY + 12;
+      
+      const rect = tooltipEl.getBoundingClientRect();
+      let left = x;
+      let top = y;
+      
+      if (left + rect.width > window.innerWidth) {
+        left = event.clientX - rect.width - 12;
+      }
+      if (top + rect.height > window.innerHeight) {
+        top = event.clientY - rect.height - 12;
+      }
+      
+      tooltipEl.style.left = left + 'px';
+      tooltipEl.style.top = top + 'px';
+    };
+
+    updatePosition(e);
+
+    const onMouseMove = (event) => {
+      updatePosition(event);
+    };
+
+    const onMouseLeave = () => {
+      tooltipEl.classList.remove('visible');
+      target.removeEventListener('mousemove', onMouseMove);
+      target.removeEventListener('mouseleave', onMouseLeave);
+    };
+
+    target.addEventListener('mousemove', onMouseMove);
+    target.addEventListener('mouseleave', onMouseLeave);
+  });
+}
+
