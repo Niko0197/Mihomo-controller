@@ -2088,6 +2088,9 @@ function renderClientsTable() {
     
     tbody.appendChild(tr);
   });
+  if (typeof initCustomSelects === 'function') {
+    initCustomSelects();
+  }
 }
 
 async function toggleClientVpn(ip, checkboxEl) {

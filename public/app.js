@@ -140,6 +140,7 @@ function renderTable() {
   });
 
   updateApplyButtonState();
+  initCustomSelects();
 }
 
 // Кнопка применить (активация)
@@ -1006,6 +1007,7 @@ window.onload = function() {
   loadData();
   updateXkeenStatus();
   initCustomTooltips();
+  initCustomSelects();
   setInterval(updateXkeenStatus, 15000); // Опрос раз в 15 секунд
 };
 
@@ -1318,6 +1320,7 @@ function renderRulesTable() {
 
     tbody.appendChild(tr);
   });
+  initCustomSelects();
 }
 
 function filterRulesTable() {
@@ -1474,4 +1477,152 @@ function initCustomTooltips() {
     target.addEventListener('mouseleave', onMouseLeave);
   });
 }
+
+// Инициализация кастомных красивых выпадающих списков
+function convertToCustomSelect(selectEl) {
+  if (!selectEl || selectEl.style.display === 'none' || selectEl.parentElement.classList.contains('custom-select-wrapper')) {
+    return;
+  }
+
+  // Create wrapper
+  const wrapper = document.createElement('div');
+  wrapper.className = 'custom-select-wrapper';
+  if (selectEl.className) {
+    wrapper.classList.add(selectEl.className + '-container');
+  }
+
+  if (selectEl.style.width) {
+    wrapper.style.width = selectEl.style.width;
+  }
+  
+  if (selectEl.disabled) {
+    wrapper.classList.add('disabled');
+  }
+
+  // Create trigger
+  const trigger = document.createElement('div');
+  trigger.className = 'custom-select-trigger';
+  
+  // Create dropdown
+  const dropdown = document.createElement('div');
+  dropdown.className = 'custom-select-dropdown';
+
+  // Function to sync trigger text and selected option class
+  const syncSelect = () => {
+    const selectedOpt = selectEl.options[selectEl.selectedIndex];
+    trigger.textContent = selectedOpt ? selectedOpt.textContent : 'Выбрать...';
+    
+    // Update selected class in dropdown
+    const options = dropdown.querySelectorAll('.custom-select-option');
+    options.forEach((opt, idx) => {
+      if (idx === selectEl.selectedIndex) {
+        opt.classList.add('selected');
+      } else {
+        opt.classList.remove('selected');
+      }
+    });
+
+    // Sync disabled state
+    if (selectEl.disabled) {
+      wrapper.classList.add('disabled');
+    } else {
+      wrapper.classList.remove('disabled');
+    }
+  };
+
+  // Populate dropdown options
+  const rebuildOptions = () => {
+    dropdown.innerHTML = '';
+    Array.from(selectEl.options).forEach((origOpt, idx) => {
+      const opt = document.createElement('div');
+      opt.className = 'custom-select-option';
+      opt.textContent = origOpt.textContent;
+      if (idx === selectEl.selectedIndex) opt.classList.add('selected');
+      
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (selectEl.disabled) return;
+        selectEl.selectedIndex = idx;
+        
+        // Trigger original events
+        selectEl.dispatchEvent(new Event('change'));
+        
+        syncSelect();
+        wrapper.classList.remove('open');
+      });
+      dropdown.appendChild(opt);
+    });
+  };
+
+  rebuildOptions();
+
+  // Handle trigger click
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (selectEl.disabled) return;
+    
+    // Close other custom selects first
+    document.querySelectorAll('.custom-select-wrapper').forEach(w => {
+      if (w !== wrapper) w.classList.remove('open');
+    });
+    
+    wrapper.classList.toggle('open');
+    
+    // If opening, ensure the active option is scrolled into view
+    if (wrapper.classList.contains('open')) {
+      const selected = dropdown.querySelector('.custom-select-option.selected');
+      if (selected) {
+        dropdown.scrollTop = selected.offsetTop - dropdown.offsetTop - 10;
+      }
+    }
+  });
+
+  // Watch for changes on the original select (e.g. if options list changes dynamically)
+  const observer = new MutationObserver(() => {
+    rebuildOptions();
+    syncSelect();
+  });
+  observer.observe(selectEl, { childList: true, attributes: true, subtree: true });
+
+  // Watch for direct select disabled property changes
+  const checkDisabledTimer = setInterval(() => {
+    if (!document.body.contains(wrapper)) {
+      clearInterval(checkDisabledTimer);
+      return;
+    }
+    if (selectEl.disabled && !wrapper.classList.contains('disabled')) {
+      wrapper.classList.add('disabled');
+    } else if (!selectEl.disabled && wrapper.classList.contains('disabled')) {
+      wrapper.classList.remove('disabled');
+    }
+  }, 200);
+
+  // Insert elements
+  selectEl.parentNode.insertBefore(wrapper, selectEl);
+  wrapper.appendChild(selectEl); // move select inside wrapper
+  selectEl.style.display = 'none'; // hide original select
+  wrapper.appendChild(trigger);
+  wrapper.appendChild(dropdown);
+
+  // Initial sync
+  syncSelect();
+  
+  // Expose sync method on the native select
+  selectEl.syncCustomSelect = syncSelect;
+}
+
+function initCustomSelects() {
+  document.querySelectorAll('select').forEach(sel => {
+    if (!sel.classList.contains('no-custom')) {
+      convertToCustomSelect(sel);
+    }
+  });
+}
+
+// Global click listener to close dropdowns when clicking outside
+document.addEventListener('click', () => {
+  document.querySelectorAll('.custom-select-wrapper').forEach(wrapper => {
+    wrapper.classList.remove('open');
+  });
+});
 
