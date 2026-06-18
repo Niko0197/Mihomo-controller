@@ -1227,6 +1227,11 @@ function renderProxyGroups(proxiesData) {
       const arrow = header.querySelector('.pgc-toggle-arrow');
       const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
       
+      if (nodesPanel && nodesPanel._onTransitionEnd) {
+        nodesPanel.removeEventListener('transitionend', nodesPanel._onTransitionEnd);
+        nodesPanel._onTransitionEnd = null;
+      }
+      
       if (isCurrentlyCollapsed) {
         card.classList.remove('pgc-collapsed');
         if (arrow) arrow.classList.add('rotated');
@@ -1234,13 +1239,14 @@ function renderProxyGroups(proxiesData) {
           const height = nodesPanel.scrollHeight;
           nodesPanel.style.maxHeight = height + 'px';
           nodesPanel.style.opacity = '1';
-          const onTransitionEnd = (evt) => {
+          nodesPanel._onTransitionEnd = (evt) => {
             if (evt.propertyName === 'max-height') {
               nodesPanel.style.maxHeight = 'none';
-              nodesPanel.removeEventListener('transitionend', onTransitionEnd);
+              nodesPanel.removeEventListener('transitionend', nodesPanel._onTransitionEnd);
+              nodesPanel._onTransitionEnd = null;
             }
           };
-          nodesPanel.addEventListener('transitionend', onTransitionEnd);
+          nodesPanel.addEventListener('transitionend', nodesPanel._onTransitionEnd);
         }
         localStorage.setItem('pgc-collapsed-' + group.name, 'false');
       } else {
@@ -1440,6 +1446,11 @@ function renderProxyProviders(providersData, proxiesData) {
       const arrow = header.querySelector('.pgc-toggle-arrow');
       const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
       
+      if (pgcBody && pgcBody._onTransitionEnd) {
+        pgcBody.removeEventListener('transitionend', pgcBody._onTransitionEnd);
+        pgcBody._onTransitionEnd = null;
+      }
+      
       if (isCurrentlyCollapsed) {
         card.classList.remove('pgc-collapsed');
         if (arrow) arrow.classList.add('rotated');
@@ -1447,13 +1458,14 @@ function renderProxyProviders(providersData, proxiesData) {
           const height = pgcBody.scrollHeight;
           pgcBody.style.maxHeight = height + 'px';
           pgcBody.style.opacity = '1';
-          const onTransitionEnd = (evt) => {
+          pgcBody._onTransitionEnd = (evt) => {
             if (evt.propertyName === 'max-height') {
               pgcBody.style.maxHeight = 'none';
-              pgcBody.removeEventListener('transitionend', onTransitionEnd);
+              pgcBody.removeEventListener('transitionend', pgcBody._onTransitionEnd);
+              pgcBody._onTransitionEnd = null;
             }
           };
-          pgcBody.addEventListener('transitionend', onTransitionEnd);
+          pgcBody.addEventListener('transitionend', pgcBody._onTransitionEnd);
         }
         localStorage.setItem('pgc-collapsed-' + provider.name, 'false');
       } else {
