@@ -1294,68 +1294,73 @@ function renderProxyGroups(proxiesData) {
       dot.className = 'pgc-dot ' + getLatencyDotClass(d);
       dot.title = nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A');
       if (nodeName === group.now) dot.classList.add('pgc-dot-active');
+      // Dot context menu and hover pointer is available for all groups
+      dot.style.cursor = 'pointer';
+      dot.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pingProxyNode(nodeName);
+      });
       if (isSelector) {
-        dot.style.cursor = 'pointer';
         dot.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
-        dot.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          pingProxyNode(nodeName);
-        });
       }
       dotsRow.appendChild(dot);
     });
 
-    // --- Node buttons panel (for Selector groups) ---
-    let nodesPanel = null;
-    if (isSelector) {
-      nodesPanel = document.createElement('div');
-      if (totalNodes >= 9) {
-        nodesPanel.className = 'pgc-nodes-panel grid-3-columns';
-      } else {
-        nodesPanel.className = 'pgc-nodes-panel';
-      }
-      
-      if (isCollapsed) {
-        nodesPanel.style.maxHeight = '0px';
-        nodesPanel.style.opacity = '0';
-      } else {
-        nodesPanel.style.maxHeight = 'none';
-        nodesPanel.style.opacity = '1';
-      }
+    // --- Node buttons panel (for all group types) ---
+    const nodesPanel = document.createElement('div');
+    if (totalNodes >= 9) {
+      nodesPanel.className = 'pgc-nodes-panel grid-3-columns';
+    } else {
+      nodesPanel.className = 'pgc-nodes-panel';
+    }
+    
+    if (isCollapsed) {
+      nodesPanel.style.maxHeight = '0px';
+      nodesPanel.style.opacity = '0';
+    } else {
+      nodesPanel.style.maxHeight = 'none';
+      nodesPanel.style.opacity = '1';
+    }
 
-      group.all.forEach(nodeName => {
-        const np = proxies[nodeName];
-        const isActive = nodeName === group.now;
-        const isChildGroup = np && np.all && Array.isArray(np.all);
-        const childType = np ? np.type : '';
-        const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
-        const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
+    group.all.forEach(nodeName => {
+      const np = proxies[nodeName];
+      const isActive = nodeName === group.now;
+      const isChildGroup = np && np.all && Array.isArray(np.all);
+      const childType = np ? np.type : '';
+      const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
+      const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
 
-        const btn = document.createElement('button');
-        btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
-        btn.setAttribute('data-tooltip', nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A'));
+      const btn = document.createElement('button');
+      btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
+      btn.setAttribute('data-tooltip', nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A'));
 
-        btn.innerHTML = `
-          <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
-          <span class="pgc-nb-name">${nodeName}</span>
-          ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
-          ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
-          ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
-        `;
+      btn.innerHTML = `
+        <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
+        <span class="pgc-nb-name">${nodeName}</span>
+        ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
+        ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
+        ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
+      `;
 
+      if (isSelector) {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           selectProxyInGroup(group.name, nodeName);
         });
-        btn.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          pingProxyNode(nodeName);
+      } else {
+        btn.style.cursor = 'default';
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Stop propagation to prevent card collapse
         });
-        nodesPanel.appendChild(btn);
+      }
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pingProxyNode(nodeName);
       });
-    }
+      nodesPanel.appendChild(btn);
+    });
 
     const body = document.createElement('div');
     body.className = 'pgc-body';
