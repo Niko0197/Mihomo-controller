@@ -1067,6 +1067,21 @@ input[type="checkbox"]:checked::before {
   margin-bottom: 12px;
   font-size: 0.78rem;
   font-family: var(--font-outfit);
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: background 0.2s var(--m3-easing),
+              border-color 0.2s var(--m3-easing),
+              transform 0.1s var(--m3-easing);
+}
+
+.sidebar-version-info:hover {
+  background: rgba(255, 255, 255, 0.05);
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.sidebar-version-info:active {
+  transform: scale(0.96);
 }
 
 .version-label {

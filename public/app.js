@@ -1039,6 +1039,27 @@ async function loadPanelVersion() {
   }
 }
 
+// Добавляем интерактивность и проверку обновлений при клике на версию
+document.addEventListener('DOMContentLoaded', () => {
+  const versionPanel = document.getElementById('panel-version-info');
+  if (versionPanel) {
+    versionPanel.addEventListener('click', async () => {
+      showToast('🔄 Проверка обновлений веб-панели...');
+      
+      try {
+        await loadPanelVersion();
+        setTimeout(() => {
+          const versionVal = document.getElementById('panel-version-val').textContent;
+          const branchVal = document.getElementById('panel-branch-val').textContent;
+          showToast(`✅ Версия актуальна: ${versionVal} (${branchVal})`, 'success');
+        }, 600);
+      } catch (err) {
+        showToast('Ошибка при проверке версии', 'error');
+      }
+    });
+  }
+});
+
 // === Управление XKeen (запуск, остановка, рестарт) ===
 window.isXkeenRunning = false;
 
