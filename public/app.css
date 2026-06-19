@@ -231,6 +231,7 @@ header {
   align-items: center;
   justify-content: center;
   white-space: nowrap;
+  flex-shrink: 0;
   gap: 10px;
   position: relative;
   overflow: hidden;
