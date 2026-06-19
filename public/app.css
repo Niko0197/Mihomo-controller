@@ -2563,6 +2563,14 @@ input:checked + .slider:before {
   line-height: 1.2;
 }
 
+.version-changes-list li.version-author-line {
+  padding-left: 0;
+}
+
+.version-changes-list li.version-author-line::before {
+  content: none;
+}
+
 .version-item-card.current .version-changes-list li::before {
   color: var(--success);
 }

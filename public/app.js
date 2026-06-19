@@ -1778,6 +1778,13 @@ async function loadVersionsList() {
         
       const currentBadgeHtml = commit.current ? '<span class="version-current-badge">Текущая</span>' : '';
 
+      let changesHtml = '';
+      if (Array.isArray(commit.changes) && commit.changes.length > 0) {
+        changesHtml = commit.changes.map(ch => `<li>${ch}</li>`).join('');
+      } else {
+        changesHtml = `<li>${commit.message}</li>`;
+      }
+
       card.innerHTML = `
         <div class="version-item-header">
           <div class="version-item-info">
@@ -1795,8 +1802,8 @@ async function loadVersionsList() {
         <div class="version-item-body">
           <div class="version-changes-title">Изменения:</div>
           <ul class="version-changes-list">
-            <li>${commit.message}</li>
-            <li style="color: rgba(255,255,255,0.4); font-size: 0.8rem; margin-top: 10px;">Автор: ${commit.author} | SHA: ${commit.sha.substring(0, 8)}</li>
+            ${changesHtml}
+            <li class="version-author-line" style="color: rgba(255,255,255,0.4); font-size: 0.8rem; margin-top: 10px;">Автор: ${commit.author} | SHA: ${commit.sha.substring(0, 8)}</li>
           </ul>
         </div>
       `;

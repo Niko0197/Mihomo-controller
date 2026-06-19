@@ -1531,6 +1531,17 @@ function parseAndSendCommits(logStdout, branch, res) {
       currentHeadSha = execSync('git rev-parse HEAD', { cwd: __dirname }).toString().trim();
     } catch (e) {}
 
+    // Хелпер для определения стабильной версии релиза
+    const isStableVersion = (verStr) => {
+      const clean = verStr.startsWith('v') ? verStr.substring(1) : verStr;
+      const parts = clean.split('.');
+      if (parts.length === 3) {
+        const patch = parseInt(parts[2], 10);
+        return patch === 0;
+      }
+      return clean === '1.0.0';
+    };
+
     for (const line of lines) {
       const parts = line.split('|');
       if (parts.length < 4) continue;
@@ -1562,6 +1573,42 @@ function parseAndSendCommits(logStdout, branch, res) {
         message,
         current: sha === currentHeadSha
       });
+    }
+
+    // Заполнение списков изменений для каждого коммита
+    for (let i = 0; i < commits.length; i++) {
+      const c = commits[i];
+      const isStable = isStableVersion(c.version);
+      
+      if (isStable) {
+        // Находим предыдущий стабильный релиз
+        let prevReleaseSha = '';
+        for (let j = i + 1; j < commits.length; j++) {
+          if (isStableVersion(commits[j].version)) {
+            prevReleaseSha = commits[j].sha;
+            break;
+          }
+        }
+        
+        let changes = [];
+        try {
+          let gitCmd = '';
+          if (prevReleaseSha) {
+            gitCmd = `git log ${prevReleaseSha}..${c.sha} --format="%s"`;
+          } else {
+            // Для самого первого релиза берем 10 предыдущих коммитов
+            gitCmd = `git log ${c.sha} -n 10 --format="%s"`;
+          }
+          const changesStr = execSync(gitCmd, { cwd: __dirname }).toString().trim();
+          changes = changesStr.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+        } catch (e) {
+          changes = [c.message];
+        }
+        c.changes = changes;
+      } else {
+        // Dev-коммиты просто показывают свое сообщение
+        c.changes = [c.message];
+      }
     }
     
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
