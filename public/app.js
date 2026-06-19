@@ -1446,16 +1446,16 @@ function initCustomTooltips() {
   }
 
   document.addEventListener('mouseover', (e) => {
-    const target = e.target.closest('.pgc-dot, [data-tooltip]');
+    const target = e.target.closest('.pgc-dot, [data-tooltip], [title]');
     if (!target) return;
 
     let text = '';
-    if (target.hasAttribute('data-tooltip')) {
-      text = target.getAttribute('data-tooltip');
-    } else if (target.hasAttribute('title')) {
+    if (target.hasAttribute('title')) {
       text = target.getAttribute('title');
       target.setAttribute('data-tooltip', text);
       target.removeAttribute('title');
+    } else if (target.hasAttribute('data-tooltip')) {
+      text = target.getAttribute('data-tooltip');
     }
 
     if (!text) return;
