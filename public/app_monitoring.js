@@ -1840,8 +1840,7 @@ function setupSystemMonitorToggle() {
     arrow.classList.remove('rotated');
   }
   
-  card.addEventListener('click', (e) => {
-    
+  const toggleMonitor = () => {
     const isCurrentlyExpanded = body.classList.contains('expanded');
     if (!isCurrentlyExpanded) {
       body.classList.add('expanded');
@@ -1870,6 +1869,15 @@ function setupSystemMonitorToggle() {
       
       localStorage.setItem('system-monitor-expanded', 'false');
     }
+  };
+
+  card.addEventListener('click', (e) => {
+    toggleMonitor();
+  });
+
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    toggleMonitor();
   });
 }
 
