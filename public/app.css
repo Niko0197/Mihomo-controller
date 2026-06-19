@@ -2443,6 +2443,19 @@ input:checked + .slider:before {
   font-family: var(--font-outfit);
 }
 
+.version-dev-badge {
+  background: var(--warning-container);
+  color: var(--warning);
+  border: 1px solid rgba(255, 183, 77, 0.25);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: var(--font-outfit);
+}
+
 .version-item-meta {
   font-size: 0.8rem;
   color: var(--text-muted);

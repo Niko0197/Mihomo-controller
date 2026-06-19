@@ -1740,14 +1740,17 @@ async function loadVersionsList() {
       }
       card.dataset.sha = commit.sha;
 
-      const badgeHtml = commit.current ? '<span class="version-current-badge">Текущая</span>' : '';
+      const isDev = isDevVersion(commit.version);
+      const devBadgeHtml = isDev ? '<span class="version-dev-badge">Dev</span>' : '';
+      const currentBadgeHtml = commit.current ? '<span class="version-current-badge">Текущая</span>' : '';
 
       card.innerHTML = `
         <div class="version-item-header">
           <div class="version-item-info">
             <div class="version-item-title-row">
               <span class="version-item-title">${commit.version}</span>
-              ${badgeHtml}
+              ${devBadgeHtml}
+              ${currentBadgeHtml}
             </div>
             <div class="version-item-meta">${commit.date}</div>
           </div>
@@ -1880,5 +1883,26 @@ async function triggerUpdateRestart(customMessage) {
   setTimeout(() => {
     window.location.reload();
   }, 5000);
+}
+
+function isDevVersion(versionStr) {
+  // Clean version string (remove 'v' prefix if present)
+  const clean = versionStr.startsWith('v') ? versionStr.substring(1) : versionStr;
+  
+  // Check if it matches semver pattern X.Y.Z
+  const parts = clean.split('.');
+  if (parts.length === 3) {
+    const major = parseInt(parts[0], 10);
+    const minor = parseInt(parts[1], 10);
+    const patch = parseInt(parts[2], 10);
+    if (!isNaN(major) && !isNaN(minor) && !isNaN(patch)) {
+      return patch !== 0; // Dev version if patch is not 0
+    }
+  }
+  
+  // If it's a short SHA or doesn't follow X.Y.0 pattern, treat as dev version unless it is exactly 1.0.0
+  if (clean === '1.0.0') return false;
+  
+  return true;
 }
 
