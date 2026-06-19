@@ -1966,6 +1966,10 @@ const server = http.createServer(async (req, res) => {
       serveStaticFile(res, 'app_monitoring.js', 'application/javascript; charset=utf-8');
       return;
     }
+    if (pathname === '/version.json') {
+      serveStaticFile(res, 'version.json', 'application/json; charset=utf-8');
+      return;
+    }
   }
 
   // Маршрутизация API

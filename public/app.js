@@ -1005,11 +1005,39 @@ window.onload = function() {
     indentUnit: 2
   });
   loadData();
+  loadPanelVersion();
   updateXkeenStatus();
   initCustomTooltips();
   initCustomSelects();
   setInterval(updateXkeenStatus, 15000); // Опрос раз в 15 секунд
 };
+
+async function loadPanelVersion() {
+  try {
+    const res = await fetch('/version.json');
+    if (res.ok) {
+      const data = await res.json();
+      const versionVal = document.getElementById('panel-version-val');
+      const branchVal = document.getElementById('panel-branch-val');
+      if (versionVal) versionVal.textContent = data.version;
+      if (branchVal) {
+        branchVal.textContent = data.branch;
+        if (data.branch.toLowerCase() === 'main' || data.branch.toLowerCase() === 'master') {
+          branchVal.style.background = 'var(--success-container)';
+          branchVal.style.color = 'var(--success)';
+          branchVal.style.borderColor = 'rgba(61, 220, 132, 0.25)';
+        } else {
+          // Dev branch style
+          branchVal.style.background = 'rgba(255, 183, 77, 0.15)';
+          branchVal.style.color = '#ffb74d';
+          branchVal.style.borderColor = 'rgba(255, 183, 77, 0.3)';
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error loading panel version:', err);
+  }
+}
 
 // === Управление XKeen (запуск, остановка, рестарт) ===
 window.isXkeenRunning = false;

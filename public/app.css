@@ -1056,6 +1056,39 @@ input[type="checkbox"]:checked::before {
   margin-bottom: 8px;
 }
 
+.sidebar-version-info {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 14px;
+  margin-bottom: 12px;
+  font-size: 0.78rem;
+  font-family: var(--font-outfit);
+}
+
+.version-label {
+  color: var(--text-muted);
+}
+
+.version-label strong {
+  color: var(--text);
+}
+
+.branch-badge {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text);
+  border: 1px solid var(--md-sys-color-outline);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-weight: 600;
+  font-size: 0.72rem;
+  letter-spacing: 0.5px;
+  transition: all 0.2s var(--m3-easing);
+}
+
 .sidebar-status-controls {
   display: flex;
   flex-direction: column;
