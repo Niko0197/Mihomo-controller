@@ -57,8 +57,8 @@ body {
   -webkit-user-select: none;
 }
 
-/* Allow text selection in inputs, textareas, dropdowns, CodeMirror editor, table cells, code blocks, and logs */
-input, textarea, select, .CodeMirror, .CodeMirror *, td, th, pre, code, .selectable, .log-line, .log-container {
+/* Allow text selection in inputs, textareas, dropdowns, CodeMirror editor, table cells, code blocks, logs, headings, card titles, paragraphs, and timestamps */
+input, textarea, select, .CodeMirror, .CodeMirror *, td, th, pre, code, .selectable, .log-line, .log-container, h1, h2, h3, h4, h5, h6, .card-title, p, .timestamp {
   user-select: text;
   -webkit-user-select: text;
 }
