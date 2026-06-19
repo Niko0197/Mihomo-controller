@@ -1736,7 +1736,7 @@ async function loadVersionsList() {
       return;
     }
 
-    // ДЕДУБЛИКАЦИЯ: Если есть одинаковые версии, оставляем только коммит ветки main
+    // ДЕДУБЛИКАЦИЯ: Если есть одинаковые версии, объединяем их списки изменений
     const uniqueCommits = [];
     const versionMap = new Map(); // version -> array of commits
 
@@ -1751,19 +1751,35 @@ async function loadVersionsList() {
       if (commitsList.length === 1) {
         uniqueCommits.push(commitsList[0]);
       } else {
-        // Ищем коммит, где ветка - main или master
-        const mainCommit = commitsList.find(c => c.branch === 'main' || c.branch === 'master');
-        if (mainCommit) {
-          // Если хотя бы один из дубликатов был текущим (активным), помечаем как текущий именно main-коммит
-          const hasCurrent = commitsList.some(c => c.current);
-          if (hasCurrent) {
-            mainCommit.current = true;
+        // Объединяем все изменения из всех коммитов этой версии
+        let mergedChanges = [];
+        commitsList.forEach(c => {
+          if (Array.isArray(c.changes)) {
+            mergedChanges = mergedChanges.concat(c.changes);
+          } else if (c.message) {
+            mergedChanges.push(c.message);
           }
-          uniqueCommits.push(mainCommit);
-        } else {
+        });
+        
+        // Очищаем дубликаты строк изменений
+        mergedChanges = Array.from(new Set(mergedChanges));
+
+        // Ищем коммит, где ветка - main или master
+        let repCommit = commitsList.find(c => c.branch === 'main' || c.branch === 'master');
+        if (!repCommit) {
           // Если нет коммита из main, оставляем самый первый (новейший)
-          uniqueCommits.push(commitsList[0]);
+          repCommit = commitsList[0];
         }
+
+        // Создаем копию коммита с объединенными изменениями
+        const mergedCommit = { ...repCommit, changes: mergedChanges };
+
+        // Если хотя бы один из дубликатов был текущим (активным), помечаем как текущий
+        const hasCurrent = commitsList.some(c => c.current);
+        if (hasCurrent) {
+          mergedCommit.current = true;
+        }
+        uniqueCommits.push(mergedCommit);
       }
     });
 
