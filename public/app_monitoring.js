@@ -1203,6 +1203,13 @@ function renderProxyGroups(proxiesData) {
     const delayText = resolvedActiveDelay > 0 ? `${resolvedActiveDelay} ms` : '—';
 
     // --- Header ---
+    const providerMapping = {
+      '💎 StealthSurf': 'stealthsurf',
+      '💎 StealthSurf 2': 'StealthSurf2',
+      '🎱 GitHub': 'Igareck_Black_VPN'
+    };
+    const providerToUpdate = providerMapping[group.name];
+
     const header = document.createElement('div');
     header.className = 'pgc-header';
     header.innerHTML = `
@@ -1212,6 +1219,7 @@ function renderProxyGroups(proxiesData) {
         <span class="pgc-meta">·&nbsp;${typeLabel}&nbsp;·&nbsp;${aliveCount}/${totalNodes}</span>
       </div>
       <div class="pgc-header-right">
+        ${providerToUpdate ? `<button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${providerToUpdate}')">🔄</button>` : ''}
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
         <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
