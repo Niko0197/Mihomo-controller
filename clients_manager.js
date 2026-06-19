@@ -272,13 +272,15 @@ function parseHotspotXml(xmlString) {
     const ipMatch = hostContent.match(/<ip>([^<]*)<\/ip>/);
     const hostnameMatch = hostContent.match(/<hostname>([^<]*)<\/hostname>/);
     const nameMatch = hostContent.match(/<name>([^<]*)<\/name>/);
+    const activeMatch = hostContent.match(/<active>([^<]*)<\/active>/);
     
     if (macMatch) {
       hosts.push({
         mac: macMatch[1].trim().toUpperCase(),
         ip: ipMatch ? ipMatch[1].trim() : '',
         hostname: hostnameMatch ? unescapeXml(hostnameMatch[1].trim()) : '',
-        name: nameMatch ? unescapeXml(nameMatch[1].trim()) : ''
+        name: nameMatch ? unescapeXml(nameMatch[1].trim()) : '',
+        active: activeMatch ? activeMatch[1].trim() : 'no'
       });
     }
   }
@@ -897,10 +899,35 @@ function getClientsList() {
     console.error('Ошибка выполнения ip neigh:', err.message);
   }
 
-  // Добавляем активных клиентов из hotspot, которых нет в ARP таблице
+  // Добавляем/обновляем статус клиентов из hotspot (включая неактивных/офлайн)
   hotspotHosts.forEach(h => {
-    if (h.active === 'yes' && h.ip && h.ip !== '127.0.0.1' && h.ip !== '::1' && h.ip !== '192.168.1.1' && !clientsMap.has(h.ip)) {
-      clientsMap.set(h.ip, buildClientObj(h.ip, h.mac, true));
+    if (h.ip && h.ip !== '0.0.0.0' && h.ip !== '127.0.0.1' && h.ip !== '::1' && h.ip !== '192.168.1.1') {
+      const isActive = (h.active === 'yes');
+      const existing = clientsMap.get(h.ip);
+      
+      if (existing) {
+        existing.active = isActive;
+        if (h.mac && !existing.mac) {
+          existing.mac = h.mac.toUpperCase();
+        }
+      } else {
+        let macFound = null;
+        if (h.mac) {
+          const normMac = h.mac.toUpperCase();
+          for (const c of clientsMap.values()) {
+            if (c.mac && c.mac.toUpperCase() === normMac) {
+              macFound = c;
+              break;
+            }
+          }
+        }
+        
+        if (macFound) {
+          macFound.active = isActive;
+        } else {
+          clientsMap.set(h.ip, buildClientObj(h.ip, h.mac, isActive));
+        }
+      }
     }
   });
 

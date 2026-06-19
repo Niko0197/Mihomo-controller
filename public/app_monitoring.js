@@ -1991,7 +1991,7 @@ function renderClientsTable() {
     const tdState = document.createElement('td');
     const badge = document.createElement('span');
     badge.className = `status-badge ${c.active ? 'active' : 'inactive'}`;
-    badge.textContent = c.active ? 'Активен' : 'STALE';
+    badge.textContent = c.active ? 'Активен' : 'Не в сети';
     tdState.appendChild(badge);
     
     // Current speed
