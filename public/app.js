@@ -1725,14 +1725,45 @@ async function loadVersionsList() {
       return;
     }
 
+    // ДЕДУБЛИКАЦИЯ: Если есть одинаковые версии, оставляем только коммит ветки main
+    const uniqueCommits = [];
+    const versionMap = new Map(); // version -> array of commits
+
+    commits.forEach(c => {
+      if (!versionMap.has(c.version)) {
+        versionMap.set(c.version, []);
+      }
+      versionMap.get(c.version).push(c);
+    });
+
+    versionMap.forEach((commitsList, versionKey) => {
+      if (commitsList.length === 1) {
+        uniqueCommits.push(commitsList[0]);
+      } else {
+        // Ищем коммит, где ветка - main или master
+        const mainCommit = commitsList.find(c => c.branch === 'main' || c.branch === 'master');
+        if (mainCommit) {
+          // Если хотя бы один из дубликатов был текущим (активным), помечаем как текущий именно main-коммит
+          const hasCurrent = commitsList.some(c => c.current);
+          if (hasCurrent) {
+            mainCommit.current = true;
+          }
+          uniqueCommits.push(mainCommit);
+        } else {
+          // Если нет коммита из main, оставляем самый первый (новейший)
+          uniqueCommits.push(commitsList[0]);
+        }
+      }
+    });
+
     // Сохраняем текущий SHA
-    const currentCommit = commits.find(c => c.current);
+    const currentCommit = uniqueCommits.find(c => c.current);
     if (currentCommit) {
       currentCommitSha = currentCommit.sha;
       selectedCommitSha = currentCommit.sha;
     }
 
-    commits.forEach(commit => {
+    uniqueCommits.forEach(commit => {
       const card = document.createElement('div');
       card.className = 'version-item-card';
       if (commit.current) {
@@ -1741,7 +1772,10 @@ async function loadVersionsList() {
       card.dataset.sha = commit.sha;
 
       const isDev = isDevVersion(commit.version);
-      const devBadgeHtml = isDev ? '<span class="version-dev-badge">Dev</span>' : '';
+      const typeBadgeHtml = isDev 
+        ? '<span class="version-dev-badge">Dev</span>' 
+        : '<span class="version-main-badge">Main</span>';
+        
       const currentBadgeHtml = commit.current ? '<span class="version-current-badge">Текущая</span>' : '';
 
       card.innerHTML = `
@@ -1749,7 +1783,7 @@ async function loadVersionsList() {
           <div class="version-item-info">
             <div class="version-item-title-row">
               <span class="version-item-title">${commit.version}</span>
-              ${devBadgeHtml}
+              ${typeBadgeHtml}
               ${currentBadgeHtml}
             </div>
             <div class="version-item-meta">${commit.date}</div>

@@ -1540,10 +1540,12 @@ function parseAndSendCommits(logStdout, branch, res) {
       const message = parts[3];
       
       let versionNum = '';
+      let commitBranch = '';
       try {
         const versionJsonStr = execSync('git show ' + sha + ':public/version.json', { cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
         const versionData = JSON.parse(versionJsonStr);
         versionNum = versionData.version || sha.substring(0, 7);
+        commitBranch = versionData.branch || '';
       } catch (e) {
         versionNum = sha.substring(0, 7);
       }
@@ -1554,6 +1556,7 @@ function parseAndSendCommits(logStdout, branch, res) {
       commits.push({
         sha,
         version: displayVersion,
+        branch: commitBranch,
         date,
         author,
         message,
