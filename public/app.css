@@ -229,6 +229,8 @@ header {
   transition: all 0.3s var(--m3-easing);
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  white-space: nowrap;
   gap: 10px;
   position: relative;
   overflow: hidden;
