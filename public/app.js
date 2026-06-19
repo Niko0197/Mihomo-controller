@@ -1122,8 +1122,9 @@ function updateXkeenTabPlaceholders() {
 }
 
 // Обработчики кликов управления XKeen
-document.getElementById('btn-xkeen-toggle').onclick = async function() {
-  const btn = this;
+async function handleXkeenToggle() {
+  const btn = document.getElementById('btn-xkeen-toggle');
+  if (btn.disabled) return;
   const restartBtn = document.getElementById('btn-xkeen-restart');
   btn.disabled = true;
   restartBtn.disabled = true;
@@ -1142,10 +1143,11 @@ document.getElementById('btn-xkeen-toggle').onclick = async function() {
   } finally {
     await updateXkeenStatus();
   }
-};
+}
 
-document.getElementById('btn-xkeen-restart').onclick = async function() {
-  const btn = this;
+async function handleXkeenRestart() {
+  const btn = document.getElementById('btn-xkeen-restart');
+  if (btn.disabled) return;
   const toggleBtn = document.getElementById('btn-xkeen-toggle');
   btn.disabled = true;
   toggleBtn.disabled = true;
@@ -1168,7 +1170,26 @@ document.getElementById('btn-xkeen-restart').onclick = async function() {
     if (svg) svg.style.transform = 'none';
     await updateXkeenStatus();
   }
-};
+}
+
+const btnXkeenToggleEl = document.getElementById('btn-xkeen-toggle');
+const btnXkeenRestartEl = document.getElementById('btn-xkeen-restart');
+
+if (btnXkeenToggleEl) {
+  btnXkeenToggleEl.onclick = handleXkeenToggle;
+  btnXkeenToggleEl.oncontextmenu = function(e) {
+    e.preventDefault();
+    handleXkeenToggle();
+  };
+}
+
+if (btnXkeenRestartEl) {
+  btnXkeenRestartEl.onclick = handleXkeenRestart;
+  btnXkeenRestartEl.oncontextmenu = function(e) {
+    e.preventDefault();
+    handleXkeenRestart();
+  };
+}
 
 // --- ДИНАМИЧЕСКИЕ ПРАВИЛА ---
 let dynamicRulesList = [];
