@@ -1167,8 +1167,10 @@ input[type="checkbox"]:checked::before {
   
   .sidebar-status-controls {
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
+    gap: 12px;
   }
   
   .sidebar-status-controls .status-badge {
@@ -1177,6 +1179,13 @@ input[type="checkbox"]:checked::before {
   
   .sidebar-status-controls .xkeen-controls {
     width: auto;
+  }
+
+  .sidebar-status-controls .system-monitor-card {
+    flex: 1 0 100%;
+    width: 100%;
+    margin: 8px -16px -16px -16px !important;
+    box-sizing: border-box;
   }
   
   .tabs-vertical {
@@ -1197,6 +1206,117 @@ input[type="checkbox"]:checked::before {
     margin-left: 0;
     max-width: 100%;
     padding: 24px 16px;
+  }
+
+  #table-wrapper,
+  #subs-table-wrapper,
+  #ping-table-wrapper,
+  #connections-table-wrapper,
+  #clients-table-wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    width: 100%;
+  }
+}
+
+/* Mobile adjustments for phone screens */
+@media (max-width: 768px) {
+  .controls-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+  
+  .search-wrapper {
+    max-width: 100%;
+    width: 100%;
+  }
+  
+  .btn-group {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+  
+  .btn-group .btn {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+@media (max-width: 600px) {
+  .card {
+    padding: 16px;
+    border-radius: 20px;
+  }
+  
+  .card-title {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 1.25rem;
+  }
+  
+  .logo-title {
+    font-size: 1.3rem;
+  }
+  
+  .logo-icon {
+    font-size: 1.8rem;
+  }
+  
+  #form-add-rule {
+    flex-direction: column;
+    align-items: stretch !important;
+    padding: 16px !important;
+  }
+  
+  #form-add-rule > div {
+    width: 100% !important;
+    min-width: 0 !important;
+  }
+  
+  #form-add-rule button {
+    width: 100%;
+    justify-content: center;
+  }
+  
+  .CodeMirror {
+    height: 400px !important;
+  }
+  
+  .console-terminal {
+    height: 320px;
+    max-height: 320px;
+  }
+  
+  .toast-container {
+    right: 16px;
+    left: 16px;
+    bottom: 16px;
+    align-items: center;
+  }
+  
+  .toast {
+    width: 100%;
+    box-sizing: border-box;
+    padding: 12px 16px;
+    font-size: 0.88rem;
+  }
+}
+
+@media (max-width: 480px) {
+  .pgc-nodes-panel.grid-3-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  
+  th, td {
+    padding: 12px 14px;
+    font-size: 0.85rem;
+  }
+  
+  .file-chip {
+    padding: 6px 10px;
+    font-size: 0.8rem;
   }
 }
 
