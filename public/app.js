@@ -1008,6 +1008,7 @@ window.onload = function() {
   });
   loadData();
   loadPanelVersion();
+  loadMihomoVersion();
   updateXkeenStatus();
   initCustomTooltips();
   initCustomSelects();
@@ -1047,6 +1048,16 @@ document.addEventListener('DOMContentLoaded', () => {
   if (versionPanel) {
     versionPanel.addEventListener('click', () => {
       switchTab('updates');
+    });
+  }
+  
+  // Добавляем закрытие модалки при клике на overlay
+  const mihomoModal = document.getElementById('mihomo-update-modal');
+  if (mihomoModal) {
+    mihomoModal.addEventListener('click', (e) => {
+      if (e.target === mihomoModal) {
+        closeMihomoUpdateModal();
+      }
     });
   }
 });
@@ -1945,5 +1956,219 @@ function isDevVersion(versionStr) {
   if (clean === '1.0.0') return false;
   
   return true;
+}
+
+// === Управление ядром Mihomo (версии, релизы, обновление) ===
+window.mihomoArch = '';
+let selectedMihomoRelease = null;
+
+async function loadMihomoVersion() {
+  try {
+    const res = await fetch('/api/mihomo/version');
+    if (res.ok) {
+      const data = await res.json();
+      const coreVersionVal = document.getElementById('core-version-val');
+      if (coreVersionVal && data.success) {
+        coreVersionVal.textContent = data.version;
+        window.mihomoArch = data.arch;
+      }
+    }
+  } catch (err) {
+    console.error('Error loading Mihomo version:', err);
+    const coreVersionVal = document.getElementById('core-version-val');
+    if (coreVersionVal) {
+      coreVersionVal.textContent = 'Ошибка';
+    }
+  }
+}
+
+function openMihomoUpdateModal() {
+  const modal = document.getElementById('mihomo-update-modal');
+  if (modal) {
+    modal.style.display = 'flex';
+    loadMihomoReleases();
+  }
+}
+
+function closeMihomoUpdateModal() {
+  const modal = document.getElementById('mihomo-update-modal');
+  if (modal) {
+    modal.style.display = 'none';
+  }
+}
+
+async function loadMihomoReleases() {
+  const listContainer = document.getElementById('mihomo-releases-list');
+  const installBtn = document.getElementById('btn-install-mihomo');
+  
+  if (!listContainer) return;
+  
+  listContainer.innerHTML = `
+    <div class="releases-loading">
+      <span class="spinner"></span> Загрузка списка релизов...
+    </div>
+  `;
+  installBtn.disabled = true;
+  selectedMihomoRelease = null;
+  
+  try {
+    const res = await fetch('/api/mihomo/releases');
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    const data = await res.json();
+    if (!data.success) {
+      throw new Error(data.error || 'Неизвестная ошибка сервера');
+    }
+    
+    const releases = data.releases || [];
+    if (releases.length === 0) {
+      listContainer.innerHTML = '<div class="releases-loading">Релизы не найдены.</div>';
+      return;
+    }
+    
+    const countBadge = document.querySelector('.github-count');
+    if (countBadge) {
+      countBadge.textContent = releases.length;
+    }
+    
+    listContainer.innerHTML = '';
+    
+    releases.forEach((rel, idx) => {
+      const card = document.createElement('div');
+      card.className = 'release-card';
+      
+      const formattedDate = rel.published_at ? new Date(rel.published_at).toISOString().split('T')[0] : '';
+      
+      let changesHtml = '';
+      if (rel.changes && rel.changes.length > 0) {
+        const listItems = rel.changes.map(ch => {
+          const cleanCh = ch.replace(/`([^`]+)`/g, '<code>$1</code>');
+          return `<li>${cleanCh}</li>`;
+        }).join('');
+        
+        changesHtml = `
+          <div class="release-changes">
+            <div class="changes-title">What's Changed</div>
+            <ul class="changes-list">${listItems}</ul>
+          </div>
+        `;
+      }
+      
+      const hasAsset = !!rel.download_url;
+      const warningHtml = !hasAsset 
+        ? `<div style="color: var(--md-sys-color-error); font-size: 0.8rem; margin-top: 6px; font-family: var(--font-inter);">
+             Внимание: Файл под архитектуру "${window.mihomoArch || 'неизвестно'}" не найден в этом релизе.
+           </div>`
+        : '';
+      
+      card.innerHTML = `
+        <div class="release-card-header">
+          <div class="release-info">
+            <div class="release-version">${rel.tag_name}</div>
+            <div class="release-date">${formattedDate}</div>
+            ${warningHtml}
+          </div>
+          <div class="release-radio-container">
+            <input type="radio" name="mihomo-release-choice" class="release-radio-input" 
+                   value="${idx}" ${!hasAsset ? 'disabled' : ''}>
+          </div>
+        </div>
+        ${changesHtml}
+      `;
+      
+      if (hasAsset) {
+        card.addEventListener('click', (e) => {
+          const radio = card.querySelector('.release-radio-input');
+          if (e.target !== radio) {
+            radio.checked = true;
+          }
+          
+          document.querySelectorAll('.release-card').forEach(c => c.classList.remove('selected'));
+          card.classList.add('selected');
+          
+          selectedMihomoRelease = rel;
+          installBtn.disabled = false;
+        });
+      } else {
+        card.style.opacity = '0.5';
+        card.style.cursor = 'not-allowed';
+      }
+      
+      listContainer.appendChild(card);
+    });
+    
+  } catch (err) {
+    console.error('Error fetching releases:', err);
+    listContainer.innerHTML = `
+      <div class="releases-error-msg">
+        ⚠️ Ошибка загрузки списка версий с GitHub:<br>
+        <span style="font-size: 0.85rem; opacity: 0.8;">${err.message}</span>
+      </div>
+    `;
+  }
+}
+
+async function installMihomoCore() {
+  if (!selectedMihomoRelease) return;
+  
+  const tag = selectedMihomoRelease.tag_name;
+  const downloadUrl = selectedMihomoRelease.download_url;
+  
+  if (!confirm(`Вы действительно хотите обновить ядро Mihomo до версии ${tag}?`)) {
+    return;
+  }
+  
+  closeMihomoUpdateModal();
+  showMihomoDimmerOverlay('Установка нового ядра Mihomo и перезапуск службы XKeen...');
+  
+  try {
+    const res = await fetch('/api/mihomo/update', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({
+        tag: tag,
+        download_url: downloadUrl
+      })
+    });
+    
+    const data = await res.json();
+    
+    if (res.ok && data.success) {
+      showToast(data.message || `Ядро успешно обновлено до ${tag}`, 'success');
+      loadMihomoVersion();
+    } else {
+      showToast(data.error || 'Ошибка при установке ядра', 'error');
+    }
+  } catch (err) {
+    console.error('Error installing core:', err);
+    showToast(`Ошибка сети: ${err.message}`, 'error');
+  } finally {
+    hideMihomoDimmerOverlay();
+  }
+}
+
+function showMihomoDimmerOverlay(msg) {
+  let overlay = document.getElementById('dimmer-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'dimmer-overlay';
+    overlay.className = 'dimmer-overlay';
+    overlay.innerHTML = '<div class="dimmer-spinner"></div>' +
+                        `<div class="dimmer-text">${msg || 'Перезапуск службы XKeen...'}</div>`;
+    document.body.appendChild(overlay);
+  } else {
+    overlay.querySelector('.dimmer-text').textContent = msg || 'Перезапуск службы XKeen...';
+  }
+  overlay.classList.add('active');
+}
+
+function hideMihomoDimmerOverlay() {
+  const overlay = document.getElementById('dimmer-overlay');
+  if (overlay) {
+    overlay.classList.remove('active');
+  }
 }
 

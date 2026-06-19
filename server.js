@@ -1,6 +1,7 @@
 const http = require('http');
 const https = require('https');
 const fs = require('fs');
+const zlib = require('zlib');
 const path = require('path');
 const yamlUtils = require('./yaml_utils');
 const systemStats = require('./system_stats');
@@ -1683,6 +1684,417 @@ function handleSystemUpdate(req, res) {
   });
 }
 
+// GET /api/mihomo/version
+function handleGetMihomoVersion(req, res) {
+  const version = getMihomoVersion();
+  const arch = getCpuArchitecture();
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({ success: true, version, arch }));
+}
+
+// Вспомогательная функция для получения текущей версии Mihomo
+function getMihomoVersion() {
+  const { execSync } = require('child_process');
+  try {
+    const output = execSync('/opt/sbin/mihomo -v 2>&1').toString().trim();
+    const match = output.match(/v\d+\.\d+\.\d+/);
+    if (match) {
+      return match[0];
+    }
+    const alphaMatch = output.match(/v\d+\.\d+\.\d+-\w+/);
+    if (alphaMatch) {
+      return alphaMatch[0];
+    }
+    const parts = output.split(' ');
+    for (const p of parts) {
+      if (p.startsWith('v') && p.includes('.')) {
+        return p;
+      }
+    }
+    return output || 'Неизвестно';
+  } catch (e) {
+    return 'Не установлено';
+  }
+}
+
+// Вспомогательная функция для получения архитектуры ЦП
+function getCpuArchitecture() {
+  const { execSync } = require('child_process');
+  let arch = process.arch;
+  
+  if (process.platform === 'linux') {
+    try {
+      const uname = execSync('uname -m').toString().trim().toLowerCase();
+      if (uname.includes('aarch64') || uname.includes('arm64')) {
+        return 'arm64';
+      }
+      if (uname.includes('armv7') || uname.includes('armv8') || uname.includes('arm')) {
+        return 'arm32v7';
+      }
+      if (uname.includes('mips64el')) {
+        return 'mips64el';
+      }
+      if (uname.includes('mipsel') || uname.includes('mipsle')) {
+        return 'mipsle';
+      }
+      if (uname.includes('mips')) {
+        return 'mips';
+      }
+      if (uname.includes('x86_64') || uname.includes('amd64')) {
+        return 'amd64';
+      }
+      if (uname.includes('i386') || uname.includes('i686')) {
+        return '386';
+      }
+    } catch (e) {
+      console.error('Error running uname -m:', e.message);
+    }
+  }
+  
+  if (arch === 'x64') return 'amd64';
+  if (arch === 'ia32') return '386';
+  if (arch === 'arm') return 'arm32v7';
+  if (arch === 'arm64') return 'arm64';
+  if (arch === 'mips' || arch === 'mipsel') return 'mipsle';
+  
+  return arch;
+}
+
+// Вспомогательная функция для поиска наилучшего ассета
+function findBestAsset(assets, sysArch) {
+  const linuxAssets = assets.filter(a => a.name.toLowerCase().includes('linux') && a.name.toLowerCase().endsWith('.gz'));
+  
+  if (sysArch === 'mipsle') {
+    let asset = linuxAssets.find(a => a.name.toLowerCase().includes('mipsle-softfloat'));
+    if (asset) return asset;
+    asset = linuxAssets.find(a => a.name.toLowerCase().includes('mipsle'));
+    if (asset) return asset;
+  }
+  
+  if (sysArch === 'mips') {
+    let asset = linuxAssets.find(a => a.name.toLowerCase().includes('mips-softfloat'));
+    if (asset) return asset;
+    asset = linuxAssets.find(a => a.name.toLowerCase().includes('mips'));
+    if (asset) return asset;
+  }
+  
+  if (sysArch === 'arm32v7') {
+    let asset = linuxAssets.find(a => a.name.toLowerCase().includes('arm32v7'));
+    if (asset) return asset;
+    asset = linuxAssets.find(a => a.name.toLowerCase().includes('armv7'));
+    if (asset) return asset;
+  }
+  
+  let asset = linuxAssets.find(a => a.name.toLowerCase().includes(sysArch.toLowerCase()));
+  if (asset) return asset;
+  
+  if (sysArch === 'amd64') {
+    asset = linuxAssets.find(a => a.name.toLowerCase().includes('x86_64') || a.name.toLowerCase().includes('x64'));
+    if (asset) return asset;
+  }
+  
+  return null;
+}
+
+// Вспомогательная функция для парсинга What's Changed
+function parseReleaseBody(body) {
+  if (!body) return [];
+  let lines = body.split('\n');
+  let changes = [];
+  let capture = false;
+  
+  for (let line of lines) {
+    line = line.trim();
+    if (!line) continue;
+    
+    if (line.toLowerCase().includes("what's changed") || line.toLowerCase().includes("changelog")) {
+      capture = true;
+      continue;
+    }
+    
+    if (capture && (line.startsWith('#') || line.toLowerCase().includes("full changelog"))) {
+      break;
+    }
+    
+    if (capture) {
+      if (line.startsWith('*') || line.startsWith('-')) {
+        changes.push(line.replace(/^[\*\-\s]+/, '').trim());
+      }
+    } else {
+      if (line.startsWith('*') || line.startsWith('-')) {
+        changes.push(line.replace(/^[\*\-\s]+/, '').trim());
+      }
+    }
+  }
+  
+  if (changes.length === 0) {
+    for (let line of lines) {
+      line = line.trim();
+      if (line.startsWith('*') || line.startsWith('-')) {
+        changes.push(line.replace(/^[\*\-\s]+/, '').trim());
+      }
+      if (changes.length >= 10) break;
+    }
+  }
+  
+  return changes.slice(0, 15);
+}
+
+// Вспомогательная функция для скачивания и распаковки с редиректами
+function downloadAndDecompress(url, destPath) {
+  return new Promise((resolve, reject) => {
+    function download(currentUrl) {
+      const options = {
+        headers: { 'User-Agent': 'Mihomo-Controller-Updater/1.0' },
+        timeout: 10000
+      };
+      
+      const request = https.get(currentUrl, options, (response) => {
+        if (response.statusCode === 301 || response.statusCode === 302) {
+          download(response.headers.location);
+          return;
+        }
+        
+        if (response.statusCode !== 200) {
+          reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
+          return;
+        }
+        
+        const fileStream = fs.createWriteStream(destPath);
+        const gunzipStream = zlib.createGunzip();
+        
+        response.pipe(gunzipStream).pipe(fileStream);
+        
+        fileStream.on('finish', () => {
+          fileStream.close();
+          resolve();
+        });
+        
+        fileStream.on('error', (err) => {
+          fileStream.close();
+          reject(err);
+        });
+        
+        gunzipStream.on('error', (err) => {
+          reject(err);
+        });
+      });
+      
+      request.on('error', (err) => {
+        reject(err);
+      });
+      
+      request.on('timeout', () => {
+        request.destroy();
+        reject(new Error('Connection timeout during download'));
+      });
+    }
+    
+    download(url);
+  });
+}
+
+let cachedMihomoReleases = null;
+let cachedMihomoReleasesTime = 0;
+
+// GET /api/mihomo/releases
+function handleGetMihomoReleases(req, res) {
+  const now = Date.now();
+  if (cachedMihomoReleases && (now - cachedMihomoReleasesTime < 15 * 60 * 1000)) {
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases }));
+    return;
+  }
+  
+  const options = {
+    hostname: 'api.github.com',
+    path: '/repos/MetaCubeX/mihomo/releases?per_page=15',
+    method: 'GET',
+    headers: {
+      'User-Agent': 'Mihomo-Controller-Updater/1.0'
+    },
+    timeout: 8000
+  };
+  
+  const githubReq = https.request(options, (githubRes) => {
+    let data = '';
+    githubRes.on('data', chunk => data += chunk);
+    githubRes.on('end', () => {
+      try {
+        if (githubRes.statusCode !== 200) {
+          throw new Error(`GitHub API returned status ${githubRes.statusCode}`);
+        }
+        
+        const releasesList = JSON.parse(data);
+        const parsedReleases = [];
+        const sysArch = getCpuArchitecture();
+        
+        for (const rel of releasesList) {
+          const bestAsset = findBestAsset(rel.assets || [], sysArch);
+          
+          parsedReleases.push({
+            tag_name: rel.tag_name,
+            published_at: rel.published_at,
+            body: rel.body,
+            changes: parseReleaseBody(rel.body),
+            download_url: bestAsset ? bestAsset.browser_download_url : null,
+            asset_name: bestAsset ? bestAsset.name : null
+          });
+        }
+        
+        cachedMihomoReleases = parsedReleases;
+        cachedMihomoReleasesTime = now;
+        
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, releases: parsedReleases }));
+      } catch (err) {
+        console.error('Error parsing GitHub releases:', err.message);
+        if (cachedMihomoReleases) {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases, warning: 'Using stale cache due to error: ' + err.message }));
+        } else {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: false, error: err.message }));
+        }
+      }
+    });
+  });
+  
+  githubReq.on('error', (err) => {
+    console.error('GitHub API request error:', err.message);
+    if (cachedMihomoReleases) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases, warning: 'Using stale cache due to error: ' + err.message }));
+    } else {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+  
+  githubReq.on('timeout', () => {
+    githubReq.destroy();
+    if (cachedMihomoReleases) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases, warning: 'Using stale cache due to timeout' }));
+    } else {
+      res.writeHead(504, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: 'GitHub API request timeout' }));
+    }
+  });
+  
+  githubReq.end();
+}
+
+// POST /api/mihomo/update
+function handleMihomoUpdate(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body);
+      const { tag, download_url } = payload;
+      
+      if (!tag || !download_url) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Missing tag or download_url' }));
+        return;
+      }
+      
+      console.log(`[Mihomo Updater] Starting update to ${tag} from ${download_url}`);
+      
+      const tempGz = '/tmp/mihomo_new.gz';
+      const tempBin = '/tmp/mihomo_new';
+      const targetBin = '/opt/sbin/mihomo';
+      const backupBin = '/opt/sbin/mihomo.bak';
+      
+      try {
+        if (fs.existsSync(tempGz)) fs.unlinkSync(tempGz);
+        if (fs.existsSync(tempBin)) fs.unlinkSync(tempBin);
+      } catch (e) {}
+      
+      try {
+        await downloadAndDecompress(download_url, tempBin);
+      } catch (err) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Скачивание или распаковка не удалась: ' + err.message }));
+        return;
+      }
+      
+      if (!fs.existsSync(tempBin) || fs.statSync(tempBin).size === 0) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Распакованный файл пустой или не существует' }));
+        return;
+      }
+      
+      const { exec } = require('child_process');
+      
+      let backupCreated = false;
+      try {
+        if (fs.existsSync(targetBin)) {
+          if (fs.existsSync(backupBin)) fs.unlinkSync(backupBin);
+          fs.renameSync(targetBin, backupBin);
+          backupCreated = true;
+        }
+      } catch (backupErr) {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Не удалось создать резервную копию: ' + backupErr.message }));
+        return;
+      }
+      
+      try {
+        fs.copyFileSync(tempBin, targetBin);
+        fs.chmodSync(targetBin, 0o755);
+      } catch (copyErr) {
+        if (backupCreated) {
+          try { fs.renameSync(backupBin, targetBin); } catch (e) {}
+        }
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Не удалось заменить исполняемый файл: ' + copyErr.message }));
+        return;
+      }
+      
+      console.log('[Mihomo Updater] Restarting XKeen service...');
+      exec('/opt/etc/init.d/S99xkeen restart', (errRestart, stdout, stderr) => {
+        setTimeout(() => {
+          exec('pidof mihomo', (errPid, stdoutPid) => {
+            const isRunning = !errPid && stdoutPid.trim().length > 0;
+            
+            if (!isRunning) {
+              console.error('[Mihomo Updater] New kernel failed to start! Restoring backup...');
+              try {
+                if (fs.existsSync(targetBin)) fs.unlinkSync(targetBin);
+                if (fs.existsSync(backupBin)) {
+                  fs.renameSync(backupBin, targetBin);
+                  fs.chmodSync(targetBin, 0o755);
+                }
+                exec('/opt/etc/init.d/S99xkeen restart');
+              } catch (restoreErr) {
+                console.error('[Mihomo Updater] Critical: Restore failed:', restoreErr.message);
+              }
+              
+              res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ success: false, error: 'Ядро не запустилось после обновления. Произведен откат на предыдущую версию.' }));
+            } else {
+              console.log('[Mihomo Updater] Kernel updated successfully. Cleaning up temp files...');
+              try {
+                if (fs.existsSync(tempBin)) fs.unlinkSync(tempBin);
+                if (fs.existsSync(tempGz)) fs.unlinkSync(tempGz);
+              } catch (e) {}
+              
+              res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ success: true, message: `Ядро Mihomo успешно обновлено до ${tag}` }));
+            }
+          });
+        }, 3000);
+      });
+      
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
 function updateVersionJsonBranch(branchName) {
   const fs = require('fs');
   const path = require('path');
@@ -2225,6 +2637,18 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && pathname === '/api/system/update') {
     handleSystemUpdate(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/mihomo/version') {
+    handleGetMihomoVersion(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/mihomo/releases') {
+    handleGetMihomoReleases(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/mihomo/update') {
+    handleMihomoUpdate(req, res);
     return;
   }
 
