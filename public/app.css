@@ -2358,5 +2358,189 @@ input:checked + .slider:before {
   font-weight: 600;
 }
 
+/* Вкладка обновлений: список версий и карточки */
+.versions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 16px;
+}
+
+.version-item-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 14px;
+  padding: 16px 20px;
+  cursor: pointer;
+  position: relative;
+  transition: background 0.3s var(--m3-easing),
+              border-color 0.3s var(--m3-easing),
+              transform 0.2s var(--m3-easing),
+              box-shadow 0.3s var(--m3-easing);
+  overflow: hidden;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.version-item-card:hover {
+  background: var(--md-sys-color-surface-hover);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.version-item-card.selected {
+  background: rgba(168, 199, 250, 0.06);
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.version-item-card.current {
+  border-color: var(--success);
+  background: rgba(61, 220, 132, 0.03);
+}
+
+.version-item-card.current.selected {
+  background: rgba(61, 220, 132, 0.06);
+  border-color: var(--success);
+}
+
+.version-item-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.version-item-info {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.version-item-title-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.version-item-title {
+  font-size: 1.15rem;
+  font-weight: 700;
+  font-family: var(--font-outfit);
+  color: var(--text);
+}
+
+.version-current-badge {
+  background: var(--success-container);
+  color: var(--success);
+  border: 1px solid rgba(61, 220, 132, 0.25);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-family: var(--font-outfit);
+}
+
+.version-item-meta {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  font-family: var(--font-outfit);
+}
+
+.version-item-radio {
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 2px solid var(--text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: border-color 0.25s var(--m3-easing);
+  flex-shrink: 0;
+}
+
+.version-item-card.selected .version-item-radio {
+  border-color: var(--md-sys-color-primary);
+}
+
+.version-item-card.current.selected .version-item-radio {
+  border-color: var(--success);
+}
+
+.version-item-radio-inner {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--md-sys-color-primary);
+  transform: scale(0);
+  transition: transform 0.25s var(--m3-easing), background-color 0.25s var(--m3-easing);
+}
+
+.version-item-card.selected .version-item-radio-inner {
+  transform: scale(1);
+}
+
+.version-item-card.current.selected .version-item-radio-inner {
+  background: var(--success);
+}
+
+.version-item-body {
+  max-height: 0;
+  opacity: 0;
+  overflow: hidden;
+  transition: max-height 0.4s var(--m3-easing),
+              opacity 0.3s var(--m3-easing),
+              margin-top 0.3s var(--m3-easing),
+              padding-top 0.3s var(--m3-easing);
+}
+
+.version-item-card.selected .version-item-body {
+  max-height: 800px;
+  opacity: 1;
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.version-changes-title {
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text);
+  margin-bottom: 8px;
+  font-family: var(--font-inter);
+}
+
+.version-changes-list {
+  list-style-type: none;
+  padding-left: 0;
+}
+
+.version-changes-list li {
+  font-size: 0.88rem;
+  color: var(--text-muted);
+  position: relative;
+  padding-left: 16px;
+  margin-bottom: 6px;
+  line-height: 1.4;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.version-changes-list li::before {
+  content: "•";
+  position: absolute;
+  left: 0;
+  color: var(--md-sys-color-primary);
+  font-size: 1.1rem;
+  line-height: 1.2;
+}
+
+.version-item-card.current .version-changes-list li::before {
+  color: var(--success);
+}
+
+
 
 

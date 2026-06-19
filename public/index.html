@@ -111,6 +111,7 @@
         <button class="tab-btn" id="tab-btn-logs" onclick="switchTab('logs')">📋 Логи ядра</button>
         <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
+        <button class="tab-btn" id="tab-btn-updates" onclick="switchTab('updates')">🔄 Обновления</button>
       </nav>
     </aside>
 
@@ -628,6 +629,42 @@
             <h3>Правил пока нет</h3>
             <p>Вы еще не добавили ни одного быстрого правила. Используйте форму выше.</p>
           </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка: Обновления и версии -->
+    <div id="tab-content-updates" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <span>🔄 Управление версиями и обновлениями</span>
+        </div>
+        
+        <div class="controls-row" style="margin-bottom: 24px; gap: 20px; flex-wrap: wrap;">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <label style="font-weight: 500; font-size: 0.9rem; color: var(--text-muted);">Ветка обновлений:</label>
+            <select id="update-branch-select" style="background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; font-size: 0.9rem; font-family: var(--font-inter); outline: none; height: 38px;">
+              <option value="main">main (стабильная)</option>
+              <option value="Dev">Dev (разработка)</option>
+            </select>
+            <button class="btn btn-primary" style="font-size: 0.85rem; padding: 6px 14px; height: 38px;" onclick="changeUpdateBranch()">Применить ветку</button>
+          </div>
+          
+          <div style="flex-grow: 1; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Текущая ветка: <strong id="active-branch-label" class="selectable">...</strong></span>
+          </div>
+        </div>
+
+        <h3 style="margin-bottom: 12px; font-size: 1.1rem; font-weight: 600; color: var(--text); font-family: var(--font-outfit);">Доступные версии (коммиты):</h3>
+        
+        <div id="versions-list-container" class="versions-list">
+          <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка списка версий с роутера...</div>
+        </div>
+
+        <div style="margin-top: 24px; display: flex; justify-content: flex-end;">
+          <button id="btn-install-version" class="btn btn-primary" style="font-size: 0.95rem; padding: 10px 24px; font-weight: 600; min-height: 40px;" disabled onclick="installSelectedVersion()">
+            📦 Установить выбранную версию
+          </button>
         </div>
       </div>
     </div>

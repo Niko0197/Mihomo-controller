@@ -44,6 +44,8 @@ function switchTab(tabId) {
     loadProxiesList();
   } else if (tabId === 'rules') {
     loadDynamicRulesTab();
+  } else if (tabId === 'updates') {
+    loadVersionsList();
   } else {
     loadData();
   }
@@ -1039,23 +1041,12 @@ async function loadPanelVersion() {
   }
 }
 
-// Добавляем интерактивность и проверку обновлений при клике на версию
+// Добавляем переход на вкладку обновлений при клике на версию
 document.addEventListener('DOMContentLoaded', () => {
   const versionPanel = document.getElementById('panel-version-info');
   if (versionPanel) {
-    versionPanel.addEventListener('click', async () => {
-      showToast('🔄 Проверка обновлений веб-панели...');
-      
-      try {
-        await loadPanelVersion();
-        setTimeout(() => {
-          const versionVal = document.getElementById('panel-version-val').textContent;
-          const branchVal = document.getElementById('panel-branch-val').textContent;
-          showToast(`✅ Версия актуальна: ${versionVal} (${branchVal})`, 'success');
-        }, 600);
-      } catch (err) {
-        showToast('Ошибка при проверке версии', 'error');
-      }
+    versionPanel.addEventListener('click', () => {
+      switchTab('updates');
     });
   }
 });
@@ -1695,4 +1686,199 @@ document.addEventListener('click', () => {
     wrapper.classList.remove('open');
   });
 });
+
+// === ФУНКЦИОНАЛ УПРАВЛЕНИЯ ВЕРСИЯМИ И ОБНОВЛЕНИЯМИ ===
+let selectedCommitSha = null;
+let currentCommitSha = null;
+
+async function loadVersionsList() {
+  const container = document.getElementById('versions-list-container');
+  const installBtn = document.getElementById('btn-install-version');
+  
+  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка списка версий с роутера...</div>';
+  installBtn.disabled = true;
+  selectedCommitSha = null;
+  currentCommitSha = null;
+
+  try {
+    const res = await fetch('/api/system/versions');
+    if (!res.ok) throw new Error('Ошибка при запросе версий');
+    const payload = await res.json();
+    if (!payload.success) throw new Error(payload.error || 'Неизвестная ошибка');
+
+    const branch = payload.branch;
+    const commits = payload.commits || [];
+
+    // Обновляем метки ветки
+    document.getElementById('active-branch-label').textContent = branch;
+    const branchSelect = document.getElementById('update-branch-select');
+    if (branchSelect) {
+      branchSelect.value = branch;
+      if (typeof branchSelect.syncCustomSelect === 'function') {
+        branchSelect.syncCustomSelect();
+      }
+    }
+
+    container.innerHTML = '';
+    if (commits.length === 0) {
+      container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Коммиты не найдены.</div>';
+      return;
+    }
+
+    // Сохраняем текущий SHA
+    const currentCommit = commits.find(c => c.current);
+    if (currentCommit) {
+      currentCommitSha = currentCommit.sha;
+      selectedCommitSha = currentCommit.sha;
+    }
+
+    commits.forEach(commit => {
+      const card = document.createElement('div');
+      card.className = 'version-item-card';
+      if (commit.current) {
+        card.classList.add('current', 'selected');
+      }
+      card.dataset.sha = commit.sha;
+
+      const badgeHtml = commit.current ? '<span class="version-current-badge">Текущая</span>' : '';
+
+      card.innerHTML = `
+        <div class="version-item-header">
+          <div class="version-item-info">
+            <div class="version-item-title-row">
+              <span class="version-item-title">${commit.version}</span>
+              ${badgeHtml}
+            </div>
+            <div class="version-item-meta">${commit.date}</div>
+          </div>
+          <div class="version-item-radio">
+            <div class="version-item-radio-inner"></div>
+          </div>
+        </div>
+        <div class="version-item-body">
+          <div class="version-changes-title">Изменения:</div>
+          <ul class="version-changes-list">
+            <li>${commit.message}</li>
+            <li style="color: rgba(255,255,255,0.4); font-size: 0.8rem; margin-top: 10px;">Автор: ${commit.author} | SHA: ${commit.sha.substring(0, 8)}</li>
+          </ul>
+        </div>
+      `;
+
+      card.addEventListener('click', () => {
+        // Убираем выделение со всех карточек
+        container.querySelectorAll('.version-item-card').forEach(c => c.classList.remove('selected'));
+        // Выделяем текущую
+        card.classList.add('selected');
+        selectedCommitSha = commit.sha;
+
+        // Если выбрали текущую запущенную версию, отключаем кнопку установки
+        if (selectedCommitSha === currentCommitSha) {
+          installBtn.disabled = true;
+        } else {
+          installBtn.disabled = false;
+        }
+      });
+
+      container.appendChild(card);
+    });
+
+  } catch (err) {
+    container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px 0;">Ошибка загрузки версий: ${err.message}</div>`;
+    showToast('Ошибка при загрузке версий: ' + err.message, 'error');
+  }
+}
+
+async function changeUpdateBranch() {
+  const branchSelect = document.getElementById('update-branch-select');
+  if (!branchSelect) return;
+  const branchVal = branchSelect.value;
+
+  if (!confirm(`Вы действительно хотите переключить панель на ветку "${branchVal}"?\nПри этом панель обновится на последнюю версию этой ветки, настройки сохранятся.`)) {
+    return;
+  }
+
+  try {
+    showToast('Переключение ветки...');
+    const response = await fetch('/api/system/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch: branchVal })
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Ошибка при переключении');
+    }
+
+    triggerUpdateRestart('Переключение ветки и перезапуск панели...');
+  } catch (err) {
+    showToast('Ошибка при изменении ветки: ' + err.message, 'error');
+  }
+}
+
+async function installSelectedVersion() {
+  if (!selectedCommitSha) {
+    showToast('Сначала выберите версию для установки', 'error');
+    return;
+  }
+
+  if (selectedCommitSha === currentCommitSha) {
+    showToast('Выбранная версия уже установлена', 'error');
+    return;
+  }
+
+  if (!confirm(`Вы действительно хотите переключить панель на версию ${selectedCommitSha.substring(0, 7)}?\nВсе ваши настройки и базы данных будут сохранены.`)) {
+    return;
+  }
+
+  try {
+    showToast('Установка выбранной версии...');
+    const response = await fetch('/api/system/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sha: selectedCommitSha })
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Ошибка при установке');
+    }
+
+    triggerUpdateRestart('Установка версии и перезапуск панели...');
+  } catch (err) {
+    showToast('Ошибка при установке версии: ' + err.message, 'error');
+  }
+}
+
+async function triggerUpdateRestart(customMessage) {
+  let overlay = document.getElementById('dimmer-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'dimmer-overlay';
+    overlay.className = 'dimmer-overlay';
+    overlay.innerHTML = '<div class="dimmer-spinner"></div>' +
+                        `<div class="dimmer-text">${customMessage || 'Перезапуск веб-контроллера...'}</div>`;
+    document.body.appendChild(overlay);
+  } else {
+    overlay.querySelector('.dimmer-text').textContent = customMessage || 'Перезапуск веб-контроллера...';
+  }
+  
+  setTimeout(() => overlay.classList.add('active'), 20);
+  
+  let secondsLeft = 5;
+  showToast('Панель перезапускается, подождите ' + secondsLeft + ' сек...', 'success');
+  
+  const countdownInterval = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft > 0) {
+      showToast('Панель перезапускается, подождите ' + secondsLeft + ' сек...', 'success');
+    } else {
+      clearInterval(countdownInterval);
+    }
+  }, 1000);
+  
+  setTimeout(() => {
+    window.location.reload();
+  }, 5000);
+}
 
