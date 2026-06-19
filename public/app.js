@@ -44,6 +44,8 @@ function switchTab(tabId) {
     loadProxiesList();
   } else if (tabId === 'rules') {
     loadDynamicRulesTab();
+  } else if (tabId === 'updates') {
+    loadVersionsList();
   } else {
     loadData();
   }
@@ -140,6 +142,7 @@ function renderTable() {
   });
 
   updateApplyButtonState();
+  initCustomSelects();
 }
 
 // Кнопка применить (активация)
@@ -1004,10 +1007,49 @@ window.onload = function() {
     indentUnit: 2
   });
   loadData();
+  loadPanelVersion();
   updateXkeenStatus();
   initCustomTooltips();
+  initCustomSelects();
   setInterval(updateXkeenStatus, 15000); // Опрос раз в 15 секунд
 };
+
+async function loadPanelVersion() {
+  try {
+    const res = await fetch('/version.json');
+    if (res.ok) {
+      const data = await res.json();
+      const versionVal = document.getElementById('panel-version-val');
+      const branchVal = document.getElementById('panel-branch-val');
+      if (versionVal) versionVal.textContent = data.version;
+      if (branchVal) {
+        branchVal.textContent = data.branch;
+        if (data.branch.toLowerCase() === 'main' || data.branch.toLowerCase() === 'master') {
+          branchVal.style.background = 'var(--success-container)';
+          branchVal.style.color = 'var(--success)';
+          branchVal.style.borderColor = 'rgba(61, 220, 132, 0.25)';
+        } else {
+          // Dev branch style
+          branchVal.style.background = 'rgba(255, 183, 77, 0.15)';
+          branchVal.style.color = '#ffb74d';
+          branchVal.style.borderColor = 'rgba(255, 183, 77, 0.3)';
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Error loading panel version:', err);
+  }
+}
+
+// Добавляем переход на вкладку обновлений при клике на версию
+document.addEventListener('DOMContentLoaded', () => {
+  const versionPanel = document.getElementById('panel-version-info');
+  if (versionPanel) {
+    versionPanel.addEventListener('click', () => {
+      switchTab('updates');
+    });
+  }
+});
 
 // === Управление XKeen (запуск, остановка, рестарт) ===
 window.isXkeenRunning = false;
@@ -1120,8 +1162,9 @@ function updateXkeenTabPlaceholders() {
 }
 
 // Обработчики кликов управления XKeen
-document.getElementById('btn-xkeen-toggle').onclick = async function() {
-  const btn = this;
+async function handleXkeenToggle() {
+  const btn = document.getElementById('btn-xkeen-toggle');
+  if (btn.disabled) return;
   const restartBtn = document.getElementById('btn-xkeen-restart');
   btn.disabled = true;
   restartBtn.disabled = true;
@@ -1140,10 +1183,11 @@ document.getElementById('btn-xkeen-toggle').onclick = async function() {
   } finally {
     await updateXkeenStatus();
   }
-};
+}
 
-document.getElementById('btn-xkeen-restart').onclick = async function() {
-  const btn = this;
+async function handleXkeenRestart() {
+  const btn = document.getElementById('btn-xkeen-restart');
+  if (btn.disabled) return;
   const toggleBtn = document.getElementById('btn-xkeen-toggle');
   btn.disabled = true;
   toggleBtn.disabled = true;
@@ -1166,7 +1210,26 @@ document.getElementById('btn-xkeen-restart').onclick = async function() {
     if (svg) svg.style.transform = 'none';
     await updateXkeenStatus();
   }
-};
+}
+
+const btnXkeenToggleEl = document.getElementById('btn-xkeen-toggle');
+const btnXkeenRestartEl = document.getElementById('btn-xkeen-restart');
+
+if (btnXkeenToggleEl) {
+  btnXkeenToggleEl.onclick = handleXkeenToggle;
+  btnXkeenToggleEl.oncontextmenu = function(e) {
+    e.preventDefault();
+    handleXkeenToggle();
+  };
+}
+
+if (btnXkeenRestartEl) {
+  btnXkeenRestartEl.onclick = handleXkeenRestart;
+  btnXkeenRestartEl.oncontextmenu = function(e) {
+    e.preventDefault();
+    handleXkeenRestart();
+  };
+}
 
 // --- ДИНАМИЧЕСКИЕ ПРАВИЛА ---
 let dynamicRulesList = [];
@@ -1318,6 +1381,7 @@ function renderRulesTable() {
 
     tbody.appendChild(tr);
   });
+  initCustomSelects();
 }
 
 function filterRulesTable() {
@@ -1422,16 +1486,16 @@ function initCustomTooltips() {
   }
 
   document.addEventListener('mouseover', (e) => {
-    const target = e.target.closest('.pgc-dot, [data-tooltip]');
+    const target = e.target.closest('.pgc-dot, [data-tooltip], [title]');
     if (!target) return;
 
     let text = '';
-    if (target.hasAttribute('data-tooltip')) {
-      text = target.getAttribute('data-tooltip');
-    } else if (target.hasAttribute('title')) {
+    if (target.hasAttribute('title')) {
       text = target.getAttribute('title');
       target.setAttribute('data-tooltip', text);
       target.removeAttribute('title');
+    } else if (target.hasAttribute('data-tooltip')) {
+      text = target.getAttribute('data-tooltip');
     }
 
     if (!text) return;
@@ -1473,5 +1537,372 @@ function initCustomTooltips() {
     target.addEventListener('mousemove', onMouseMove);
     target.addEventListener('mouseleave', onMouseLeave);
   });
+}
+
+// Инициализация кастомных красивых выпадающих списков
+function convertToCustomSelect(selectEl) {
+  if (!selectEl || selectEl.style.display === 'none' || selectEl.parentElement.classList.contains('custom-select-wrapper')) {
+    return;
+  }
+
+  // Create wrapper
+  const wrapper = document.createElement('div');
+  wrapper.className = 'custom-select-wrapper';
+  if (selectEl.className) {
+    wrapper.classList.add(selectEl.className + '-container');
+  }
+
+  if (selectEl.style.width) {
+    wrapper.style.width = selectEl.style.width;
+  }
+  
+  if (selectEl.disabled) {
+    wrapper.classList.add('disabled');
+  }
+
+  // Create trigger
+  const trigger = document.createElement('div');
+  trigger.className = 'custom-select-trigger';
+  
+  // Create dropdown
+  const dropdown = document.createElement('div');
+  dropdown.className = 'custom-select-dropdown';
+
+  // Function to sync trigger text and selected option class
+  const syncSelect = () => {
+    const selectedOpt = selectEl.options[selectEl.selectedIndex];
+    trigger.textContent = selectedOpt ? selectedOpt.textContent : 'Выбрать...';
+    
+    // Update selected class in dropdown
+    const options = dropdown.querySelectorAll('.custom-select-option');
+    options.forEach((opt, idx) => {
+      if (idx === selectEl.selectedIndex) {
+        opt.classList.add('selected');
+      } else {
+        opt.classList.remove('selected');
+      }
+    });
+
+    // Sync disabled state
+    if (selectEl.disabled) {
+      wrapper.classList.add('disabled');
+    } else {
+      wrapper.classList.remove('disabled');
+    }
+  };
+
+  // Populate dropdown options
+  const rebuildOptions = () => {
+    dropdown.innerHTML = '';
+    Array.from(selectEl.options).forEach((origOpt, idx) => {
+      const opt = document.createElement('div');
+      opt.className = 'custom-select-option';
+      opt.textContent = origOpt.textContent;
+      if (idx === selectEl.selectedIndex) opt.classList.add('selected');
+      
+      opt.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (selectEl.disabled) return;
+        selectEl.selectedIndex = idx;
+        
+        // Trigger original events
+        selectEl.dispatchEvent(new Event('change'));
+        
+        syncSelect();
+        wrapper.classList.remove('open');
+      });
+      dropdown.appendChild(opt);
+    });
+  };
+
+  rebuildOptions();
+
+  // Handle trigger click
+  trigger.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (selectEl.disabled) return;
+    
+    // Close other custom selects first
+    document.querySelectorAll('.custom-select-wrapper').forEach(w => {
+      if (w !== wrapper) w.classList.remove('open');
+    });
+    
+    wrapper.classList.toggle('open');
+    
+    // If opening, ensure the active option is scrolled into view
+    if (wrapper.classList.contains('open')) {
+      const selected = dropdown.querySelector('.custom-select-option.selected');
+      if (selected) {
+        dropdown.scrollTop = selected.offsetTop - dropdown.offsetTop - 10;
+      }
+    }
+  });
+
+  // Watch for changes on the original select (e.g. if options list changes dynamically)
+  const observer = new MutationObserver(() => {
+    rebuildOptions();
+    syncSelect();
+  });
+  observer.observe(selectEl, { childList: true, attributes: true, subtree: true });
+
+  // Watch for direct select disabled property changes
+  const checkDisabledTimer = setInterval(() => {
+    if (!document.body.contains(wrapper)) {
+      clearInterval(checkDisabledTimer);
+      return;
+    }
+    if (selectEl.disabled && !wrapper.classList.contains('disabled')) {
+      wrapper.classList.add('disabled');
+    } else if (!selectEl.disabled && wrapper.classList.contains('disabled')) {
+      wrapper.classList.remove('disabled');
+    }
+  }, 200);
+
+  // Insert elements
+  selectEl.parentNode.insertBefore(wrapper, selectEl);
+  wrapper.appendChild(selectEl); // move select inside wrapper
+  selectEl.style.display = 'none'; // hide original select
+  wrapper.appendChild(trigger);
+  wrapper.appendChild(dropdown);
+
+  // Initial sync
+  syncSelect();
+  
+  // Expose sync method on the native select
+  selectEl.syncCustomSelect = syncSelect;
+}
+
+function initCustomSelects() {
+  document.querySelectorAll('select').forEach(sel => {
+    if (!sel.classList.contains('no-custom')) {
+      convertToCustomSelect(sel);
+    }
+  });
+}
+
+// Global click listener to close dropdowns when clicking outside
+document.addEventListener('click', () => {
+  document.querySelectorAll('.custom-select-wrapper').forEach(wrapper => {
+    wrapper.classList.remove('open');
+  });
+});
+
+// === ФУНКЦИОНАЛ УПРАВЛЕНИЯ ВЕРСИЯМИ И ОБНОВЛЕНИЯМИ ===
+let selectedCommitSha = null;
+let currentCommitSha = null;
+
+async function loadVersionsList() {
+  const container = document.getElementById('versions-list-container');
+  const installBtn = document.getElementById('btn-install-version');
+  
+  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка списка версий с роутера...</div>';
+  installBtn.disabled = true;
+  selectedCommitSha = null;
+  currentCommitSha = null;
+
+  try {
+    const res = await fetch('/api/system/versions');
+    if (!res.ok) throw new Error('Ошибка при запросе версий');
+    const payload = await res.json();
+    if (!payload.success) throw new Error(payload.error || 'Неизвестная ошибка');
+
+    const branch = payload.branch;
+    const commits = payload.commits || [];
+
+    // Обновляем метки ветки
+    document.getElementById('active-branch-label').textContent = branch;
+    const branchSelect = document.getElementById('update-branch-select');
+    if (branchSelect) {
+      branchSelect.value = branch;
+      if (typeof branchSelect.syncCustomSelect === 'function') {
+        branchSelect.syncCustomSelect();
+      }
+    }
+
+    container.innerHTML = '';
+    if (commits.length === 0) {
+      container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Коммиты не найдены.</div>';
+      return;
+    }
+
+    // Сохраняем текущий SHA
+    const currentCommit = commits.find(c => c.current);
+    if (currentCommit) {
+      currentCommitSha = currentCommit.sha;
+      selectedCommitSha = currentCommit.sha;
+    }
+
+    commits.forEach(commit => {
+      const card = document.createElement('div');
+      card.className = 'version-item-card';
+      if (commit.current) {
+        card.classList.add('current', 'selected');
+      }
+      card.dataset.sha = commit.sha;
+
+      const isDev = isDevVersion(commit.version);
+      const devBadgeHtml = isDev ? '<span class="version-dev-badge">Dev</span>' : '';
+      const currentBadgeHtml = commit.current ? '<span class="version-current-badge">Текущая</span>' : '';
+
+      card.innerHTML = `
+        <div class="version-item-header">
+          <div class="version-item-info">
+            <div class="version-item-title-row">
+              <span class="version-item-title">${commit.version}</span>
+              ${devBadgeHtml}
+              ${currentBadgeHtml}
+            </div>
+            <div class="version-item-meta">${commit.date}</div>
+          </div>
+          <div class="version-item-radio">
+            <div class="version-item-radio-inner"></div>
+          </div>
+        </div>
+        <div class="version-item-body">
+          <div class="version-changes-title">Изменения:</div>
+          <ul class="version-changes-list">
+            <li>${commit.message}</li>
+            <li style="color: rgba(255,255,255,0.4); font-size: 0.8rem; margin-top: 10px;">Автор: ${commit.author} | SHA: ${commit.sha.substring(0, 8)}</li>
+          </ul>
+        </div>
+      `;
+
+      card.addEventListener('click', () => {
+        // Убираем выделение со всех карточек
+        container.querySelectorAll('.version-item-card').forEach(c => c.classList.remove('selected'));
+        // Выделяем текущую
+        card.classList.add('selected');
+        selectedCommitSha = commit.sha;
+
+        // Если выбрали текущую запущенную версию, отключаем кнопку установки
+        if (selectedCommitSha === currentCommitSha) {
+          installBtn.disabled = true;
+        } else {
+          installBtn.disabled = false;
+        }
+      });
+
+      container.appendChild(card);
+    });
+
+  } catch (err) {
+    container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px 0;">Ошибка загрузки версий: ${err.message}</div>`;
+    showToast('Ошибка при загрузке версий: ' + err.message, 'error');
+  }
+}
+
+async function changeUpdateBranch() {
+  const branchSelect = document.getElementById('update-branch-select');
+  if (!branchSelect) return;
+  const branchVal = branchSelect.value;
+
+  if (!confirm(`Вы действительно хотите переключить панель на ветку "${branchVal}"?\nПри этом панель обновится на последнюю версию этой ветки, настройки сохранятся.`)) {
+    return;
+  }
+
+  try {
+    showToast('Переключение ветки...');
+    const response = await fetch('/api/system/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch: branchVal })
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Ошибка при переключении');
+    }
+
+    triggerUpdateRestart('Переключение ветки и перезапуск панели...');
+  } catch (err) {
+    showToast('Ошибка при изменении ветки: ' + err.message, 'error');
+  }
+}
+
+async function installSelectedVersion() {
+  if (!selectedCommitSha) {
+    showToast('Сначала выберите версию для установки', 'error');
+    return;
+  }
+
+  if (selectedCommitSha === currentCommitSha) {
+    showToast('Выбранная версия уже установлена', 'error');
+    return;
+  }
+
+  if (!confirm(`Вы действительно хотите переключить панель на версию ${selectedCommitSha.substring(0, 7)}?\nВсе ваши настройки и базы данных будут сохранены.`)) {
+    return;
+  }
+
+  try {
+    showToast('Установка выбранной версии...');
+    const response = await fetch('/api/system/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sha: selectedCommitSha })
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Ошибка при установке');
+    }
+
+    triggerUpdateRestart('Установка версии и перезапуск панели...');
+  } catch (err) {
+    showToast('Ошибка при установке версии: ' + err.message, 'error');
+  }
+}
+
+async function triggerUpdateRestart(customMessage) {
+  let overlay = document.getElementById('dimmer-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'dimmer-overlay';
+    overlay.className = 'dimmer-overlay';
+    overlay.innerHTML = '<div class="dimmer-spinner"></div>' +
+                        `<div class="dimmer-text">${customMessage || 'Перезапуск веб-контроллера...'}</div>`;
+    document.body.appendChild(overlay);
+  } else {
+    overlay.querySelector('.dimmer-text').textContent = customMessage || 'Перезапуск веб-контроллера...';
+  }
+  
+  setTimeout(() => overlay.classList.add('active'), 20);
+  
+  let secondsLeft = 5;
+  showToast('Панель перезапускается, подождите ' + secondsLeft + ' сек...', 'success');
+  
+  const countdownInterval = setInterval(() => {
+    secondsLeft--;
+    if (secondsLeft > 0) {
+      showToast('Панель перезапускается, подождите ' + secondsLeft + ' сек...', 'success');
+    } else {
+      clearInterval(countdownInterval);
+    }
+  }, 1000);
+  
+  setTimeout(() => {
+    window.location.reload();
+  }, 5000);
+}
+
+function isDevVersion(versionStr) {
+  // Clean version string (remove 'v' prefix if present)
+  const clean = versionStr.startsWith('v') ? versionStr.substring(1) : versionStr;
+  
+  // Check if it matches semver pattern X.Y.Z
+  const parts = clean.split('.');
+  if (parts.length === 3) {
+    const major = parseInt(parts[0], 10);
+    const minor = parseInt(parts[1], 10);
+    const patch = parseInt(parts[2], 10);
+    if (!isNaN(major) && !isNaN(minor) && !isNaN(patch)) {
+      return patch !== 0; // Dev version if patch is not 0
+    }
+  }
+  
+  // If it's a short SHA or doesn't follow X.Y.0 pattern, treat as dev version unless it is exactly 1.0.0
+  if (clean === '1.0.0') return false;
+  
+  return true;
 }
 

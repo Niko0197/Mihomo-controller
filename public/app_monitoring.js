@@ -1203,6 +1203,13 @@ function renderProxyGroups(proxiesData) {
     const delayText = resolvedActiveDelay > 0 ? `${resolvedActiveDelay} ms` : '—';
 
     // --- Header ---
+    const providerMapping = {
+      '💎 StealthSurf': 'stealthsurf',
+      '💎 StealthSurf 2': 'StealthSurf2',
+      '🎱 GitHub': 'Igareck_Black_VPN'
+    };
+    const providerToUpdate = providerMapping[group.name];
+
     const header = document.createElement('div');
     header.className = 'pgc-header';
     header.innerHTML = `
@@ -1212,8 +1219,9 @@ function renderProxyGroups(proxiesData) {
         <span class="pgc-meta">·&nbsp;${typeLabel}&nbsp;·&nbsp;${aliveCount}/${totalNodes}</span>
       </div>
       <div class="pgc-header-right">
+        ${providerToUpdate ? `<button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${providerToUpdate}')">🔄</button>` : ''}
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
-        <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
+        <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
     `;
 
@@ -1223,11 +1231,43 @@ function renderProxyGroups(proxiesData) {
       if (e.target.closest('.pgc-node-btn') || e.target.closest('.pgc-dot') || e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
-      const nowCollapsed = card.classList.toggle('pgc-collapsed');
-      localStorage.setItem('pgc-collapsed-' + group.name, nowCollapsed ? 'true' : 'false');
+      const nodesPanel = card.querySelector('.pgc-nodes-panel');
       const arrow = header.querySelector('.pgc-toggle-arrow');
-      if (arrow) {
-        arrow.textContent = nowCollapsed ? '▸' : '▾';
+      const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
+      
+      if (nodesPanel && nodesPanel._onTransitionEnd) {
+        nodesPanel.removeEventListener('transitionend', nodesPanel._onTransitionEnd);
+        nodesPanel._onTransitionEnd = null;
+      }
+      
+      if (isCurrentlyCollapsed) {
+        card.classList.remove('pgc-collapsed');
+        if (arrow) arrow.classList.add('rotated');
+        if (nodesPanel) {
+          const height = nodesPanel.scrollHeight;
+          nodesPanel.style.maxHeight = height + 'px';
+          nodesPanel.style.opacity = '1';
+          nodesPanel._onTransitionEnd = (evt) => {
+            if (evt.propertyName === 'max-height') {
+              nodesPanel.style.maxHeight = 'none';
+              nodesPanel.removeEventListener('transitionend', nodesPanel._onTransitionEnd);
+              nodesPanel._onTransitionEnd = null;
+            }
+          };
+          nodesPanel.addEventListener('transitionend', nodesPanel._onTransitionEnd);
+        }
+        localStorage.setItem('pgc-collapsed-' + group.name, 'false');
+      } else {
+        if (nodesPanel) {
+          const height = nodesPanel.scrollHeight;
+          nodesPanel.style.maxHeight = height + 'px';
+          nodesPanel.offsetHeight; // force reflow
+          nodesPanel.style.maxHeight = '0px';
+          nodesPanel.style.opacity = '0';
+        }
+        if (arrow) arrow.classList.remove('rotated');
+        card.classList.add('pgc-collapsed');
+        localStorage.setItem('pgc-collapsed-' + group.name, 'true');
       }
     });
 
@@ -1262,56 +1302,73 @@ function renderProxyGroups(proxiesData) {
       dot.className = 'pgc-dot ' + getLatencyDotClass(d);
       dot.title = nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A');
       if (nodeName === group.now) dot.classList.add('pgc-dot-active');
+      // Dot context menu and hover pointer is available for all groups
+      dot.style.cursor = 'pointer';
+      dot.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pingProxyNode(nodeName);
+      });
       if (isSelector) {
-        dot.style.cursor = 'pointer';
         dot.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
-        dot.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          pingProxyNode(nodeName);
-        });
       }
       dotsRow.appendChild(dot);
     });
 
-    // --- Node buttons panel (for Selector groups) ---
-    let nodesPanel = null;
-    if (isSelector && totalNodes <= 30) {
-      nodesPanel = document.createElement('div');
+    // --- Node buttons panel (for all group types) ---
+    const nodesPanel = document.createElement('div');
+    if (totalNodes >= 9) {
+      nodesPanel.className = 'pgc-nodes-panel grid-3-columns';
+    } else {
       nodesPanel.className = 'pgc-nodes-panel';
-      nodesPanel.style.display = 'flex'; // Always visible when card is expanded
+    }
+    
+    if (isCollapsed) {
+      nodesPanel.style.maxHeight = '0px';
+      nodesPanel.style.opacity = '0';
+    } else {
+      nodesPanel.style.maxHeight = 'none';
+      nodesPanel.style.opacity = '1';
+    }
 
-      group.all.forEach(nodeName => {
-        const np = proxies[nodeName];
-        const isActive = nodeName === group.now;
-        const isChildGroup = np && np.all && Array.isArray(np.all);
-        const childType = np ? np.type : '';
-        const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
-        const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
+    group.all.forEach(nodeName => {
+      const np = proxies[nodeName];
+      const isActive = nodeName === group.now;
+      const isChildGroup = np && np.all && Array.isArray(np.all);
+      const childType = np ? np.type : '';
+      const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
+      const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
 
-        const btn = document.createElement('button');
-        btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
+      const btn = document.createElement('button');
+      btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
+      btn.setAttribute('data-tooltip', nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A'));
 
-        btn.innerHTML = `
-          <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
-          <span class="pgc-nb-name">${nodeName}</span>
-          ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
-          ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
-          ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
-        `;
+      btn.innerHTML = `
+        <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
+        <span class="pgc-nb-name">${nodeName}</span>
+        ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
+        ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
+        ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
+      `;
 
+      if (isSelector) {
         btn.addEventListener('click', (e) => {
           e.stopPropagation();
           selectProxyInGroup(group.name, nodeName);
         });
-        btn.addEventListener('contextmenu', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          pingProxyNode(nodeName);
+      } else {
+        btn.style.cursor = 'default';
+        btn.addEventListener('click', (e) => {
+          e.stopPropagation(); // Stop propagation to prevent card collapse
         });
-        nodesPanel.appendChild(btn);
+      }
+      btn.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pingProxyNode(nodeName);
       });
-    }
+      nodesPanel.appendChild(btn);
+    });
 
     const body = document.createElement('div');
     body.className = 'pgc-body';
@@ -1390,7 +1447,7 @@ function renderProxyProviders(providersData, proxiesData) {
         <span class="pgc-count-badge">${total}</span>
         <button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${provider.name.replace(/'/g, "\\'")}')">🔄</button>
         <button class="pgc-hc-btn pgc-hc-bolt" title="Healthcheck" onclick="event.stopPropagation();healthcheckProvider('${provider.name.replace(/'/g, "\\'")}')">⚡</button>
-        <span class="pgc-toggle-arrow">${isCollapsed ? '▸' : '▾'}</span>
+        <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
     `;
 
@@ -1399,11 +1456,43 @@ function renderProxyProviders(providersData, proxiesData) {
       if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
-      const nowCollapsed = card.classList.toggle('pgc-collapsed');
-      localStorage.setItem('pgc-collapsed-' + provider.name, nowCollapsed ? 'true' : 'false');
+      const pgcBody = card.querySelector('.pgc-body');
       const arrow = header.querySelector('.pgc-toggle-arrow');
-      if (arrow) {
-        arrow.textContent = nowCollapsed ? '▸' : '▾';
+      const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
+      
+      if (pgcBody && pgcBody._onTransitionEnd) {
+        pgcBody.removeEventListener('transitionend', pgcBody._onTransitionEnd);
+        pgcBody._onTransitionEnd = null;
+      }
+      
+      if (isCurrentlyCollapsed) {
+        card.classList.remove('pgc-collapsed');
+        if (arrow) arrow.classList.add('rotated');
+        if (pgcBody) {
+          const height = pgcBody.scrollHeight;
+          pgcBody.style.maxHeight = height + 'px';
+          pgcBody.style.opacity = '1';
+          pgcBody._onTransitionEnd = (evt) => {
+            if (evt.propertyName === 'max-height') {
+              pgcBody.style.maxHeight = 'none';
+              pgcBody.removeEventListener('transitionend', pgcBody._onTransitionEnd);
+              pgcBody._onTransitionEnd = null;
+            }
+          };
+          pgcBody.addEventListener('transitionend', pgcBody._onTransitionEnd);
+        }
+        localStorage.setItem('pgc-collapsed-' + provider.name, 'false');
+      } else {
+        if (pgcBody) {
+          const height = pgcBody.scrollHeight;
+          pgcBody.style.maxHeight = height + 'px';
+          pgcBody.offsetHeight; // force reflow
+          pgcBody.style.maxHeight = '0px';
+          pgcBody.style.opacity = '0';
+        }
+        if (arrow) arrow.classList.remove('rotated');
+        card.classList.add('pgc-collapsed');
+        localStorage.setItem('pgc-collapsed-' + provider.name, 'true');
       }
     });
 
@@ -1447,6 +1536,7 @@ function renderProxyProviders(providersData, proxiesData) {
       const d = getLastDelay(p);
       const nodeDiv = document.createElement('div');
       nodeDiv.className = 'pgc-prov-node';
+      nodeDiv.setAttribute('data-tooltip', p.name + ': ' + (d > 0 ? d + 'ms' : 'N/A') + ' (' + p.type + ')');
       nodeDiv.innerHTML = `
         <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
         <span class="pgc-nb-name">${p.name}</span>
@@ -1479,6 +1569,13 @@ function renderProxyProviders(providersData, proxiesData) {
 
     const body = document.createElement('div');
     body.className = 'pgc-body';
+    if (isCollapsed) {
+      body.style.maxHeight = '0px';
+      body.style.opacity = '0';
+    } else {
+      body.style.maxHeight = 'none';
+      body.style.opacity = '1';
+    }
     body.appendChild(info);
     body.appendChild(subDiv);
     body.appendChild(dotsRow);
@@ -1743,12 +1840,7 @@ function setupSystemMonitorToggle() {
     arrow.classList.remove('rotated');
   }
   
-  card.addEventListener('click', (e) => {
-    // Avoid toggling the accordion when clicking inside the body (e.g. interacting with chart)
-    if (body.contains(e.target)) {
-      return;
-    }
-    
+  const toggleMonitor = () => {
     const isCurrentlyExpanded = body.classList.contains('expanded');
     if (!isCurrentlyExpanded) {
       body.classList.add('expanded');
@@ -1777,6 +1869,15 @@ function setupSystemMonitorToggle() {
       
       localStorage.setItem('system-monitor-expanded', 'false');
     }
+  };
+
+  card.addEventListener('click', (e) => {
+    toggleMonitor();
+  });
+
+  card.addEventListener('contextmenu', (e) => {
+    e.preventDefault();
+    toggleMonitor();
   });
 }
 
@@ -2003,6 +2104,9 @@ function renderClientsTable() {
     
     tbody.appendChild(tr);
   });
+  if (typeof initCustomSelects === 'function') {
+    initCustomSelects();
+  }
 }
 
 async function toggleClientVpn(ip, checkboxEl) {

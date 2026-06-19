@@ -1476,6 +1476,198 @@ function handleServerRestart(req, res) {
   }
 }
 
+// GET /api/system/versions
+function handleGetVersions(req, res) {
+  const { exec } = require('child_process');
+  
+  exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdoutBranch) => {
+    if (err) {
+      if (err.message.includes('not found') || err.message.includes('ENOENT')) {
+        console.log('[VPN Web Controller] Git not found. Installing git via opkg...');
+        exec('/opt/bin/opkg update && /opt/bin/opkg install git-http', (errInstall, stdoutInstall) => {
+          if (errInstall) {
+            res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: false, error: 'Failed to auto-install git: ' + errInstall.message }));
+            return;
+          }
+          console.log('[VPN Web Controller] Git installed successfully. Retrying versions request...');
+          handleGetVersions(req, res);
+        });
+        return;
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+      return;
+    }
+    const currentBranch = stdoutBranch.trim();
+    
+    exec('git fetch origin ' + currentBranch, { cwd: __dirname }, (errFetch) => {
+      exec('git log origin/' + currentBranch + ' -n 15 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLog, stdoutLog) => {
+        if (errLog) {
+          exec('git log -n 15 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLocalLog, stdoutLocalLog) => {
+            if (errLocalLog) {
+              res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ success: false, error: errLocalLog.message }));
+              return;
+            }
+            parseAndSendCommits(stdoutLocalLog, currentBranch, res);
+          });
+          return;
+        }
+        parseAndSendCommits(stdoutLog, currentBranch, res);
+      });
+    });
+  });
+}
+
+function parseAndSendCommits(logStdout, branch, res) {
+  try {
+    const { execSync } = require('child_process');
+    const lines = logStdout.split('\n').filter(line => line.trim().length > 0);
+    const commits = [];
+    
+    let currentHeadSha = '';
+    try {
+      currentHeadSha = execSync('git rev-parse HEAD', { cwd: __dirname }).toString().trim();
+    } catch (e) {}
+
+    for (const line of lines) {
+      const parts = line.split('|');
+      if (parts.length < 4) continue;
+      const sha = parts[0];
+      const date = parts[1];
+      const author = parts[2];
+      const message = parts[3];
+      
+      let versionNum = '';
+      try {
+        const versionJsonStr = execSync('git show ' + sha + ':public/version.json', { cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+        const versionData = JSON.parse(versionJsonStr);
+        versionNum = versionData.version || sha.substring(0, 7);
+      } catch (e) {
+        versionNum = sha.substring(0, 7);
+      }
+      
+      versionNum = String(versionNum);
+      const displayVersion = versionNum.startsWith('v') ? versionNum : 'v' + versionNum;
+      
+      commits.push({
+        sha,
+        version: displayVersion,
+        date,
+        author,
+        message,
+        current: sha === currentHeadSha
+      });
+    }
+    
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, branch, commits }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: 'parseAndSendCommits error: ' + err.message }));
+  }
+}
+
+// POST /api/system/update
+function handleSystemUpdate(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    try {
+      const payload = JSON.parse(body);
+      const { branch, sha } = payload;
+      const { exec } = require('child_process');
+      
+      exec('git reset --hard', { cwd: __dirname }, (errReset) => {
+        if (errReset) {
+          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: false, error: 'Git reset error: ' + errReset.message }));
+          return;
+        }
+        
+        if (branch) {
+          exec('git checkout ' + branch, { cwd: __dirname }, (errCheckout) => {
+            if (errCheckout) {
+              res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ success: false, error: 'Git checkout branch error: ' + errCheckout.message }));
+              return;
+            }
+            exec('git pull origin ' + branch, { cwd: __dirname }, (errPull) => {
+              if (errPull) {
+                res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ success: false, error: 'Git pull error: ' + errPull.message }));
+                return;
+              }
+              
+              updateVersionJsonBranch(branch);
+              
+              res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ success: true, message: 'Branch switched and pulled' }));
+              
+              triggerSelfRestart();
+            });
+          });
+        } else if (sha) {
+          exec('git checkout ' + sha, { cwd: __dirname }, (errCheckout) => {
+            if (errCheckout) {
+              res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+              res.end(JSON.stringify({ success: false, error: 'Git checkout SHA error: ' + errCheckout.message }));
+              return;
+            }
+            
+            res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+            res.end(JSON.stringify({ success: true, message: 'SHA checked out' }));
+            
+            triggerSelfRestart();
+          });
+        } else {
+          res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: false, error: 'Missing branch or sha' }));
+        }
+      });
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+function updateVersionJsonBranch(branchName) {
+  const fs = require('fs');
+  const path = require('path');
+  const vPath = path.join(__dirname, 'public', 'version.json');
+  try {
+    if (fs.existsSync(vPath)) {
+      const data = JSON.parse(fs.readFileSync(vPath, 'utf8'));
+      data.branch = branchName;
+      fs.writeFileSync(vPath, JSON.stringify(data, null, 2), 'utf8');
+    }
+  } catch (e) {
+    console.error('Error updating version.json branch:', e.message);
+  }
+}
+
+function triggerSelfRestart() {
+  try {
+    if (clientsManager && typeof clientsManager.saveTrafficDbSync === 'function') {
+      clientsManager.saveTrafficDbSync();
+    }
+  } catch (e) {
+    console.error('Ошибка сохранения трафика перед перезапуском:', e.message);
+  }
+  
+  setTimeout(() => {
+    const { spawn } = require('child_process');
+    const child = spawn('sh', ['-c', 'sleep 1 && /opt/etc/init.d/S99vpn-updater-web restart'], {
+      detached: true,
+      stdio: 'ignore'
+    });
+    child.unref();
+    process.exit(0);
+  }, 500);
+}
+
 // GET /api/xkeen/proxies
 async function handleGetXkeenProxies(req, res) {
   try {
@@ -1966,11 +2158,23 @@ const server = http.createServer(async (req, res) => {
       serveStaticFile(res, 'app_monitoring.js', 'application/javascript; charset=utf-8');
       return;
     }
+    if (pathname === '/version.json') {
+      serveStaticFile(res, 'version.json', 'application/json; charset=utf-8');
+      return;
+    }
   }
 
   // Маршрутизация API
   if (req.method === 'GET' && pathname === '/api/system/stats') {
     handleGetSystemStats(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/system/versions') {
+    handleGetVersions(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/system/update') {
+    handleSystemUpdate(req, res);
     return;
   }
 

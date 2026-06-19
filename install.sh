@@ -6,7 +6,7 @@
 
 GITHUB_USER="Niko0197"
 REPO_NAME="Mihomo-controller"
-BRANCH="main"
+BRANCH="Dev"
 
 INSTALL_DIR="/opt/root/mihomo-controller"
 INIT_SCRIPT="/opt/etc/init.d/S99mihomo-controller"
