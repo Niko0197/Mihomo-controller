@@ -151,8 +151,6 @@ header {
   background: var(--md-sys-color-surface);
   border: 1px solid var(--md-sys-color-outline);
   border-radius: 28px;
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
   padding: 32px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.25);
   margin-bottom: 24px;
@@ -2296,8 +2294,6 @@ input:checked + .slider:before {
   overflow: hidden;
   transition: opacity 0.22s cubic-bezier(0.25, 1, 0.5, 1),
               transform 0.22s cubic-bezier(0.25, 1, 0.5, 1);
-  backdrop-filter: blur(25px);
-  -webkit-backdrop-filter: blur(25px);
   max-height: 250px;
   overflow-y: auto;
   box-sizing: border-box;
