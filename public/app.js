@@ -565,7 +565,7 @@ function showAddSubModal(sub = null) {
     chk.type = 'checkbox';
     chk.value = g;
     chk.className = 'sub-group-select';
-    if (g === '⚙️Manual 1' || g === '⚙️Manual 2') chk.checked = true;
+    if (g === '⚙️Manual 1' || g === '⚙️Manual 2' || g === '⚙️Manual 3') chk.checked = true;
     
     label.appendChild(chk);
     label.appendChild(document.createTextNode(g));
@@ -1754,7 +1754,7 @@ async function loadVersionsList() {
         if (Array.isArray(c.changes)) {
           c.changes = c.changes.filter(change => {
             const lower = change.toLowerCase();
-            return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version');
+            return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version') && !lower.startsWith('local:');
           });
         }
         uniqueCommits.push(c);
@@ -1765,7 +1765,7 @@ async function loadVersionsList() {
           const list = Array.isArray(c.changes) ? c.changes : (c.message ? [c.message] : []);
           list.forEach(change => {
             const lower = change.toLowerCase();
-            if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version')) return;
+            if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version') || lower.startsWith('local:')) return;
             mergedChanges.push(change);
           });
         });

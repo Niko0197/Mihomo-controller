@@ -1144,6 +1144,7 @@ function renderProxyGroups(proxiesData) {
     '🚀Auto-Best',
     '⚙️Manual 1',
     '⚙️Manual 2',
+    '⚙️Manual 3',
     '💎 StealthSurf',
     '💎 StealthSurf 2',
     '🎱 GitHub',
@@ -1190,6 +1191,11 @@ function renderProxyGroups(proxiesData) {
     const icon = typeIcons[group.type.toLowerCase()] || '📡';
     const typeLabel = typeLabels[group.type.toLowerCase()] || group.type;
 
+    let iconHtml = '';
+    if (group.icon && (group.icon.startsWith('http') || group.icon.startsWith('./'))) {
+      iconHtml = `<img src="${group.icon}" style="width: 18px; height: 18px; object-fit: contain; margin-right: 6px; flex-shrink: 0;" onerror="this.style.display='none'; this.nextElementSibling.style.display='inline-block';" />`;
+    }
+
     const localVal = localStorage.getItem('pgc-collapsed-' + group.name);
     const isCollapsed = localVal !== null ? localVal === 'true' : true;
     if (isCollapsed) {
@@ -1214,7 +1220,7 @@ function renderProxyGroups(proxiesData) {
     header.className = 'pgc-header';
     header.innerHTML = `
       <div class="pgc-header-left">
-        <span class="pgc-icon">${icon}</span>
+        <span class="pgc-icon" style="display: flex; align-items: center;">${iconHtml}<span class="fallback-icon" style="${iconHtml ? 'display: none;' : 'display: inline-block;'}">${icon}</span></span>
         <span class="pgc-name">${group.name}</span>
         <span class="pgc-meta">·&nbsp;${typeLabel}&nbsp;·&nbsp;${aliveCount}/${totalNodes}</span>
       </div>

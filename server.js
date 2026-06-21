@@ -661,6 +661,7 @@ async function handleGetData(req, res) {
         '🚀Auto-Best',
         '⚙️Manual 1',
         '⚙️Manual 2',
+        '⚙️Manual 3',
         '💎 StealthSurf',
         '💎 StealthSurf 2',
         '🎱 GitHub',
@@ -1614,7 +1615,7 @@ function parseAndSendCommits(logStdout, branch, res) {
             .filter(line => {
               if (line.length === 0) return false;
               const lower = line.toLowerCase();
-              return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version');
+              return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version') && !lower.startsWith('local:');
             });
         } catch (e) {
           changes = [c.message];
@@ -1623,7 +1624,7 @@ function parseAndSendCommits(logStdout, branch, res) {
       } else {
         // Dev-коммиты просто показывают свое сообщение
         const lower = c.message.toLowerCase();
-        if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version')) {
+        if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version') || lower.startsWith('local:')) {
           c.changes = [];
         } else {
           c.changes = [c.message];
@@ -2923,7 +2924,9 @@ const groupToNameMap = {
   'GLOBAL': 'custom_global',
   '🚀Auto-Best': 'custom_autobest',
   '⚙️Manual 1': 'custom_manual_1',
-  '⚙️Manual 2': 'custom_manual_2'
+  '⚙️Manual 2': 'custom_manual_2',
+  '⚙️Manual 3': 'custom_manual_3',
+  '18+': 'custom_18_plus'
 };
 
 function getGroupNameKey(group) {
