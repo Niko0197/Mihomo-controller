@@ -2238,8 +2238,6 @@ input:checked + .slider:before {
               border-color 0.18s cubic-bezier(0.25, 1, 0.5, 1),
               color 0.18s cubic-bezier(0.25, 1, 0.5, 1),
               transform 0.06s cubic-bezier(0.25, 1, 0.5, 1);
-  backdrop-filter: blur(10px);
-  -webkit-backdrop-filter: blur(10px);
   box-sizing: border-box;
 }
 
