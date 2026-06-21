@@ -1127,7 +1127,7 @@ function renderProxyGroups(proxiesData) {
   if (!container) return;
 
   const proxies = proxiesData.proxies || {};
-  const excludeNames = ['GLOBAL', 'DIRECT', 'REJECT'];
+  const excludeNames = ['GLOBAL', 'DIRECT', 'REJECT', '18+'];
   const groups = [];
 
   for (const [name, proxy] of Object.entries(proxies)) {

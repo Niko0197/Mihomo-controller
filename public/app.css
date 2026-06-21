@@ -1466,11 +1466,10 @@ input[type="checkbox"]:checked::before {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 5px 0 8px;
-  margin-bottom: 8px;
+  padding: 5px 0 2px;
+  margin-bottom: 6px;
   font-size: 0.82rem;
   color: var(--text-muted);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
 }
 
 .pgc-sel-icon {
@@ -1542,7 +1541,8 @@ input[type="checkbox"]:checked::before {
   transition: max-height 0.4s cubic-bezier(0.25, 1, 0.5, 1),
               opacity 0.3s ease,
               padding-top 0.4s cubic-bezier(0.25, 1, 0.5, 1),
-              margin-top 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+              margin-top 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+              border-color 0.3s ease;
   padding-top: 0;
   margin-top: 0;
   border-top: 1px solid rgba(255, 255, 255, 0);
