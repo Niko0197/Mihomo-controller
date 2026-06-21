@@ -1759,6 +1759,7 @@ input[type="checkbox"]:checked::before {
 /* --- Provider expanded node list --- */
 .pgc-prov-nodes {
   flex-direction: column;
+  flex-wrap: nowrap;
   gap: 4px;
 }
 
