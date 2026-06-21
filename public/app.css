@@ -1813,16 +1813,7 @@ input[type="checkbox"]:checked::before {
   padding-bottom: 16px;
 }
 
-.pgc-card.pgc-provider .pgc-body {
-  max-height: 0;
-  opacity: 0;
-  overflow: hidden;
-  transition: max-height 0.4s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.3s ease;
-}
 
-.pgc-card.pgc-provider:not(.pgc-collapsed) .pgc-body {
-  opacity: 1;
-}
 
 .pgc-toggle-arrow {
   font-size: 0.9rem;
@@ -1838,10 +1829,7 @@ input[type="checkbox"]:checked::before {
   transform: rotate(90deg);
 }
 
-.pgc-prov-toggle-nodes-btn:hover {
-  text-decoration: underline;
-  color: var(--md-sys-color-primary-container) !important;
-}
+
 
 /* Disable old chevron indicator */
 .pgc-expandable .pgc-header-left::after {

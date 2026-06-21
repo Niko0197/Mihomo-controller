@@ -1462,39 +1462,39 @@ function renderProxyProviders(providersData, proxiesData) {
       if (e.target.closest('button') || e.target.closest('a') || e.target.closest('input')) {
         return;
       }
-      const pgcBody = card.querySelector('.pgc-body');
+      const nodesPanel = card.querySelector('.pgc-prov-nodes');
       const arrow = header.querySelector('.pgc-toggle-arrow');
       const isCurrentlyCollapsed = card.classList.contains('pgc-collapsed');
       
-      if (pgcBody && pgcBody._onTransitionEnd) {
-        pgcBody.removeEventListener('transitionend', pgcBody._onTransitionEnd);
-        pgcBody._onTransitionEnd = null;
+      if (nodesPanel && nodesPanel._onTransitionEnd) {
+        nodesPanel.removeEventListener('transitionend', nodesPanel._onTransitionEnd);
+        nodesPanel._onTransitionEnd = null;
       }
       
       if (isCurrentlyCollapsed) {
         card.classList.remove('pgc-collapsed');
         if (arrow) arrow.classList.add('rotated');
-        if (pgcBody) {
-          const height = pgcBody.scrollHeight;
-          pgcBody.style.maxHeight = height + 'px';
-          pgcBody.style.opacity = '1';
-          pgcBody._onTransitionEnd = (evt) => {
+        if (nodesPanel) {
+          const height = nodesPanel.scrollHeight;
+          nodesPanel.style.maxHeight = height + 'px';
+          nodesPanel.style.opacity = '1';
+          nodesPanel._onTransitionEnd = (evt) => {
             if (evt.propertyName === 'max-height') {
-              pgcBody.style.maxHeight = 'none';
-              pgcBody.removeEventListener('transitionend', pgcBody._onTransitionEnd);
-              pgcBody._onTransitionEnd = null;
+              nodesPanel.style.maxHeight = 'none';
+              nodesPanel.removeEventListener('transitionend', nodesPanel._onTransitionEnd);
+              nodesPanel._onTransitionEnd = null;
             }
           };
-          pgcBody.addEventListener('transitionend', pgcBody._onTransitionEnd);
+          nodesPanel.addEventListener('transitionend', nodesPanel._onTransitionEnd);
         }
         localStorage.setItem('pgc-collapsed-' + provider.name, 'false');
       } else {
-        if (pgcBody) {
-          const height = pgcBody.scrollHeight;
-          pgcBody.style.maxHeight = height + 'px';
-          pgcBody.offsetHeight; // force reflow
-          pgcBody.style.maxHeight = '0px';
-          pgcBody.style.opacity = '0';
+        if (nodesPanel) {
+          const height = nodesPanel.scrollHeight;
+          nodesPanel.style.maxHeight = height + 'px';
+          nodesPanel.offsetHeight; // force reflow
+          nodesPanel.style.maxHeight = '0px';
+          nodesPanel.style.opacity = '0';
         }
         if (arrow) arrow.classList.remove('rotated');
         card.classList.add('pgc-collapsed');
@@ -1536,7 +1536,13 @@ function renderProxyProviders(providersData, proxiesData) {
     // Expandable nodes panel
     const nodesPanel = document.createElement('div');
     nodesPanel.className = 'pgc-nodes-panel pgc-prov-nodes';
-    nodesPanel.style.display = 'none';
+    if (isCollapsed) {
+      nodesPanel.style.maxHeight = '0px';
+      nodesPanel.style.opacity = '0';
+    } else {
+      nodesPanel.style.maxHeight = 'none';
+      nodesPanel.style.opacity = '1';
+    }
 
     nodesList.forEach(p => {
       const d = getLastDelay(p);
@@ -1552,40 +1558,11 @@ function renderProxyProviders(providersData, proxiesData) {
       nodesPanel.appendChild(nodeDiv);
     });
 
-    // Button to toggle nodes panel inside card body
-    const toggleNodesBtn = document.createElement('button');
-    toggleNodesBtn.className = 'pgc-prov-toggle-nodes-btn';
-    toggleNodesBtn.textContent = 'Показать список узлов';
-    toggleNodesBtn.style.margin = '10px 0 2px';
-    toggleNodesBtn.style.background = 'none';
-    toggleNodesBtn.style.border = 'none';
-    toggleNodesBtn.style.color = 'var(--md-sys-color-primary)';
-    toggleNodesBtn.style.fontSize = '0.8rem';
-    toggleNodesBtn.style.cursor = 'pointer';
-    toggleNodesBtn.style.padding = '0';
-    toggleNodesBtn.style.textAlign = 'left';
-    toggleNodesBtn.style.fontFamily = 'Inter, sans-serif';
-    toggleNodesBtn.style.fontWeight = '500';
-
-    toggleNodesBtn.addEventListener('click', () => {
-      const shown = nodesPanel.style.display !== 'none';
-      nodesPanel.style.display = shown ? 'none' : 'flex';
-      toggleNodesBtn.textContent = shown ? 'Показать список узлов' : 'Скрыть список узлов';
-    });
-
     const body = document.createElement('div');
     body.className = 'pgc-body';
-    if (isCollapsed) {
-      body.style.maxHeight = '0px';
-      body.style.opacity = '0';
-    } else {
-      body.style.maxHeight = 'none';
-      body.style.opacity = '1';
-    }
     body.appendChild(info);
     body.appendChild(subDiv);
     body.appendChild(dotsRow);
-    body.appendChild(toggleNodesBtn);
     body.appendChild(nodesPanel);
 
     card.appendChild(header);
