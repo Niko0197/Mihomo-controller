@@ -1024,8 +1024,9 @@ async function loadPanelVersion() {
       const branchVal = document.getElementById('panel-branch-val');
       if (versionVal) versionVal.textContent = data.version;
       if (branchVal) {
-        branchVal.textContent = data.branch;
-        if (data.branch.toLowerCase() === 'main' || data.branch.toLowerCase() === 'master') {
+        const isDev = isDevVersion(data.version);
+        branchVal.textContent = isDev ? 'Dev' : 'Main';
+        if (!isDev) {
           branchVal.style.background = 'var(--success-container)';
           branchVal.style.color = 'var(--success)';
           branchVal.style.borderColor = 'rgba(61, 220, 132, 0.25)';
@@ -1749,16 +1750,24 @@ async function loadVersionsList() {
 
     versionMap.forEach((commitsList, versionKey) => {
       if (commitsList.length === 1) {
-        uniqueCommits.push(commitsList[0]);
+        const c = commitsList[0];
+        if (Array.isArray(c.changes)) {
+          c.changes = c.changes.filter(change => {
+            const lower = change.toLowerCase();
+            return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version');
+          });
+        }
+        uniqueCommits.push(c);
       } else {
         // Объединяем все изменения из всех коммитов этой версии
         let mergedChanges = [];
         commitsList.forEach(c => {
-          if (Array.isArray(c.changes)) {
-            mergedChanges = mergedChanges.concat(c.changes);
-          } else if (c.message) {
-            mergedChanges.push(c.message);
-          }
+          const list = Array.isArray(c.changes) ? c.changes : (c.message ? [c.message] : []);
+          list.forEach(change => {
+            const lower = change.toLowerCase();
+            if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version')) return;
+            mergedChanges.push(change);
+          });
         });
         
         // Очищаем дубликаты строк изменений

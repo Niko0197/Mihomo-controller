@@ -335,7 +335,10 @@ async function handleXkeenTrace(req, res) {
       return;
     }
 
-    const trimmedDomain = domain.trim().toLowerCase();
+    let trimmedDomain = domain.trim().toLowerCase();
+    // Очищаем домен от протокола, путей, порта и GET-параметров
+    trimmedDomain = trimmedDomain.replace(/^(https?:\/\/)?(www\.)?/, '');
+    trimmedDomain = trimmedDomain.split('/')[0].split(':')[0];
     
     // 1. DNS Resolution
     let ips = [];
@@ -519,10 +522,15 @@ async function handleXkeenTrace(req, res) {
         payload = rule.substring(type.length + 1, lastCloseParen + 1);
         policy = rule.substring(lastCloseParen + 2).trim();
       } else {
-        const parts = rule.split(',');
-        type = parts[0].trim().toUpperCase();
-        payload = parts[1] ? parts[1].trim() : '';
-        policy = parts[2] ? parts[2].trim() : '';
+        const parts = rule.split(',').map(p => p.trim());
+        type = parts[0].toUpperCase();
+        if (parts.length === 2) {
+          payload = '';
+          policy = parts[1] || '';
+        } else {
+          payload = parts[1] || '';
+          policy = parts[2] || '';
+        }
       }
       
       let matched = false;
@@ -1601,14 +1609,25 @@ function parseAndSendCommits(logStdout, branch, res) {
             gitCmd = `git log ${c.sha} -n 10 --format="%s"`;
           }
           const changesStr = execSync(gitCmd, { cwd: __dirname }).toString().trim();
-          changes = changesStr.split('\n').map(line => line.trim()).filter(line => line.length > 0);
+          changes = changesStr.split('\n')
+            .map(line => line.trim())
+            .filter(line => {
+              if (line.length === 0) return false;
+              const lower = line.toLowerCase();
+              return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version');
+            });
         } catch (e) {
           changes = [c.message];
         }
         c.changes = changes;
       } else {
         // Dev-коммиты просто показывают свое сообщение
-        c.changes = [c.message];
+        const lower = c.message.toLowerCase();
+        if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version')) {
+          c.changes = [];
+        } else {
+          c.changes = [c.message];
+        }
       }
     }
     
