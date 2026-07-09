@@ -3179,8 +3179,96 @@ function runMigration() {
   }
 }
 
-// Запуск миграции правил
+function runMihomoMemoryOptimization() {
+  try {
+    if (!fs.existsSync(configPath)) {
+      console.log('[Optimization] config.yaml не найден по пути ' + configPath);
+      return;
+    }
+
+    let yamlText = fs.readFileSync(configPath, 'utf8');
+    let changed = false;
+
+    // 1. Проверяем, есть ли правило GEOIP,RU в конфиге
+    const geoipRuRegex = /^\s*-\s*GEOIP\s*,\s*RU\s*,\s*([^,\s\n]+)(?:\s*,\s*no-resolve)?/m;
+    const match = yamlText.match(geoipRuRegex);
+    
+    if (match) {
+      const targetGroup = match[1].trim();
+      console.log(`[Optimization] Найден старый GEOIP,RU направленный в группу ${targetGroup}. Применяем оптимизацию...`);
+
+      // Добавляем geoip-ru в rule-providers если его там нет
+      if (!yamlText.includes('geoip-ru:')) {
+        let providersIndex = yamlText.indexOf('rule-providers:');
+        if (providersIndex !== -1) {
+          const providerConfig = `\n  geoip-ru:\n    type: http\n    behavior: ipcidr\n    format: mrs\n    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/ru.mrs"\n    path: ./rules/geoip-ru.mrs\n    interval: 86400`;
+          const insertIndex = providersIndex + 'rule-providers:'.length;
+          yamlText = yamlText.slice(0, insertIndex) + providerConfig + yamlText.slice(insertIndex);
+          changed = true;
+          console.log('[Optimization] Добавлен rule-provider: geoip-ru.');
+        }
+      }
+
+      // Заменяем правило
+      yamlText = yamlText.replace(geoipRuRegex, `  - RULE-SET,geoip-ru,${targetGroup},no-resolve`);
+      changed = true;
+      console.log('[Optimization] Правило GEOIP,RU заменено на RULE-SET,geoip-ru.');
+    }
+
+    // 2. Отключаем geo-auto-update
+    if (yamlText.includes('geo-auto-update: true')) {
+      yamlText = yamlText.replace('geo-auto-update: true', 'geo-auto-update: false');
+      changed = true;
+      console.log('[Optimization] geo-auto-update установлено в false.');
+    }
+
+    if (changed) {
+      fs.writeFileSync(configPath, yamlText, 'utf8');
+      console.log('[Optimization] config.yaml успешно оптимизирован.');
+    }
+
+    // 3. Удаляем старые глобальные базы (если они присутствуют на диске и в конфиге нет GEOIP,RU)
+    if (!yamlText.match(/^\s*-\s*GEOIP\s*,\s*RU\s*,/m)) {
+      const dbFiles = [
+        '/opt/etc/mihomo/GeoIP.dat',
+        '/opt/etc/mihomo/GeoSite.dat',
+        '/opt/etc/mihomo/geoip.metadb',
+        '/opt/etc/mihomo/ASN.mmdb'
+      ];
+      dbFiles.forEach(file => {
+        try {
+          if (fs.existsSync(file)) {
+            fs.unlinkSync(file);
+            console.log(`[Optimization] Удален неиспользуемый файл базы: ${file}`);
+          }
+        } catch (e) {
+          console.error(`[Optimization] Не удалось удалить файл ${file}:`, e.message);
+        }
+      });
+    }
+
+    if (changed) {
+      // 4. Перезапускаем службу XKeen
+      const { exec } = require('child_process');
+      console.log('[Optimization] Перезапуск службы XKeen для применения оптимизаций...');
+      exec('/opt/etc/init.d/S99xkeen restart', (err, stdout, stderr) => {
+        if (err) {
+          console.error('[Optimization] Ошибка перезапуска XKeen:', err.message);
+        } else {
+          console.log('[Optimization] Служба XKeen успешно перезапущена.');
+        }
+      });
+    } else {
+      console.log('[Optimization] Оптимизация памяти уже была применена ранее.');
+    }
+  } catch (err) {
+    console.error('[Optimization] Ошибка при выполнении оптимизации:', err);
+  }
+}
+
+// Запуск миграции и оптимизации правил
 runMigration();
+runMihomoMemoryOptimization();
 
 // Очистка порта перед запуском (убиваем старый процесс если есть)
 function killOldProcess() {
