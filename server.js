@@ -2309,6 +2309,10 @@ function parseAllRules(yamlText) {
     }
 
     if (inRulesSection) {
+      if (line.startsWith('#') || line.length === 0) {
+        continue;
+      }
+      
       if (lines[i].length > 0 && !lines[i].startsWith(' ') && !lines[i].startsWith('-')) {
         inRulesSection = false;
         break;
