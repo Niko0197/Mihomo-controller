@@ -1452,7 +1452,7 @@ function renderProxyProviders(providersData, proxiesData) {
       <div class="pgc-header-right">
         <span class="pgc-count-badge">${total}</span>
         <button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${provider.name.replace(/'/g, "\\'")}')">🔄</button>
-        <button class="pgc-hc-btn pgc-hc-bolt" title="Healthcheck" onclick="event.stopPropagation();healthcheckProvider('${provider.name.replace(/'/g, "\\'")}')">⚡</button>
+        <button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга" onclick="event.stopPropagation();healthcheckProvider('${provider.name.replace(/'/g, "\\'")}')">⚡</button>
         <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
     `;
@@ -1592,13 +1592,13 @@ window.selectProxyInGroup = selectProxyInGroup;
 
 async function healthcheckProvider(providerName) {
   try {
-    showToast('⚡ Healthcheck: ' + providerName + '...');
+    showToast('⚡ Измеряем пинг: ' + providerName + '...');
     const res = await fetch('/api/xkeen/providers/' + encodeURIComponent(providerName) + '/healthcheck');
     if (res.ok) {
-      showToast('✅ Healthcheck ' + providerName + ' завершён');
+      showToast('✅ Тест пинга ' + providerName + ' завершён');
       setTimeout(() => loadProxiesDashboard(), 1200);
     } else {
-      showToast('Ошибка healthcheck: ' + providerName, 'error');
+      showToast('Ошибка теста пинга: ' + providerName, 'error');
     }
   } catch (err) {
     showToast('Ошибка сети: ' + err.message, 'error');
@@ -1641,12 +1641,12 @@ async function healthcheckAllGroups() {
       if (prov.vehicleType !== 'Compatible' && name !== 'default') {
         tasks.push(
           fetch('/api/xkeen/providers/' + encodeURIComponent(name) + '/healthcheck')
-            .catch(e => console.error('HC fail:', name, e))
+            .catch(e => console.error('Ping fail:', name, e))
         );
       }
     }
     await Promise.all(tasks);
-    showToast('✅ Healthcheck всех провайдеров завершён!');
+    showToast('✅ Тест пинга всех провайдеров завершён!');
     setTimeout(() => loadProxiesDashboard(), 1500);
   } catch (err) {
     showToast('Ошибка: ' + err.message, 'error');
@@ -1925,6 +1925,9 @@ function renderClientsTable() {
 
   // If the user is currently interacting with the group select dropdown, skip re-rendering to prevent it from closing
   if (document.activeElement && document.activeElement.classList.contains('group-select')) {
+    return;
+  }
+  if (document.querySelector('.custom-select-wrapper.open.group-select-container')) {
     return;
   }
 
