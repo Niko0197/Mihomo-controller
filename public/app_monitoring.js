@@ -1595,7 +1595,27 @@ async function healthcheckProvider(providerName) {
     showToast('⚡ Измеряем пинг: ' + providerName + '...');
     const res = await fetch('/api/xkeen/providers/' + encodeURIComponent(providerName) + '/healthcheck');
     if (res.ok) {
-      showToast('✅ Тест пинга ' + providerName + ' завершён');
+      const provRes = await fetch('/api/xkeen/providers');
+      if (provRes.ok) {
+        const provData = await provRes.json();
+        const providers = provData.providers || {};
+        const prov = providers[providerName];
+        if (prov && Array.isArray(prov.proxies)) {
+          let alive = 0;
+          prov.proxies.forEach(p => {
+            if (getLastDelay(p) > 0) alive++;
+          });
+          if (alive > 0) {
+            showToast(`✅ Тест пинга ${providerName} завершён. Доступно локаций: ${alive}/${prov.proxies.length}`, 'success');
+          } else {
+            showToast(`❌ Тест пинга ${providerName}: все локации недоступны!`, 'error');
+          }
+        } else {
+          showToast('✅ Тест пинга ' + providerName + ' завершён');
+        }
+      } else {
+        showToast('✅ Тест пинга ' + providerName + ' завершён');
+      }
       setTimeout(() => loadProxiesDashboard(), 1200);
     } else {
       showToast('Ошибка теста пинга: ' + providerName, 'error');
@@ -1646,7 +1666,29 @@ async function healthcheckAllGroups() {
       }
     }
     await Promise.all(tasks);
-    showToast('✅ Тест пинга всех провайдеров завершён!');
+    
+    const verifyRes = await fetch('/api/xkeen/providers');
+    if (verifyRes.ok) {
+      const verifyData = await verifyRes.json();
+      const updatedProviders = verifyData.providers || {};
+      let totalProxies = 0;
+      let totalAlive = 0;
+      for (const [name, prov] of Object.entries(updatedProviders)) {
+        if (prov.vehicleType !== 'Compatible' && name !== 'default' && Array.isArray(prov.proxies)) {
+          totalProxies += prov.proxies.length;
+          prov.proxies.forEach(p => {
+            if (getLastDelay(p) > 0) totalAlive++;
+          });
+        }
+      }
+      if (totalAlive > 0) {
+        showToast(`✅ Тест пинга всех провайдеров завершён! Доступно: ${totalAlive}/${totalProxies}`, 'success');
+      } else {
+        showToast(`❌ Тест пинга всех провайдеров завершён: все локации недоступны!`, 'error');
+      }
+    } else {
+      showToast('✅ Тест пинга всех провайдеров завершён!');
+    }
     setTimeout(() => loadProxiesDashboard(), 1500);
   } catch (err) {
     showToast('Ошибка: ' + err.message, 'error');
@@ -1923,14 +1965,6 @@ function renderClientsTable() {
     counterEl.textContent = `Всего: ${total} · Активно: ${activeCount} · Обход VPN: ${directCount}`;
   }
 
-  // If the user is currently interacting with the group select dropdown, skip re-rendering to prevent it from closing
-  if (document.activeElement && document.activeElement.classList.contains('group-select')) {
-    return;
-  }
-  if (document.querySelector('.custom-select-wrapper.open.group-select-container')) {
-    return;
-  }
-
   // If in background silent mode, don't build DOM to save CPU
   if (clientsSilentMode) return;
   
@@ -1946,6 +1980,113 @@ function renderClientsTable() {
     const mac = (c.mac || '').toLowerCase();
     return name.includes(query) || ip.includes(query) || mac.includes(query);
   });
+
+  // Check if we can do an in-place update of existing elements to avoid closing dropdowns
+  const existingRows = Array.from(tbody.querySelectorAll('tr[data-ip]'));
+  const canUpdateInPlace = existingRows.length === filtered.length && 
+    filtered.every((c, idx) => existingRows[idx] && existingRows[idx].getAttribute('data-ip') === c.ip);
+
+  if (canUpdateInPlace) {
+    filtered.forEach((c, idx) => {
+      const tr = existingRows[idx];
+
+      // 1. Device Info (Name)
+      const nameSpan = tr.querySelector('.editable-name');
+      if (nameSpan) {
+        const expectedHtml = `${c.name || '<i>Устройство без имени</i>'} <svg width="12" height="12" viewBox="0 0 24 24"><path d="M3 17.25V21h3.75L17.81 9.94l-3.75-3.75L3 17.25zM20.71 7.04c.39-.39.39-1.02 0-1.41l-2.34-2.34c-.39-.39-1.02-.39-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83z"/></svg>`;
+        if (nameSpan.innerHTML !== expectedHtml) {
+          nameSpan.innerHTML = expectedHtml;
+        }
+      }
+
+      // 2. State Badge
+      const badge = tr.querySelector('.status-badge');
+      if (badge) {
+        const expectedClass = `status-badge ${c.active ? 'active' : 'inactive'}`;
+        const expectedText = c.active ? 'Активен' : 'Не в сети';
+        if (badge.className !== expectedClass) badge.className = expectedClass;
+        if (badge.textContent !== expectedText) badge.textContent = expectedText;
+      }
+
+      // 3. Current Speed
+      const tdSpeed = tr.querySelector('.client-speed-text');
+      if (tdSpeed) {
+        let expectedSpeedHtml = '';
+        if (c.active && (c.downSpeed > 0 || c.upSpeed > 0)) {
+          expectedSpeedHtml = `<span style="color:#a8c7fa;">${formatSpeed(c.downSpeed)} ↓</span><br><span style="color:#3ddc84;">${formatSpeed(c.upSpeed)} ↑</span>`;
+        } else {
+          expectedSpeedHtml = '<span style="color:var(--text-muted);">0 KB/s</span>';
+        }
+        if (tdSpeed.innerHTML !== expectedSpeedHtml) {
+          tdSpeed.innerHTML = expectedSpeedHtml;
+        }
+      }
+
+      // 4. Cumulative Traffic Columns
+      const trafficCells = tr.querySelectorAll('.client-traffic-text');
+      const tdVpnTraffic = trafficCells[0];
+      const tdDirectTraffic = trafficCells[1];
+
+      if (tdVpnTraffic) {
+        const vpnTotal = c.vpnDownload + c.vpnUpload;
+        const vpnTotalAll = c.vpnDownloadTotal + c.vpnUploadTotal;
+        let expectedVpnTraffic = '—';
+        if (vpnTotalAll > 0) {
+          expectedVpnTraffic = `
+        <span title="Трафик за текущий месяц" style="font-weight: 500;">${formatBytes(vpnTotal)} <span style="font-size:0.7rem; opacity:0.6; font-weight:normal;">(мес)</span></span><br>
+        <span title="Трафик за всё время" style="font-size:0.75rem; opacity:0.75;">${formatBytes(vpnTotalAll)} <span style="font-size:0.7rem; opacity:0.6;">(всего)</span></span><br>
+        <span style="font-size:0.72rem; opacity:0.6;">↓ ${formatBytes(c.vpnDownload)} / ↑ ${formatBytes(c.vpnUpload)}</span>
+      `;
+        }
+        if (tdVpnTraffic.innerHTML.replace(/\s+/g, ' ').trim() !== expectedVpnTraffic.replace(/\s+/g, ' ').trim()) {
+          tdVpnTraffic.innerHTML = expectedVpnTraffic;
+        }
+      }
+
+      if (tdDirectTraffic) {
+        const directTotal = c.directDownload + c.directUpload;
+        const directTotalAll = c.directDownloadTotal + c.directUploadTotal;
+        let expectedDirectTraffic = '—';
+        if (directTotalAll > 0) {
+          expectedDirectTraffic = `
+        <span title="Трафик за текущий месяц" style="font-weight: 500;">${formatBytes(directTotal)} <span style="font-size:0.7rem; opacity:0.6; font-weight:normal;">(мес)</span></span><br>
+        <span title="Трафик за всё время" style="font-size:0.75rem; opacity:0.75;">${formatBytes(directTotalAll)} <span style="font-size:0.7rem; opacity:0.6;">(всего)</span></span><br>
+        <span style="font-size:0.72rem; opacity:0.6;">↓ ${formatBytes(c.directDownload)} / ↑ ${formatBytes(c.directUpload)}</span>
+      `;
+        }
+        if (tdDirectTraffic.innerHTML.replace(/\s+/g, ' ').trim() !== expectedDirectTraffic.replace(/\s+/g, ' ').trim()) {
+          tdDirectTraffic.innerHTML = expectedDirectTraffic;
+        }
+      }
+
+      // 5. VPN Toggle & Group dropdown select (Skip updating state if custom select dropdown is currently open)
+      const wrapper = tr.querySelector('.custom-select-wrapper');
+      const isDropdownOpen = wrapper && wrapper.classList.contains('open');
+
+      if (!isDropdownOpen) {
+        const realInput = tr.querySelector('input[type="checkbox"]');
+        if (realInput && realInput.checked !== c.vpnEnabled && !realInput.disabled) {
+          realInput.checked = c.vpnEnabled;
+        }
+
+        const select = tr.querySelector('.group-select');
+        if (select) {
+          const expectedDisabled = !c.vpnEnabled;
+          if (select.disabled !== expectedDisabled) {
+            select.disabled = expectedDisabled;
+          }
+          const currentGroup = c.group || '🚀Auto-Best';
+          if (select.value !== currentGroup) {
+            select.value = currentGroup;
+          }
+          if (typeof select.syncCustomSelect === 'function') {
+            select.syncCustomSelect();
+          }
+        }
+      }
+    });
+    return;
+  }
   
   tbody.innerHTML = '';
   
@@ -1956,6 +2097,7 @@ function renderClientsTable() {
   
   filtered.forEach(c => {
     const tr = document.createElement('tr');
+    tr.setAttribute('data-ip', c.ip);
     
     // Device info (Name, IP, MAC)
     const tdDevice = document.createElement('td');
