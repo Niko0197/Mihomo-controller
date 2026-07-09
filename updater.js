@@ -380,9 +380,19 @@ async function main() {
 
           if (host && chains.length > 0) {
             const mainChain = chains[0];
+            // Если трафик пошел через одну из общих прокси-групп (не сервисных)
+            const generalGroups = [
+              'GLOBAL',
+              '🚀Auto-Best',
+              '⚙️Manual 1',
+              '⚙️Manual 2',
+              '⚙️Manual 3',
+              '💎 StealthSurf',
+              '💎 StealthSurf 2',
+              '🎱 GitHub'
+            ];
             
-            // Если трафик пошел через прокси-группу (а не DIRECT или REJECT)
-            if (mainChain !== 'DIRECT' && mainChain !== 'REJECT') {
+            if (generalGroups.includes(mainChain)) {
               if (isRussianDomain(host)) {
                 // Если этого домена еще нет в логе, записываем
                 if (!existingLogs.includes(host)) {
