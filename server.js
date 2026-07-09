@@ -25,7 +25,7 @@ function makeMihomoRequest(method, endpoint, body = null) {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 5000
+      timeout: 20000
     };
 
     const req = http.request(options, (res) => {

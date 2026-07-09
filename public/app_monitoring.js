@@ -1618,7 +1618,12 @@ async function healthcheckProvider(providerName) {
       }
       setTimeout(() => loadProxiesDashboard(), 1200);
     } else {
-      showToast('Ошибка теста пинга: ' + providerName, 'error');
+      let errMsg = '';
+      try {
+        const data = await res.json();
+        errMsg = data.error || data.message || '';
+      } catch (e) {}
+      showToast(`Ошибка теста пинга: ${providerName}${errMsg ? ' (' + errMsg + ')' : ''}`, 'error');
     }
   } catch (err) {
     showToast('Ошибка сети: ' + err.message, 'error');
