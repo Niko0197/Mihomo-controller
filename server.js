@@ -1348,20 +1348,42 @@ function handlePingProxy(req, res) {
       }
       
       let targetNode = name;
+      let providerName = null;
       try {
-        const proxiesRes = await makeMihomoRequest('GET', '/proxies');
-        if (proxiesRes.statusCode === 200) {
+        const [proxiesRes, providersRes] = await Promise.all([
+          makeMihomoRequest('GET', '/proxies'),
+          makeMihomoRequest('GET', '/providers/proxies')
+        ]);
+        
+        if (proxiesRes.statusCode === 200 && providersRes.statusCode === 200) {
           const proxiesData = JSON.parse(proxiesRes.data);
+          const providersData = JSON.parse(providersRes.data);
+          
           const proxies = proxiesData.proxies || {};
+          const providers = providersData.providers || {};
           
           let active = proxies[targetNode];
           let limit = 5;
           while (active && active.now && limit > 0) {
             const next = proxies[active.now];
-            if (!next) break;
-            active = next;
-            targetNode = active.name || active.now;
+            if (next) {
+              active = next;
+              targetNode = active.name || active.now;
+            } else {
+              targetNode = active.now;
+              break;
+            }
             limit--;
+          }
+          
+          for (const [pName, prov] of Object.entries(providers)) {
+            if (prov.proxies && Array.isArray(prov.proxies)) {
+              const found = prov.proxies.some(p => p.name === targetNode);
+              if (found) {
+                providerName = pName;
+                break;
+              }
+            }
           }
         }
       } catch (e) {
@@ -1370,7 +1392,13 @@ function handlePingProxy(req, res) {
 
       const timeout = 3000;
       const url = encodeURIComponent('http://www.gstatic.com/generate_204');
-      const mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
+      
+      let mRes;
+      if (providerName) {
+        mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(providerName) + '/' + encodeURIComponent(targetNode) + '/healthcheck?url=' + url + '&timeout=' + timeout);
+      } else {
+        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
+      }
       
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
