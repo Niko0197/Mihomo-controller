@@ -1347,9 +1347,30 @@ function handlePingProxy(req, res) {
         return;
       }
       
+      let targetNode = name;
+      try {
+        const proxiesRes = await makeMihomoRequest('GET', '/proxies');
+        if (proxiesRes.statusCode === 200) {
+          const proxiesData = JSON.parse(proxiesRes.data);
+          const proxies = proxiesData.proxies || {};
+          
+          let active = proxies[targetNode];
+          let limit = 5;
+          while (active && active.now && limit > 0) {
+            const next = proxies[active.now];
+            if (!next) break;
+            active = next;
+            targetNode = active.name || active.now;
+            limit--;
+          }
+        }
+      } catch (e) {
+        console.error('Failed to resolve proxy group active node for ping:', e.message);
+      }
+
       const timeout = 3000;
       const url = encodeURIComponent('http://www.gstatic.com/generate_204');
-      const mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
+      const mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
