@@ -2232,7 +2232,7 @@ async function loadQrConnections() {
     const wifiData = wifiRes.ok ? await wifiRes.json() : { success: false, ssid: 'Keenetic-WiFi', key: '12345678', encryption: 'WPA' };
     const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
     
-    const wifiString = `WIFI:T:${wifiData.encryption};S:${wifiData.ssid};P:${wifiData.key};;`;
+    const wifiString = `WIFI:S:${wifiData.ssid};T:${wifiData.encryption};P:${wifiData.key};;`;
     const baseDomain = 'https://spyware.keenet9883.netcraze.link:8083';
     const fullConfigUrl = `${baseDomain}/api/config?file=config_compiled`;
     const noRoutingConfigUrl = `${baseDomain}/api/config?file=config_compiled&routing=false`;
