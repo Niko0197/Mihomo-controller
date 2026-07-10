@@ -2242,6 +2242,9 @@ async function loadQrConnections() {
     const noRoutingConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled&routing=false`;
     const noRoutingConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled&routing=false`;
     
+    const clashFullUrl = `clash://install-config?url=${encodeURIComponent(fullConfigUrlHttp)}&name=${encodeURIComponent('Mihomo Router Full')}`;
+    const clashNoRoutingUrl = `clash://install-config?url=${encodeURIComponent(noRoutingConfigUrlHttp)}&name=${encodeURIComponent('Mihomo Router Lite')}`;
+    
     let html = '';
     html += `<div class="qr-cards-grid">`;
     
@@ -2270,7 +2273,7 @@ async function loadQrConnections() {
           <span class="qr-card-title">Подписка Mihomo (Полная)</span>
         </div>
         <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullConfigUrlHttp)}" class="qr-image" alt="Full Config QR" />
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(clashFullUrl)}" class="qr-image" alt="Full Config QR" />
         </div>
         <div class="qr-card-details">
           <div class="qr-detail-text">С полной маршрутизацией и встроенными правилами для роутера.</div>
@@ -2290,7 +2293,7 @@ async function loadQrConnections() {
           <span class="qr-card-title">Подписка Mihomo (Без правил)</span>
         </div>
         <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(noRoutingConfigUrlHttp)}" class="qr-image" alt="No Routing QR" />
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(clashNoRoutingUrl)}" class="qr-image" alt="No Routing QR" />
         </div>
         <div class="qr-card-details">
           <div class="qr-detail-text">Все ваши VPN-узлы и группы. Идеально для импорта на телефон/ПК без засорения маршрутов.</div>
@@ -2371,9 +2374,22 @@ function fallbackCopyTextToClipboard(text) {
   textArea.style.top = "0";
   textArea.style.left = "0";
   textArea.style.position = "fixed";
+  textArea.style.opacity = "0";
   document.body.appendChild(textArea);
-  textArea.focus();
-  textArea.select();
+  
+  if (navigator.userAgent.match(/ipad|iphone/i)) {
+    textArea.contentEditable = true;
+    textArea.readOnly = false;
+    const range = document.createRange();
+    range.selectNodeContents(textArea);
+    const selection = window.getSelection();
+    selection.removeAllRanges();
+    selection.addRange(range);
+    textArea.setSelectionRange(0, 999999);
+  } else {
+    textArea.focus();
+    textArea.select();
+  }
 
   try {
     const successful = document.execCommand('copy');

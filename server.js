@@ -1156,7 +1156,11 @@ function handleGetConfig(req, res) {
           compiled = stripRoutingRules(compiled);
         }
         
-        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.writeHead(200, { 
+          'Content-Type': 'text/yaml; charset=utf-8',
+          'Content-Disposition': 'inline; filename="mihomo_config.yaml"',
+          'Profile-Update-Interval': '24'
+        });
         res.end(compiled);
       } else {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
@@ -1805,9 +1809,9 @@ function handleGetVersions(req, res) {
     const currentBranch = stdoutBranch.trim();
     
     exec('git fetch origin ' + currentBranch, { cwd: __dirname }, (errFetch) => {
-      exec('git log origin/' + currentBranch + ' -n 30 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLog, stdoutLog) => {
+      exec('git log origin/' + currentBranch + ' -n 60 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLog, stdoutLog) => {
         if (errLog) {
-          exec('git log -n 30 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLocalLog, stdoutLocalLog) => {
+          exec('git log -n 60 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLocalLog, stdoutLocalLog) => {
             if (errLocalLog) {
               res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
               res.end(JSON.stringify({ success: false, error: errLocalLog.message }));
@@ -2221,7 +2225,7 @@ function handleGetMihomoReleases(req, res) {
   
   const options = {
     hostname: 'api.github.com',
-    path: '/repos/MetaCubeX/mihomo/releases?per_page=15',
+    path: '/repos/MetaCubeX/mihomo/releases?per_page=30',
     method: 'GET',
     headers: {
       'User-Agent': 'Mihomo-Controller-Updater/1.0'
