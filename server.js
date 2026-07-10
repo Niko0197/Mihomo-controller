@@ -905,10 +905,14 @@ function processProviderLines(name, lines) {
           }
         }
         
-        resolvedLines.push(`    payload:`);
-        for (const pLine of payloadLines) {
-          const cleanLine = pLine.trim();
-          resolvedLines.push(`      ${cleanLine}`);
+        if (payloadLines.length === 0) {
+          resolvedLines.push(`    payload: []`);
+        } else {
+          resolvedLines.push(`    payload:`);
+          for (const pLine of payloadLines) {
+            const cleanLine = pLine.trim();
+            resolvedLines.push(`      ${cleanLine}`);
+          }
         }
         
         return resolvedLines;
