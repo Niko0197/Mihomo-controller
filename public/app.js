@@ -2233,7 +2233,7 @@ async function loadQrConnections() {
     const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
     
     const wifiString = `WIFI:S:${wifiData.ssid};T:${wifiData.encryption};P:${wifiData.key};;`;
-    const baseDomain = 'https://spyware.keenet9883.netcraze.link:8083';
+    const baseDomain = 'https://admin:gricha0609@spyware.keenet9883.netcraze.link:8083';
     const fullConfigUrl = `${baseDomain}/api/config?file=config_compiled`;
     const noRoutingConfigUrl = `${baseDomain}/api/config?file=config_compiled&routing=false`;
     
