@@ -102,11 +102,11 @@
       </div>
 
       <nav class="tabs-vertical">
-        <button class="tab-btn active" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
+        <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
         <button class="tab-btn" id="tab-btn-import" onclick="switchTab('import')">🔌 Импорт прокси</button>
         <button class="tab-btn" id="tab-btn-subs" onclick="switchTab('subs')">🌐 Подписки</button>
-        <button class="tab-btn" id="tab-btn-proxies-dashboard" onclick="switchTab('proxies-dashboard')">⚡ Прокси-панель</button>
+        <button class="tab-btn active" id="tab-btn-proxies-dashboard" onclick="switchTab('proxies-dashboard')">⚡ Прокси-панель</button>
         <button class="tab-btn" id="tab-btn-ping" onclick="switchTab('ping')">⏱️ Пинг-тест</button>
         <button class="tab-btn" id="tab-btn-tor" onclick="switchTab('tor')">🌉 Tor мосты</button>
         <button class="tab-btn" id="tab-btn-traffic" onclick="switchTab('traffic')">📊 Трафик</button>
@@ -122,7 +122,7 @@
     <!-- Правая колонка: Основной контент -->
     <main class="main-content">
     <!-- Вкладка: Прокси-панель -->
-    <div id="tab-content-proxies-dashboard" class="tab-content">
+    <div id="tab-content-proxies-dashboard" class="tab-content active">
       <div class="card">
         <div class="card-title" style="margin-bottom: 20px;">
           <span>⚡ Управление прокси и группами</span>
@@ -152,7 +152,7 @@
     </div>
 
     <!-- Вкладка 1: Утекшие домены -->
-    <div id="tab-content-leak" class="tab-content active">
+    <div id="tab-content-leak" class="tab-content">
       <div class="card">
         <div class="card-title">
           Утекшие домены (через VPN)

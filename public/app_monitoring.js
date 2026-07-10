@@ -6,7 +6,7 @@ let logsAbortController = null;
 let connectionsInterval = null;
 let connectionsSilentMode = false;
 
-let currentTab = 'leak';
+let currentTab = 'proxies-dashboard';
 let activeLogLevel = 'info';
 let userScrolledUpMap = {
   debug: false,

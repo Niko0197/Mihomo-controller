@@ -1006,10 +1006,13 @@ window.onload = function() {
     tabSize: 2,
     indentUnit: 2
   });
-  loadData();
   loadPanelVersion();
   loadMihomoVersion();
-  updateXkeenStatus();
+  updateXkeenStatus().then(() => {
+    if (window.isXkeenRunning && typeof loadProxiesDashboard === 'function') {
+      loadProxiesDashboard();
+    }
+  });
   initCustomTooltips();
   initCustomSelects();
   setInterval(updateXkeenStatus, 15000); // Опрос раз в 15 секунд
