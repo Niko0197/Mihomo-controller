@@ -1107,6 +1107,22 @@ async function loadProxiesDashboard() {
 
     const proxiesData = await proxiesRes.json();
     const providersData = await providersRes.json();
+    
+    // Внедряем прокси из провайдеров в общий список proxiesData.proxies,
+    // чтобы функции резолва задержек (resolveSelectedProxyDelay) и отрисовки
+    // могли видеть задержки для каждого конкретного провайдер-узла.
+    const proxiesMap = proxiesData.proxies || {};
+    const providers = providersData.providers || {};
+    for (const prov of Object.values(providers)) {
+      if (prov.proxies && Array.isArray(prov.proxies)) {
+        prov.proxies.forEach(p => {
+          if (p.name && !proxiesMap[p.name]) {
+            proxiesMap[p.name] = p;
+          }
+        });
+      }
+    }
+
     proxyDashboardData = { proxies: proxiesData, providers: providersData };
 
     renderProxyGroups(proxiesData);
