@@ -3019,6 +3019,16 @@ const server = http.createServer(async (req, res) => {
     handleGetConfig(req, res);
     return;
   }
+  if (req.method === 'GET' && (pathname === '/api/config/mihomo_full.yaml' || pathname === '/api/config/mihomo_lite.yaml')) {
+    // Add fake query params to route back to handleGetConfig
+    if (pathname === '/api/config/mihomo_full.yaml') {
+      req.url = '/api/config?file=config_compiled';
+    } else {
+      req.url = '/api/config?file=config_compiled&routing=false';
+    }
+    handleGetConfig(req, res);
+    return;
+  }
   if (req.method === 'POST' && pathname === '/api/config') {
     handleSaveConfig(req, res);
     return;

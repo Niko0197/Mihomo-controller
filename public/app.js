@@ -2242,8 +2242,11 @@ async function loadQrConnections() {
     const noRoutingConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled&routing=false`;
     const noRoutingConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled&routing=false`;
     
-    const clashFullUrl = `clash://install-config?url=${encodeURIComponent(fullConfigUrlHttp)}&name=${encodeURIComponent('Mihomo Router Full')}`;
-    const clashNoRoutingUrl = `clash://install-config?url=${encodeURIComponent(noRoutingConfigUrlHttp)}&name=${encodeURIComponent('Mihomo Router Lite')}`;
+    const qrUrlHttpsFull = `${baseDomainHttps}/api/config/mihomo_full.yaml`;
+    const qrUrlHttpsLite = `${baseDomainHttps}/api/config/mihomo_lite.yaml`;
+
+    const clashFullUrl = `clash://install-config?url=${encodeURIComponent(qrUrlHttpsFull)}&name=${encodeURIComponent('Mihomo Router Full')}`;
+    const clashNoRoutingUrl = `clash://install-config?url=${encodeURIComponent(qrUrlHttpsLite)}&name=${encodeURIComponent('Mihomo Router Lite')}`;
     
     let html = '';
     html += `<div class="qr-cards-grid">`;
