@@ -2233,9 +2233,14 @@ async function loadQrConnections() {
     const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
     
     const wifiString = `WIFI:S:${wifiData.ssid};T:${wifiData.encryption};P:${wifiData.key};;`;
-    const baseDomain = 'https://admin:gricha0609@spyware.keenet9883.netcraze.link:8083';
-    const fullConfigUrl = `${baseDomain}/api/config?file=config_compiled`;
-    const noRoutingConfigUrl = `${baseDomain}/api/config?file=config_compiled&routing=false`;
+    const baseDomainHttps = 'https://admin:gricha0609@spyware.keenet9883.netcraze.link:8083';
+    const baseDomainHttp = 'http://spyware.keenet9883.netcraze.link:4000';
+    
+    const fullConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled`;
+    const fullConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled`;
+    
+    const noRoutingConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled&routing=false`;
+    const noRoutingConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled&routing=false`;
     
     let html = '';
     html += `<div class="qr-cards-grid">`;
@@ -2265,11 +2270,14 @@ async function loadQrConnections() {
           <span class="qr-card-title">Подписка Mihomo (Полная)</span>
         </div>
         <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullConfigUrl)}" class="qr-image" alt="Full Config QR" />
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullConfigUrlHttp)}" class="qr-image" alt="Full Config QR" />
         </div>
         <div class="qr-card-details">
           <div class="qr-detail-text">С полной маршрутизацией и встроенными правилами для роутера.</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrl}')">📋</button></div>
+          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTPS (с паролем):</div>
+          <div class="qr-detail-url" style="margin-bottom: 6px;"><input type="text" readonly value="${fullConfigUrlHttps}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrlHttps}')">📋</button></div>
+          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTP (без пароля):</div>
+          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrlHttp}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrlHttp}')">📋</button></div>
         </div>
       </div>
     `;
@@ -2282,11 +2290,14 @@ async function loadQrConnections() {
           <span class="qr-card-title">Подписка Mihomo (Без правил)</span>
         </div>
         <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(noRoutingConfigUrl)}" class="qr-image" alt="No Routing QR" />
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(noRoutingConfigUrlHttp)}" class="qr-image" alt="No Routing QR" />
         </div>
         <div class="qr-card-details">
           <div class="qr-detail-text">Все ваши VPN-узлы и группы. Идеально для импорта на телефон/ПК без засорения маршрутов.</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrl}')">📋</button></div>
+          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTPS (с паролем):</div>
+          <div class="qr-detail-url" style="margin-bottom: 6px;"><input type="text" readonly value="${noRoutingConfigUrlHttps}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrlHttps}')">📋</button></div>
+          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTP (без пароля):</div>
+          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrlHttp}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrlHttp}')">📋</button></div>
         </div>
       </div>
     `;
