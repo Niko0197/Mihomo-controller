@@ -253,6 +253,22 @@ function renderConfigFileChips() {
 
 async function loadConfigEditor() {
   if (!configEditor) return;
+  
+  const saveBtn = document.getElementById('btn-save-config');
+  if (currentConfigFileId === 'config_compiled') {
+    configEditor.setOption('readOnly', true);
+    if (saveBtn) {
+      saveBtn.disabled = true;
+      saveBtn.title = 'Скомпилированный файл предназначен только для экспорта';
+    }
+  } else {
+    configEditor.setOption('readOnly', false);
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.title = '';
+    }
+  }
+
   configEditor.setValue('Загрузка конфигурации с роутера...');
   try {
     const res = await fetch('/api/config?file=' + encodeURIComponent(currentConfigFileId));

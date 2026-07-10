@@ -842,6 +842,137 @@ async function handleUpdateTorBridges(req, res) {
   }
 }
 
+function processProviderLines(name, lines) {
+  let isFile = false;
+  let isYaml = false;
+  let relativePath = '';
+  const newLines = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    if (trimmed.startsWith('type: file')) {
+      isFile = true;
+    } else if (trimmed.startsWith('path:')) {
+      relativePath = trimmed.substring(5).trim().replace(/['"]/g, '');
+      if (relativePath.endsWith('.yaml')) {
+        isYaml = true;
+      }
+    } else {
+      newLines.push(line);
+    }
+  }
+  
+  if (isFile && isYaml && relativePath) {
+    let absolutePath = relativePath;
+    if (relativePath.startsWith('./')) {
+      absolutePath = path.join('/opt/etc/mihomo', relativePath.substring(2));
+    } else if (!path.isAbsolute(relativePath)) {
+      absolutePath = path.join('/opt/etc/mihomo', relativePath);
+    }
+    
+    try {
+      if (fs.existsSync(absolutePath)) {
+        const fileContent = fs.readFileSync(absolutePath, 'utf8');
+        const fileLines = fileContent.split(/\r?\n/);
+        let payloadLines = [];
+        let inPayload = false;
+        
+        for (let j = 0; j < fileLines.length; j++) {
+          const fLine = fileLines[j];
+          const fTrimmed = fLine.trim();
+          
+          if (fTrimmed.startsWith('payload:')) {
+            inPayload = true;
+            continue;
+          }
+          
+          if (inPayload) {
+            if (fLine.startsWith('  -') || fLine.startsWith('  ') || fTrimmed.startsWith('-')) {
+              payloadLines.push(fLine);
+            }
+          }
+        }
+        
+        const resolvedLines = [];
+        resolvedLines.push(`  ${name}:`);
+        resolvedLines.push(`    type: inline`);
+        
+        for (const line of newLines) {
+          if (!line.trim().endsWith(':') && line.trim() !== '') {
+            resolvedLines.push(line);
+          }
+        }
+        
+        resolvedLines.push(`    payload:`);
+        for (const pLine of payloadLines) {
+          const cleanLine = pLine.trim();
+          resolvedLines.push(`      ${cleanLine}`);
+        }
+        
+        return resolvedLines;
+      }
+    } catch (err) {
+      console.error(`Failed to inline rule provider ${name} from ${absolutePath}:`, err.message);
+    }
+  }
+  
+  return lines;
+}
+
+function compileConfigInline(configText) {
+  const lines = configText.split(/\r?\n/);
+  let output = [];
+  let inRuleProviders = false;
+  let currentProvider = null;
+  let providerLines = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    
+    if (line.startsWith('rule-providers:')) {
+      inRuleProviders = true;
+      output.push(line);
+      continue;
+    }
+    
+    if (inRuleProviders) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('#')) {
+        inRuleProviders = false;
+      }
+    }
+    
+    if (inRuleProviders) {
+      if (line.startsWith('  ') && !line.startsWith('   ') && trimmed.endsWith(':')) {
+        if (currentProvider) {
+          output.push(...processProviderLines(currentProvider, providerLines));
+        }
+        currentProvider = trimmed.slice(0, -1);
+        providerLines = [line];
+      } else if (currentProvider) {
+        providerLines.push(line);
+      } else {
+        output.push(line);
+      }
+    } else {
+      if (currentProvider) {
+        output.push(...processProviderLines(currentProvider, providerLines));
+        currentProvider = null;
+        providerLines = [];
+      }
+      output.push(line);
+    }
+  }
+  
+  if (currentProvider) {
+    output.push(...processProviderLines(currentProvider, providerLines));
+  }
+  
+  return output.join('\n');
+}
+
 function getConfigFilesList() {
   const files = [];
   const baseDir = '/opt/etc/mihomo';
@@ -887,10 +1018,19 @@ function getConfigFilesList() {
     }
   }
   
+  // Добавляем виртуальный файл скомпилированного конфига для экспорта
+  files.push({
+    id: 'config_compiled',
+    name: 'config_compiled (экспорт)',
+    path: 'virtual'
+  });
+  
   // Всегда возвращаем первым config
   files.sort((a, b) => {
     if (a.id === 'config') return -1;
     if (b.id === 'config') return 1;
+    if (a.id === 'config_compiled') return -1;
+    if (b.id === 'config_compiled') return 1;
     return a.name.localeCompare(b.name);
   });
   
@@ -898,6 +1038,9 @@ function getConfigFilesList() {
 }
 
 function getFilePathFromId(id) {
+  if (id === 'config_compiled') {
+    return 'virtual';
+  }
   if (!id || id === 'config') {
     return configPath;
   }
@@ -926,8 +1069,21 @@ function handleGetConfig(req, res) {
   try {
     const urlObj = new URL(req.url, 'http://' + req.headers.host);
     const fileId = urlObj.searchParams.get('file') || 'config';
-    const filePath = getFilePathFromId(fileId);
     
+    if (fileId === 'config_compiled') {
+      if (fs.existsSync(configPath)) {
+        const configText = fs.readFileSync(configPath, 'utf8');
+        const compiled = compileConfigInline(configText);
+        res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end(compiled);
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Главный конфигурационный файл не найден');
+      }
+      return;
+    }
+
+    const filePath = getFilePathFromId(fileId);
     if (!filePath) {
       res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Недопустимый файл конфигурации');
@@ -952,8 +1108,14 @@ function handleGetConfig(req, res) {
 function handleSaveConfig(req, res) {
   const urlObj = new URL(req.url, 'http://' + req.headers.host);
   const fileId = urlObj.searchParams.get('file') || 'config';
-  const filePath = getFilePathFromId(fileId);
+  
+  if (fileId === 'config_compiled') {
+    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, message: 'Скомпилированный файл предназначен только для чтения и экспорта' }));
+    return;
+  }
 
+  const filePath = getFilePathFromId(fileId);
   if (!filePath) {
     res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, message: 'Недопустимый файл конфигурации' }));
