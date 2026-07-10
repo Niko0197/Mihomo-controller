@@ -2251,8 +2251,8 @@ async function loadQrConnections() {
           <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(wifiString)}" class="qr-image" alt="Wi-Fi QR" />
         </div>
         <div class="qr-card-details">
-          <div class="qr-detail-item"><strong>SSID:</strong> <span>${wifiData.ssid}</span> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${wifiData.ssid.replace(/'/g, "\\'")}')">📋</button></div>
-          <div class="qr-detail-item"><strong>Пароль:</strong> <span>${wifiData.key}</span> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${wifiData.key.replace(/'/g, "\\'")}')">📋</button></div>
+          <div class="qr-detail-item"><strong>SSID:</strong> <span>${wifiData.ssid}</span> <button class="btn-copy-small" onclick="copyToClipboard('${wifiData.ssid.replace(/'/g, "\\'")}')">📋</button></div>
+          <div class="qr-detail-item"><strong>Пароль:</strong> <span>${wifiData.key}</span> <button class="btn-copy-small" onclick="copyToClipboard('${wifiData.key.replace(/'/g, "\\'")}')">📋</button></div>
         </div>
       </div>
     `;
@@ -2269,7 +2269,7 @@ async function loadQrConnections() {
         </div>
         <div class="qr-card-details">
           <div class="qr-detail-text">С полной маршрутизацией и встроенными правилами для роутера.</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${fullConfigUrl}')">📋</button></div>
+          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrl}')">📋</button></div>
         </div>
       </div>
     `;
@@ -2286,7 +2286,7 @@ async function loadQrConnections() {
         </div>
         <div class="qr-card-details">
           <div class="qr-detail-text">Все ваши VPN-узлы и группы. Идеально для импорта на телефон/ПК без засорения маршрутов.</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${noRoutingConfigUrl}')">📋</button></div>
+          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrl}')">📋</button></div>
         </div>
       </div>
     `;
@@ -2306,7 +2306,7 @@ async function loadQrConnections() {
             </div>
             <div class="qr-card-details">
               <div class="qr-detail-text">Оригинальная ссылка провайдера VPN.</div>
-              <div class="qr-detail-url"><input type="text" readonly value="${p.url}" onclick="this.select()" /> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${p.url.replace(/'/g, "\\'")}')">📋</button></div>
+              <div class="qr-detail-url"><input type="text" readonly value="${p.url}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${p.url.replace(/'/g, "\\'")}')">📋</button></div>
             </div>
           </div>
         `;
@@ -2340,4 +2340,41 @@ async function loadQrConnections() {
   }
 }
 window.loadQrConnections = loadQrConnections;
+
+function copyToClipboard(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(text).then(() => {
+      showToast('Скопировано в буфер обмена');
+    }).catch(err => {
+      fallbackCopyTextToClipboard(text);
+    });
+  } else {
+    fallbackCopyTextToClipboard(text);
+  }
+}
+window.copyToClipboard = copyToClipboard;
+
+function fallbackCopyTextToClipboard(text) {
+  const textArea = document.createElement("textarea");
+  textArea.value = text;
+  textArea.style.top = "0";
+  textArea.style.left = "0";
+  textArea.style.position = "fixed";
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+
+  try {
+    const successful = document.execCommand('copy');
+    if (successful) {
+      showToast('Скопировано в буфер обмена');
+    } else {
+      showToast('Не удалось скопировать', 'error');
+    }
+  } catch (err) {
+    showToast('Ошибка при копировании: ' + err.message, 'error');
+  }
+
+  document.body.removeChild(textArea);
+}
 
