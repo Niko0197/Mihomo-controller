@@ -1805,9 +1805,9 @@ function handleGetVersions(req, res) {
     const currentBranch = stdoutBranch.trim();
     
     exec('git fetch origin ' + currentBranch, { cwd: __dirname }, (errFetch) => {
-      exec('git log origin/' + currentBranch + ' -n 15 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLog, stdoutLog) => {
+      exec('git log origin/' + currentBranch + ' -n 30 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLog, stdoutLog) => {
         if (errLog) {
-          exec('git log -n 15 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLocalLog, stdoutLocalLog) => {
+          exec('git log -n 30 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLocalLog, stdoutLocalLog) => {
             if (errLocalLog) {
               res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
               res.end(JSON.stringify({ success: false, error: errLocalLog.message }));
