@@ -1199,7 +1199,11 @@ function renderProxyGroups(proxiesData) {
     let aliveCount = 0;
     group.all.forEach(n => {
       const np = proxies[n];
-      if (np && getLastDelay(np) > 0) aliveCount++;
+      if (np) {
+        const isChild = np.all && Array.isArray(np.all);
+        const d = isChild ? resolveSelectedProxyDelay(n, proxies) : getLastDelay(np);
+        if (d > 0) aliveCount++;
+      }
     });
 
     const typeIcons = { selector: '🔀', urltest: '⚡', 'url-test': '⚡', fallback: '🛡️', loadbalance: '⚖️', 'load-balance': '⚖️', relay: '🔗' };
