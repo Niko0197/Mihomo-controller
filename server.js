@@ -977,6 +977,371 @@ function compileConfigInline(configText) {
   return output.join('\n');
 }
 
+// --- Subscription Exporter: полная компиляция конфига для внешнего импорта ---
+// Парсит прокси из файлов провайдеров (YAML proxies: и URI-списки vless:// и т.д.)
+function parseProxiesFromProviderFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return [];
+    const text = fs.readFileSync(filePath, 'utf8');
+    const lines = text.split(/\r?\n/).filter(l => l.trim().length > 0 && !l.trim().startsWith('#'));
+    
+    // Определяем: это список URI или YAML?
+    const isUriList = lines.some(line => {
+      const lower = line.trim().toLowerCase();
+      return lower.startsWith('vless://') || lower.startsWith('vmess://') || lower.startsWith('ss://') || 
+             lower.startsWith('trojan://') || lower.startsWith('tuic://') || lower.startsWith('hysteria2://') || lower.startsWith('hysteria://');
+    });
+
+    if (isUriList) {
+      const proxies = [];
+      for (const line of lines) {
+        try {
+          const parsed = yamlUtils.parseProxyUri(line.trim());
+          if (parsed) proxies.push(parsed);
+        } catch (e) {}
+      }
+      return proxies;
+    }
+
+    // YAML формат: ищем секцию proxies:
+    const proxies = [];
+    let inProxies = false;
+    let currentProxy = null;
+    let inSubOpts = false;
+    let subOptsKey = '';
+    
+    const rawLines = text.split(/\r?\n/);
+    for (let i = 0; i < rawLines.length; i++) {
+      const line = rawLines[i];
+      const trimmed = line.trim();
+      if (trimmed.length === 0 || trimmed.startsWith('#')) continue;
+      
+      if (line.startsWith('proxies:')) {
+        inProxies = true;
+        continue;
+      }
+      
+      if (inProxies) {
+        // Выход из секции proxies при встрече нового root-key
+        if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
+          if (currentProxy && currentProxy.name) proxies.push(currentProxy);
+          inProxies = false;
+          continue;
+        }
+        
+        if (trimmed.startsWith('- ')) {
+          if (currentProxy && currentProxy.name) proxies.push(currentProxy);
+          currentProxy = {};
+          inSubOpts = false;
+          
+          const rest = trimmed.substring(2).trim();
+          const colIdx = rest.indexOf(':');
+          if (colIdx !== -1) {
+            const k = rest.substring(0, colIdx).trim();
+            const v = rest.substring(colIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+            currentProxy[k] = v;
+          }
+        } else if (currentProxy) {
+          // Определяем вложенные объекты (reality-opts, ws-opts, etc.)
+          if (trimmed.endsWith(':') && !trimmed.startsWith('-')) {
+            const key = trimmed.slice(0, -1).trim();
+            if (key === 'reality-opts' || key === 'ws-opts' || key === 'grpc-opts' || key === 'h2-opts' || key === 'plugin-opts') {
+              inSubOpts = true;
+              subOptsKey = key;
+              currentProxy[key] = {};
+              continue;
+            }
+          }
+          
+          const colIdx = trimmed.indexOf(':');
+          if (colIdx !== -1) {
+            const k = trimmed.substring(0, colIdx).trim();
+            const v = trimmed.substring(colIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+            
+            // Определяем уровень вложенности по отступу
+            const indent = line.length - line.trimStart().length;
+            if (inSubOpts && indent >= 6) {
+              currentProxy[subOptsKey][k] = v;
+            } else {
+              inSubOpts = false;
+              currentProxy[k] = v;
+            }
+          }
+        }
+      }
+    }
+    if (currentProxy && currentProxy.name) proxies.push(currentProxy);
+    return proxies;
+  } catch (err) {
+    console.error(`[Export Compiler] Failed to parse provider file ${filePath}:`, err.message);
+    return [];
+  }
+}
+
+// Сериализация объекта прокси в YAML-строки для вставки в proxies:
+function serializeProxyObjectToYaml(proxy) {
+  const lines = [];
+  const name = (proxy.name || 'unknown').replace(/"/g, '\\"');
+  lines.push(`  - name: "${name}"`);
+  
+  const simpleKeys = ['type', 'server', 'port', 'uuid', 'password', 'cipher', 'network', 'flow', 'servername', 'client-fingerprint', 'sni', 'skip-cert-verify'];
+  const boolKeys = ['udp', 'tls'];
+  
+  for (const key of simpleKeys) {
+    if (proxy[key] !== undefined && proxy[key] !== '') {
+      lines.push(`    ${key}: ${proxy[key]}`);
+    }
+  }
+  for (const key of boolKeys) {
+    if (proxy[key] !== undefined) {
+      lines.push(`    ${key}: ${proxy[key]}`);
+    }
+  }
+  
+  // Вложенные объекты
+  const nestedKeys = ['reality-opts', 'ws-opts', 'grpc-opts', 'h2-opts', 'plugin-opts'];
+  for (const key of nestedKeys) {
+    if (proxy[key] && typeof proxy[key] === 'object') {
+      lines.push(`    ${key}:`);
+      for (const [subKey, subVal] of Object.entries(proxy[key])) {
+        lines.push(`      ${subKey}: ${subVal}`);
+      }
+    }
+  }
+  
+  return lines.join('\n');
+}
+
+// Главная функция: компиляция конфига для экспорта как полноценной подписки
+function compileConfigForExport(configText) {
+  const mihomoDir = '/opt/etc/mihomo';
+  const rawLines = configText.split(/\r?\n/);
+  
+  // ===== ШАГ 1: Собираем proxy-providers и парсим файлы с прокси =====
+  const providerProxies = new Map(); // имя провайдера -> [{name, type, ...}, ...]
+  let inProxyProviders = false;
+  let currentProviderName = '';
+  let currentProviderPath = '';
+  
+  for (const line of rawLines) {
+    const trimmed = line.trim();
+    
+    if (line.startsWith('proxy-providers:')) {
+      inProxyProviders = true;
+      continue;
+    }
+    if (inProxyProviders) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t')) {
+        inProxyProviders = false;
+        continue;
+      }
+      // Определяем имя провайдера (отступ 2 пробела, заканчивается на :)
+      if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
+        if (currentProviderName && currentProviderPath) {
+          let absPath = currentProviderPath;
+          if (absPath.startsWith('./')) absPath = path.join(mihomoDir, absPath.substring(2));
+          else if (!path.isAbsolute(absPath)) absPath = path.join(mihomoDir, absPath);
+          providerProxies.set(currentProviderName, parseProxiesFromProviderFile(absPath));
+        }
+        currentProviderName = trimmed.slice(0, -1);
+        currentProviderPath = '';
+      }
+      if (trimmed.startsWith('path:')) {
+        currentProviderPath = trimmed.substring(5).trim().replace(/^['"]|['"]$/g, '');
+      }
+    }
+  }
+  // Последний провайдер
+  if (currentProviderName && currentProviderPath) {
+    let absPath = currentProviderPath;
+    if (absPath.startsWith('./')) absPath = path.join(mihomoDir, absPath.substring(2));
+    else if (!path.isAbsolute(absPath)) absPath = path.join(mihomoDir, absPath);
+    providerProxies.set(currentProviderName, parseProxiesFromProviderFile(absPath));
+  }
+  
+  console.log(`[Export Compiler] Parsed ${providerProxies.size} proxy providers:`);
+  for (const [name, list] of providerProxies) {
+    console.log(`  - ${name}: ${list.length} proxies`);
+  }
+  
+  // ===== ШАГ 2: Формируем результирующий конфиг =====
+  const output = [];
+  let inPP = false; // inside proxy-providers section (skip it entirely)
+  let inProxyGroups = false;
+  let currentGroupLines = [];
+  let skipSection = false;
+  
+  for (let i = 0; i < rawLines.length; i++) {
+    const line = rawLines[i];
+    const trimmed = line.trim();
+    
+    // Определяем root-level секции
+    if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('#')) {
+      // Завершаем предыдущую группу если были в proxy-groups
+      if (inProxyGroups && currentGroupLines.length > 0) {
+        output.push(...flattenGroupBlock(currentGroupLines, providerProxies));
+        currentGroupLines = [];
+      }
+      
+      if (line.startsWith('proxy-providers:')) {
+        inPP = true;
+        inProxyGroups = false;
+        skipSection = false;
+        continue;
+      }
+      if (line.startsWith('proxy-groups:')) {
+        inPP = false;
+        inProxyGroups = true;
+        skipSection = false;
+        output.push(line);
+        continue;
+      }
+      // Любая другая root секция
+      inPP = false;
+      inProxyGroups = false;
+      skipSection = false;
+    }
+    
+    // Пропускаем содержимое proxy-providers целиком
+    if (inPP) continue;
+    
+    // Собираем строки proxy-groups для пост-обработки
+    if (inProxyGroups) {
+      // Если встретили начало новой группы (  - name:), обрабатываем предыдущую
+      if (trimmed.startsWith('- name:') && currentGroupLines.length > 0) {
+        output.push(...flattenGroupBlock(currentGroupLines, providerProxies));
+        currentGroupLines = [];
+      }
+      currentGroupLines.push(line);
+      continue;
+    }
+    
+    output.push(line);
+  }
+  
+  // Финализируем последнюю группу
+  if (currentGroupLines.length > 0) {
+    output.push(...flattenGroupBlock(currentGroupLines, providerProxies));
+  }
+  
+  // ===== ШАГ 3: Вставляем все прокси из провайдеров в секцию proxies: =====
+  const allProviderProxies = [];
+  for (const list of providerProxies.values()) {
+    allProviderProxies.push(...list);
+  }
+  
+  if (allProviderProxies.length > 0) {
+    let proxiesIdx = output.findIndex(l => l.startsWith('proxies:'));
+    const proxyYamlLines = allProviderProxies.map(p => serializeProxyObjectToYaml(p));
+    
+    if (proxiesIdx === -1) {
+      // Вставляем секцию proxies: перед proxy-groups:
+      const groupsIdx = output.findIndex(l => l.startsWith('proxy-groups:'));
+      if (groupsIdx !== -1) {
+        output.splice(groupsIdx, 0, 'proxies:', ...proxyYamlLines, '');
+      } else {
+        output.push('proxies:');
+        output.push(...proxyYamlLines);
+      }
+    } else {
+      // Вставляем прокси после существующей секции proxies:
+      // Находим конец секции proxies
+      let insertAfter = proxiesIdx;
+      for (let j = proxiesIdx + 1; j < output.length; j++) {
+        const l = output[j];
+        if (l.length > 0 && !l.startsWith(' ') && !l.startsWith('\t') && !l.startsWith('#')) {
+          insertAfter = j;
+          break;
+        }
+        insertAfter = j + 1;
+      }
+      output.splice(insertAfter, 0, ...proxyYamlLines);
+    }
+  }
+  
+  // ===== ШАГ 4: Инлайним rule-providers (используем существующую логику) =====
+  let result = output.join('\n');
+  result = compileConfigInline(result);
+  
+  return result;
+}
+
+// Обработка блока proxy-group: заменяет use: [provider1, ...] на proxies: [node1, node2, ...]
+function flattenGroupBlock(groupLines, providerProxies) {
+  const result = [];
+  let useProviders = [];
+  let inUse = false;
+  let proxiesLineIdx = -1;
+  let hasExistingProxies = false;
+  
+  for (const line of groupLines) {
+    const trimmed = line.trim();
+    
+    // Обнаруживаем use:
+    if (trimmed.startsWith('use:')) {
+      inUse = true;
+      const rest = trimmed.substring(4).trim();
+      if (rest.startsWith('[') && rest.endsWith(']')) {
+        // Inline формат: use: [provider1, provider2]
+        const names = rest.substring(1, rest.length - 1).split(',').map(n => n.trim().replace(/^['"]|['"]$/g, ''));
+        useProviders.push(...names.filter(n => n.length > 0));
+        inUse = false;
+      } else if (rest.length > 0) {
+        useProviders.push(rest.replace(/^['"]|['"]$/g, ''));
+        inUse = false;
+      }
+      continue; // Не добавляем use: в результат
+    }
+    
+    if (inUse) {
+      if (trimmed.startsWith('-')) {
+        useProviders.push(trimmed.substring(1).trim().replace(/^['"]|['"]$/g, ''));
+        continue;
+      } else {
+        inUse = false;
+      }
+    }
+    
+    if (trimmed.startsWith('proxies:')) {
+      proxiesLineIdx = result.length;
+      hasExistingProxies = true;
+    }
+    
+    result.push(line);
+  }
+  
+  // Если были use: провайдеры, резолвим их в имена прокси
+  if (useProviders.length > 0) {
+    const resolvedNames = [];
+    for (const providerName of useProviders) {
+      const list = providerProxies.get(providerName) || [];
+      for (const p of list) {
+        if (p.name) resolvedNames.push(p.name);
+      }
+    }
+    
+    if (resolvedNames.length > 0) {
+      const proxyLines = resolvedNames.map(name => `      - "${name.replace(/"/g, '\\"')}"`);
+      
+      if (proxiesLineIdx !== -1) {
+        // Вставляем после строки proxies:
+        // Ищем конец существующего блока proxies
+        let insertAt = proxiesLineIdx + 1;
+        while (insertAt < result.length && result[insertAt].trim().startsWith('-')) {
+          insertAt++;
+        }
+        result.splice(insertAt, 0, ...proxyLines);
+      } else {
+        // Добавляем proxies: в конец группы
+        result.push('    proxies:');
+        result.push(...proxyLines);
+      }
+    }
+  }
+  
+  return result;
+}
+
 function getConfigFilesList() {
   const files = [];
   const baseDir = '/opt/etc/mihomo';
@@ -1149,7 +1514,7 @@ function handleGetConfig(req, res) {
     if (fileId === 'config_compiled') {
       if (fs.existsSync(configPath)) {
         const configText = fs.readFileSync(configPath, 'utf8');
-        let compiled = compileConfigInline(configText);
+        let compiled = compileConfigForExport(configText);
         
         const routingParam = urlObj.searchParams.get('routing');
         if (routingParam === 'false') {
