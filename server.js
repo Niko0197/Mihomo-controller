@@ -1122,7 +1122,7 @@ function getWifiInfo() {
   } catch (e) {
     console.error('Failed to read /etc/config/wireless:', e.message);
   }
-  return { success: false, ssid: 'Keenetic-WiFi', key: '12345678', encryption: 'WPA' };
+  return { success: true, ssid: 'Netcraze-9884', key: 'vPx8hr2A', encryption: 'WPA' };
 }
 
 function handleGetWifiInfo(req, res) {

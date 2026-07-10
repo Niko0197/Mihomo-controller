@@ -2233,8 +2233,9 @@ async function loadQrConnections() {
     const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
     
     const wifiString = `WIFI:T:${wifiData.encryption};S:${wifiData.ssid};P:${wifiData.key};;`;
-    const fullConfigUrl = `${location.protocol}//${location.host}/api/config?file=config_compiled`;
-    const noRoutingConfigUrl = `${location.protocol}//${location.host}/api/config?file=config_compiled&routing=false`;
+    const baseDomain = 'https://spyware.keenet9883.netcraze.link:8083';
+    const fullConfigUrl = `${baseDomain}/api/config?file=config_compiled`;
+    const noRoutingConfigUrl = `${baseDomain}/api/config?file=config_compiled&routing=false`;
     
     let html = '';
     html += `<div class="qr-cards-grid">`;
