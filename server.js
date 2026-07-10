@@ -1064,6 +1064,78 @@ function handleGetConfigFiles(req, res) {
   }
 }
 
+function stripRoutingRules(configText) {
+  const lines = configText.split(/\r?\n/);
+  const output = [];
+  let inRules = false;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.startsWith('rules:')) {
+      inRules = true;
+      output.push('rules:');
+      output.push('  - MATCH,GLOBAL');
+      continue;
+    }
+    
+    if (inRules) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('#')) {
+        inRules = false;
+        output.push(line);
+      }
+    } else {
+      output.push(line);
+    }
+  }
+  return output.join('\n');
+}
+
+function getWifiInfo() {
+  try {
+    const fs = require('fs');
+    if (fs.existsSync('/etc/config/wireless')) {
+      const content = fs.readFileSync('/etc/config/wireless', 'utf8');
+      const lines = content.split('\n');
+      let ssid = '';
+      let key = '';
+      let encryption = 'WPA';
+      
+      for (let line of lines) {
+        line = line.trim();
+        if (line.startsWith('option ssid')) {
+          ssid = line.split("'")[1] || line.split('"')[1] || line.split(/\s+/)[2] || '';
+        }
+        if (line.startsWith('option key')) {
+          key = line.split("'")[1] || line.split('"')[1] || line.split(/\s+/)[2] || '';
+        }
+        if (line.startsWith('option encryption')) {
+          const enc = line.split("'")[1] || line.split('"')[1] || line.split(/\s+/)[2] || '';
+          if (enc.includes('wep')) encryption = 'WEP';
+          else if (enc === 'none') encryption = 'nopass';
+          else encryption = 'WPA';
+        }
+      }
+      if (ssid) {
+        return { success: true, ssid, key, encryption };
+      }
+    }
+  } catch (e) {
+    console.error('Failed to read /etc/config/wireless:', e.message);
+  }
+  return { success: false, ssid: 'Keenetic-WiFi', key: '12345678', encryption: 'WPA' };
+}
+
+function handleGetWifiInfo(req, res) {
+  try {
+    const info = getWifiInfo();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(info));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
 // GET /api/config
 function handleGetConfig(req, res) {
   try {
@@ -1073,7 +1145,13 @@ function handleGetConfig(req, res) {
     if (fileId === 'config_compiled') {
       if (fs.existsSync(configPath)) {
         const configText = fs.readFileSync(configPath, 'utf8');
-        const compiled = compileConfigInline(configText);
+        let compiled = compileConfigInline(configText);
+        
+        const routingParam = urlObj.searchParams.get('routing');
+        if (routingParam === 'false') {
+          compiled = stripRoutingRules(compiled);
+        }
+        
         res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end(compiled);
       } else {
@@ -2919,6 +2997,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && pathname === '/api/tor-bridges/update') {
     await handleUpdateTorBridges(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/wifi/info') {
+    handleGetWifiInfo(req, res);
     return;
   }
   if (req.method === 'GET' && pathname === '/api/config/files') {

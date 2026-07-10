@@ -46,6 +46,8 @@ function switchTab(tabId) {
     loadDynamicRulesTab();
   } else if (tabId === 'updates') {
     loadVersionsList();
+  } else if (tabId === 'qr') {
+    loadQrConnections();
   } else {
     loadData();
   }
@@ -2215,4 +2217,126 @@ function hideMihomoDimmerOverlay() {
     overlay.classList.remove('active');
   }
 }
+
+async function loadQrConnections() {
+  const container = document.getElementById('qr-codes-container');
+  if (!container) return;
+  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">⏳ Загрузка параметров подключения...</div>';
+  
+  try {
+    const [wifiRes, providersRes] = await Promise.all([
+      fetch('/api/wifi/info'),
+      fetch('/api/providers')
+    ]);
+    
+    const wifiData = wifiRes.ok ? await wifiRes.json() : { success: false, ssid: 'Keenetic-WiFi', key: '12345678', encryption: 'WPA' };
+    const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
+    
+    const wifiString = `WIFI:T:${wifiData.encryption};S:${wifiData.ssid};P:${wifiData.key};;`;
+    const fullConfigUrl = `${location.protocol}//${location.host}/api/config?file=config_compiled`;
+    const noRoutingConfigUrl = `${location.protocol}//${location.host}/api/config?file=config_compiled&routing=false`;
+    
+    let html = '';
+    html += `<div class="qr-cards-grid">`;
+    
+    // --- 1. КАРТОЧКА WIFI ---
+    html += `
+      <div class="qr-card">
+        <div class="qr-card-header">
+          <span class="qr-card-icon">📶</span>
+          <span class="qr-card-title">Подключение к Wi-Fi</span>
+        </div>
+        <div class="qr-code-wrapper">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(wifiString)}" class="qr-image" alt="Wi-Fi QR" />
+        </div>
+        <div class="qr-card-details">
+          <div class="qr-detail-item"><strong>SSID:</strong> <span>${wifiData.ssid}</span> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${wifiData.ssid.replace(/'/g, "\\'")}')">📋</button></div>
+          <div class="qr-detail-item"><strong>Пароль:</strong> <span>${wifiData.key}</span> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${wifiData.key.replace(/'/g, "\\'")}')">📋</button></div>
+        </div>
+      </div>
+    `;
+    
+    // --- 2. КАРТОЧКА ПОЛНОГО КОНФИГА МИХОМО ---
+    html += `
+      <div class="qr-card">
+        <div class="qr-card-header">
+          <span class="qr-card-icon">🚀</span>
+          <span class="qr-card-title">Подписка Mihomo (Полная)</span>
+        </div>
+        <div class="qr-code-wrapper">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(fullConfigUrl)}" class="qr-image" alt="Full Config QR" />
+        </div>
+        <div class="qr-card-details">
+          <div class="qr-detail-text">С полной маршрутизацией и встроенными правилами для роутера.</div>
+          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${fullConfigUrl}')">📋</button></div>
+        </div>
+      </div>
+    `;
+
+    // --- 3. КАРТОЧКА КОНФИГА БЕЗ МАРШРУТИЗАЦИИ (ОБНОВЛЯЕМАЯ ПОДПИСКА) ---
+    html += `
+      <div class="qr-card">
+        <div class="qr-card-header">
+          <span class="qr-card-icon">🌐</span>
+          <span class="qr-card-title">Подписка Mihomo (Без правил)</span>
+        </div>
+        <div class="qr-code-wrapper">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(noRoutingConfigUrl)}" class="qr-image" alt="No Routing QR" />
+        </div>
+        <div class="qr-card-details">
+          <div class="qr-detail-text">Все ваши VPN-узлы и группы. Идеально для импорта на телефон/ПК без засорения маршрутов.</div>
+          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrl}" onclick="this.select()" /> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${noRoutingConfigUrl}')">📋</button></div>
+        </div>
+      </div>
+    `;
+    
+    // --- 4. КАРТОЧКИ VPN ПОДПИСОК ---
+    const providers = providersData.list || [];
+    providers.forEach(p => {
+      if (p.url) {
+        html += `
+          <div class="qr-card">
+            <div class="qr-card-header">
+              <span class="qr-card-icon">📦</span>
+              <span class="qr-card-title">Вход подписки: ${p.name}</span>
+            </div>
+            <div class="qr-code-wrapper">
+              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(p.url)}" class="qr-image" alt="Sub QR" />
+            </div>
+            <div class="qr-card-details">
+              <div class="qr-detail-text">Оригинальная ссылка провайдера VPN.</div>
+              <div class="qr-detail-url"><input type="text" readonly value="${p.url}" onclick="this.select()" /> <button class="btn-copy-small" onclick="navigator.clipboard.writeText('${p.url.replace(/'/g, "\\'")}')">📋</button></div>
+            </div>
+          </div>
+        `;
+      }
+    });
+
+    // --- 5. ЗАГЛУШКА ЛОКАЛЬНОГО VPN-СЕРВЕРА ---
+    html += `
+      <div class="qr-card wg-placeholder-card">
+        <div class="qr-card-header">
+          <span class="qr-card-icon">🛡️</span>
+          <span class="qr-card-title">Внешний VPN-сервер роутера</span>
+        </div>
+        <div class="qr-code-wrapper placeholder-qr">
+          <div class="qr-placeholder-overlay">
+            <span>ЗАГЛУШКА</span>
+          </div>
+        </div>
+        <div class="qr-card-details">
+          <div class="qr-detail-text">Для подключения из внешней сети напрямую к домашнему роутеру.</div>
+          <div class="qr-detail-subnet"><strong>Пул IP-адресов:</strong> <code>192.168.2.x</code></div>
+          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Устройствам будут выделяться адреса 192.168.2.2 - 2.254 для интеграции в локальную сеть с полной маршрутизацией.</div>
+        </div>
+      </div>
+    `;
+
+    html += `</div>`;
+    container.innerHTML = html;
+  } catch (err) {
+    container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px 0;">Ошибка загрузки подключений: ${err.message}</div>`;
+  }
+}
+window.loadQrConnections = loadQrConnections;
 

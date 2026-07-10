@@ -2901,6 +2901,177 @@ input:checked + .slider:before {
   to { transform: rotate(360deg); }
 }
 
+/* --- QR Codes Connections Tab --- */
+.qr-cards-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 20px;
+  margin-top: 20px;
+}
+
+.qr-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: 16px;
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), border-color 0.25s, box-shadow 0.25s;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.qr-card:hover {
+  transform: translateY(-4px);
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.3);
+}
+
+.qr-card-header {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  margin-bottom: 16px;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
+  padding-bottom: 10px;
+}
+
+.qr-card-icon {
+  font-size: 1.3rem;
+  margin-right: 10px;
+}
+
+.qr-card-title {
+  font-family: var(--font-outfit);
+  font-weight: 600;
+  font-size: 0.95rem;
+  color: var(--text);
+}
+
+.qr-code-wrapper {
+  background: white;
+  padding: 12px;
+  border-radius: 12px;
+  margin-bottom: 16px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 180px;
+  height: 180px;
+  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.1);
+}
+
+.qr-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.qr-card-details {
+  width: 100%;
+  font-size: 0.85rem;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.qr-detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.04);
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+
+.qr-detail-text {
+  color: var(--text-muted);
+  line-height: 1.4;
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.qr-detail-subnet {
+  background: rgba(255, 183, 77, 0.08);
+  border: 1px dashed rgba(255, 183, 77, 0.2);
+  color: #ffb74d;
+  padding: 6px 10px;
+  border-radius: 8px;
+  text-align: center;
+  font-size: 0.82rem;
+}
+
+.qr-detail-url {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+}
+
+.qr-detail-url input {
+  flex-grow: 1;
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-muted);
+  padding: 6px 10px;
+  border-radius: 8px;
+  font-size: 0.75rem;
+  font-family: monospace;
+  width: 0;
+}
+
+.btn-copy-small {
+  background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  color: var(--text-normal);
+  padding: 4px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 0.75rem;
+  transition: background 0.2s, color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.btn-copy-small:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+/* WireGuard/OpenVPN placeholder styles */
+.wg-placeholder-card {
+  border-color: rgba(255, 183, 77, 0.15) !important;
+}
+
+.wg-placeholder-card:hover {
+  border-color: #ffb74d !important;
+}
+
+.placeholder-qr {
+  background: rgba(255, 255, 255, 0.01) !important;
+  border: 2px dashed rgba(255, 183, 77, 0.2);
+  position: relative;
+  width: 180px;
+  height: 180px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.qr-placeholder-overlay {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  width: 100%;
+  height: 100%;
+  color: rgba(255, 183, 77, 0.5);
+  font-weight: 700;
+  font-family: var(--font-outfit);
+  font-size: 0.85rem;
+  letter-spacing: 2px;
+}
+
 
 
 
