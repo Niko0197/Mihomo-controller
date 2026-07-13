@@ -97,7 +97,7 @@ if [ "$MODE" = "update" ]; then
 
     # Обновляем только код приложения, НЕ трогая пользовательские данные
     # Список файлов кода для обновления:
-    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js install.sh; do
+    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js install.sh uninstall.sh; do
         if [ -f "$TEMP_DIR/$FILE" ]; then
             cp -f "$TEMP_DIR/$FILE" "$INSTALL_DIR/$FILE"
             echo "  ✓ Обновлён: $FILE"
