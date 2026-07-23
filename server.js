@@ -1495,6 +1495,79 @@ function stripRoutingRules(configText) {
   return output.join('\n');
 }
 
+// Извлекает ТОЛЬКО исходящие правила маршрутизации (без локальных rules роутера)
+function extractOutboundRules(configText) {
+  const lines = configText.split(/\r?\n/);
+  const output = ['rules:'];
+  let inRules = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (line.startsWith('rules:')) {
+      inRules = true;
+      continue;
+    }
+
+    if (inRules) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('#')) {
+        break;
+      }
+
+      if (trimmed.includes('SRC-IP-CIDR') || trimmed.includes('SRC-PORT')) {
+        continue;
+      }
+      if (trimmed.includes('CLIENTS BYPASS RULES') || trimmed.includes('CLIENTS VPN RULES')) {
+        continue;
+      }
+
+      if (trimmed.length > 0) {
+        output.push(line);
+      }
+    }
+  }
+
+  return output.join('\n');
+}
+
+// Очищает скомпилированный конфиг подписки от локальных правил роутера
+function stripLocalRules(configText) {
+  const lines = configText.split(/\r?\n/);
+  const output = [];
+  let inRules = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (line.startsWith('rules:')) {
+      inRules = true;
+      output.push(line);
+      continue;
+    }
+
+    if (inRules) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t') && !line.startsWith('#')) {
+        inRules = false;
+        output.push(line);
+        continue;
+      }
+
+      if (trimmed.includes('SRC-IP-CIDR') || trimmed.includes('SRC-PORT')) {
+        continue;
+      }
+      if (trimmed.includes('CLIENTS BYPASS RULES') || trimmed.includes('CLIENTS VPN RULES')) {
+        continue;
+      }
+    }
+
+    output.push(line);
+  }
+
+  return output.join('\n');
+}
+
 function getWifiInfo() {
   try {
     const fs = require('fs');
@@ -1551,6 +1624,7 @@ function handleGetConfig(req, res) {
       if (fs.existsSync(configPath)) {
         const configText = fs.readFileSync(configPath, 'utf8');
         let compiled = compileConfigForExport(configText);
+        compiled = stripLocalRules(compiled);
         
         const routingParam = urlObj.searchParams.get('routing');
         if (routingParam === 'false') {
@@ -1563,6 +1637,22 @@ function handleGetConfig(req, res) {
           'Profile-Update-Interval': '24'
         });
         res.end(compiled);
+      } else {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Главный конфигурационный файл не найден');
+      }
+      return;
+    }
+
+    if (fileId === 'outbound_rules' || fileId === 'rules') {
+      if (fs.existsSync(configPath)) {
+        const configText = fs.readFileSync(configPath, 'utf8');
+        const outboundRules = extractOutboundRules(configText);
+        res.writeHead(200, { 
+          'Content-Type': 'text/yaml; charset=utf-8',
+          'Content-Disposition': 'inline; filename="outbound_rules.yaml"'
+        });
+        res.end(outboundRules);
       } else {
         res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
         res.end('Главный конфигурационный файл не найден');
@@ -3338,6 +3428,23 @@ const server = http.createServer(async (req, res) => {
     handleGetSystemStats(req, res);
     return;
   }
+  if (req.method === 'GET' && (pathname === '/api/config/rules.yaml' || pathname === '/api/export/rules.yaml' || pathname === '/rules.yaml' || pathname === '/outbound_rules.yaml')) {
+    if (fs.existsSync(configPath)) {
+      const configText = fs.readFileSync(configPath, 'utf8');
+      const outboundRules = extractOutboundRules(configText);
+      res.writeHead(200, { 
+        'Content-Type': 'text/yaml; charset=utf-8',
+        'Content-Disposition': 'inline; filename="outbound_rules.yaml"',
+        'Profile-Update-Interval': '24'
+      });
+      res.end(outboundRules);
+    } else {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Главный конфигурационный файл не найден');
+    }
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/api/system/versions') {
     handleGetVersions(req, res);
     return;
