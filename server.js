@@ -12,7 +12,43 @@ const API_PORT = 9090;
 const API_HOST = '192.168.1.1';
 const configPath = '/opt/etc/mihomo/config.yaml';
 const logRuPath = path.join(__dirname, 'log_ru.txt');
-const torJsonPath = path.join(__dirname, 'tor_bridges.json');
+// Автоматическая ротация текстовых логов (защита флеш-памяти роутера, макс 500 КБ)
+function rotateLogFile(filePath, maxBytes = 500 * 1024) {
+  try {
+    if (fs.existsSync(filePath)) {
+      const stats = fs.statSync(filePath);
+      if (stats.size > maxBytes) {
+        const content = fs.readFileSync(filePath, 'utf8');
+        const trimmed = content.slice(-200 * 1024);
+        const firstNewline = trimmed.indexOf('\n');
+        const cleanText = firstNewline !== -1 ? trimmed.slice(firstNewline + 1) : trimmed;
+        fs.writeFileSync(filePath, `--- [Ротация лога: ${new Date().toLocaleString('ru-RU')}] ---\n` + cleanText, 'utf8');
+      }
+    }
+  } catch (e) {
+    console.error('Ошибка ротации лога:', e.message);
+  }
+}
+
+function autoRotateAllLogs() {
+  const logs = [
+    path.join(__dirname, 'log.txt'),
+    path.join(__dirname, 'log_ru.txt'),
+    path.join(__dirname, 'server_out.log'),
+    path.join(__dirname, 'server_err.log')
+  ];
+  logs.forEach(l => rotateLogFile(l));
+}
+
+autoRotateAllLogs();
+setInterval(autoRotateAllLogs, 30 * 60 * 1000);
+
+// Автоматический сбор мусора V8 каждые 10 минут
+setInterval(() => {
+  if (global.gc) {
+    try { global.gc(); } catch (e) {}
+  }
+}, 10 * 60 * 1000);
 
 // Вспомогательная функция для выполнения HTTP-запросов к API Mihomo
 function makeMihomoRequest(method, endpoint, body = null) {
@@ -1960,6 +1996,25 @@ function handlePingProxy(req, res) {
         return;
       }
       
+      const servicePingUrls = {
+        'Apple': 'http://www.apple.com/library/test/success.html',
+        'YouTube': 'https://www.youtube.com',
+        'Discord': 'https://discord.com',
+        'Telegram': 'https://telegram.org',
+        'Meta': 'https://www.instagram.com',
+        'Twitch': 'https://www.twitch.tv',
+        'Reddit': 'https://www.reddit.com',
+        'Spotify': 'https://www.spotify.com',
+        'Speedtest': 'https://www.speedtest.net',
+        '18+': 'https://www.pornhub.com',
+        'TikTok': 'https://www.tiktok.com',
+        'Steam': 'https://store.steampowered.com',
+        'GitHub': 'https://github.com',
+        'Google': 'http://www.gstatic.com/generate_204'
+      };
+
+      const targetPingUrl = servicePingUrls[name] || 'http://www.gstatic.com/generate_204';
+
       let targetNode = name;
       let providerName = null;
       try {
@@ -2003,8 +2058,8 @@ function handlePingProxy(req, res) {
         console.error('Failed to resolve proxy group active node for ping:', e.message);
       }
 
-      const timeout = 3000;
-      const url = encodeURIComponent('http://www.gstatic.com/generate_204');
+      const timeout = 5000;
+      const url = encodeURIComponent(targetPingUrl);
       
       let mRes;
       if (providerName) {
@@ -2522,57 +2577,24 @@ function parseReleaseBody(body) {
   return changes.slice(0, 15);
 }
 
-// Вспомогательная функция для скачивания и распаковки с редиректами
+// Вспомогательная функция для скачивания и распаковки с редиректами через curl
 function downloadAndDecompress(url, destPath) {
   return new Promise((resolve, reject) => {
-    function download(currentUrl) {
-      const options = {
-        headers: { 'User-Agent': 'Mihomo-Controller-Updater/1.0' },
-        timeout: 10000
-      };
-      
-      const request = https.get(currentUrl, options, (response) => {
-        if (response.statusCode === 301 || response.statusCode === 302) {
-          download(response.headers.location);
-          return;
-        }
-        
-        if (response.statusCode !== 200) {
-          reject(new Error(`Failed to download: HTTP ${response.statusCode}`));
-          return;
-        }
-        
-        const fileStream = fs.createWriteStream(destPath);
-        const gunzipStream = zlib.createGunzip();
-        
-        response.pipe(gunzipStream).pipe(fileStream);
-        
-        fileStream.on('finish', () => {
-          fileStream.close();
+    const { exec } = require('child_process');
+    const cmd = `curl -L -s -k --connect-timeout 15 --max-time 120 "${url}" | gzip -d > "${destPath}"`;
+    exec(cmd, { maxBuffer: 10 * 1024 * 1024 }, (err, stdout, stderr) => {
+      if (err || !fs.existsSync(destPath) || fs.statSync(destPath).size < 1000000) {
+        const fallbackCmd = `curl -L -k --connect-timeout 15 --max-time 120 "${url}" -o "${destPath}.gz" && gzip -df "${destPath}.gz"`;
+        exec(fallbackCmd, { maxBuffer: 10 * 1024 * 1024 }, (err2) => {
+          if (err2 || !fs.existsSync(destPath) || fs.statSync(destPath).size < 1000000) {
+            return reject(new Error('Не удалось скачать файл релиза (таймаут сети или блокировка GitHub)'));
+          }
           resolve();
         });
-        
-        fileStream.on('error', (err) => {
-          fileStream.close();
-          reject(err);
-        });
-        
-        gunzipStream.on('error', (err) => {
-          reject(err);
-        });
-      });
-      
-      request.on('error', (err) => {
-        reject(err);
-      });
-      
-      request.on('timeout', () => {
-        request.destroy();
-        reject(new Error('Connection timeout during download'));
-      });
-    }
-    
-    download(url);
+        return;
+      }
+      resolve();
+    });
   });
 }
 
@@ -3312,7 +3334,6 @@ const server = http.createServer(async (req, res) => {
     }
   }
 
-  // Маршрутизация API
   if (req.method === 'GET' && pathname === '/api/system/stats') {
     handleGetSystemStats(req, res);
     return;

@@ -421,6 +421,22 @@ async function main() {
 
   // Проверяем работу веб-сервера и при необходимости запускаем его в фоне
   ensureServerRunning();
+
+  // Выполняем ротацию лога при завершении скрипта (макс. 500 КБ)
+  try {
+    const logPath = path.join(__dirname, 'log.txt');
+    if (fs.existsSync(logPath) && fs.statSync(logPath).size > 500 * 1024) {
+      const content = fs.readFileSync(logPath, 'utf8');
+      const trimmed = content.slice(-200 * 1024);
+      const firstNewline = trimmed.indexOf('\n');
+      const cleanText = firstNewline !== -1 ? trimmed.slice(firstNewline + 1) : trimmed;
+      fs.writeFileSync(logPath, `--- [Ротация лога: ${getTimestamp()}] ---\n` + cleanText, 'utf8');
+    }
+  } catch(e) {}
+
+  if (global.gc) {
+    try { global.gc(); } catch(e) {}
+  }
 }
 
 function ensureServerRunning() {
@@ -437,6 +453,15 @@ function ensureServerRunning() {
   });
 
   req.on('error', (err) => {
+    // Check if server.js process is already running to avoid runaway process duplication
+    try {
+      const { execSync } = require('child_process');
+      const pids = execSync('pgrep -f "server.js"', { timeout: 1000 }).toString().trim();
+      if (pids) {
+        return;
+      }
+    } catch (e) {}
+
     // Сервер не отвечает (остановлен), запускаем в фоновом режиме
     const logMsg = `[${getTimestamp()}] Веб-сервер на порту 4000 остановлен. Автозапуск в фоне...\n`;
     fs.appendFileSync(path.join(__dirname, 'log.txt'), logMsg, 'utf8');
@@ -445,7 +470,7 @@ function ensureServerRunning() {
     const out = fs.openSync(path.join(__dirname, 'server_out.log'), 'a');
     const errFile = fs.openSync(path.join(__dirname, 'server_err.log'), 'a');
 
-    const child = spawn(process.execPath, [path.join(__dirname, 'server.js')], {
+    const child = spawn('/opt/bin/node-vpnweb', [path.join(__dirname, 'server.js')], {
       detached: true,
       stdio: ['ignore', out, errFile]
     });

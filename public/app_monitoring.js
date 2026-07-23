@@ -63,7 +63,7 @@ window.switchTab = function(tabId) {
   originalSwitchTab(tabId);
   
   // Update connections polling mode based on current tab
-  if (tabId === 'connections') {
+  if (tabId === 'connections' || tabId === 'packet-monitor') {
     startConnectionsPolling(false); // Active rendering
   } else {
     startConnectionsPolling(true); // Silent background polling for stats
@@ -337,8 +337,11 @@ async function loadConnections() {
     // Aggregate VPN vs DIRECT traffic volumes
     updateTrafficVolumes(connections);
     
+    // Process packet log entries for Packet Monitor tab
+    processPacketLogEntries(connections);
+    
     // If silent mode is active, do not render table rows or connection count to save CPU
-    if (connectionsSilentMode) return;
+    if (connectionsSilentMode && currentTab !== 'packet-monitor') return;
     
     // Render connection count
     const countEl = document.getElementById('connections-count');
@@ -533,8 +536,330 @@ function renderConnectionsTable(connections) {
     tbody.appendChild(tr);
   });
   
-  lastConnBytesMap = newBytesMap;
+  prevConnBytesMap = newBytesMap;
 }
+
+// ==========================================
+// --- 2.1 Packet Monitor (Live Process & Packet Tracking) ---
+// ==========================================
+let packetLogs = [];
+let packetStreamActive = true;
+let knownProcesses = new Set();
+let seenPacketConnIds = new Map();
+
+function getProcessColor(processName) {
+  if (!processName) processName = 'Direct / General';
+  const cleanName = processName.toLowerCase().replace(/\.exe$/, '').trim();
+  
+  const presets = {
+    'google': { bg: 'rgba(66, 133, 244, 0.15)', border: '#4285F4', text: '#90CAF9' },
+    'apple': { bg: 'rgba(255, 255, 255, 0.15)', border: '#EEEEEE', text: '#FFFFFF' },
+    'telegram': { bg: 'rgba(34, 158, 217, 0.15)', border: '#229ED9', text: '#76CEF4' },
+    'youtube': { bg: 'rgba(255, 23, 68, 0.15)', border: '#FF1744', text: '#FF8A80' },
+    'discord': { bg: 'rgba(88, 101, 242, 0.15)', border: '#5865F2', text: '#B388FF' },
+    'tiktok': { bg: 'rgba(254, 44, 85, 0.15)', border: '#FE2C55', text: '#FF80AB' },
+    'meta / ig': { bg: 'rgba(225, 48, 108, 0.15)', border: '#E1306C', text: '#FF80AB' },
+    'meta': { bg: 'rgba(225, 48, 108, 0.15)', border: '#E1306C', text: '#FF80AB' },
+    'steam': { bg: 'rgba(102, 192, 244, 0.15)', border: '#66C0F4', text: '#80D8FF' },
+    'spotify': { bg: 'rgba(30, 215, 96, 0.15)', border: '#1ED760', text: '#B9F6CA' },
+    'netflix': { bg: 'rgba(229, 9, 20, 0.15)', border: '#E50914', text: '#FF8A80' },
+    'roblox': { bg: 'rgba(0, 162, 232, 0.15)', border: '#00A2E8', text: '#80D8FF' },
+    'github': { bg: 'rgba(156, 39, 176, 0.15)', border: '#AB47BC', text: '#EA80FC' },
+    'openai': { bg: 'rgba(16, 163, 127, 0.15)', border: '#10A37F', text: '#A7F3D0' },
+    'anthropic': { bg: 'rgba(217, 119, 6, 0.15)', border: '#D97706', text: '#FDE68A' },
+    'twitter / x': { bg: 'rgba(29, 155, 240, 0.15)', border: '#1D9BF0', text: '#80D8FF' },
+    'bittorrent': { bg: 'rgba(255, 152, 0, 0.15)', border: '#FF9800', text: '#FFE082' },
+    'rutracker': { bg: 'rgba(255, 152, 0, 0.15)', border: '#FF9800', text: '#FFE082' },
+    'yandex': { bg: 'rgba(255, 204, 0, 0.15)', border: '#FFCC00', text: '#FFF59D' },
+    'vkontakte': { bg: 'rgba(0, 119, 255, 0.15)', border: '#0077FF', text: '#82B1FF' },
+    'direct / general': { bg: 'rgba(76, 175, 80, 0.15)', border: '#4CAF50', text: '#A5D6A7' }
+  };
+
+  if (presets[cleanName]) return presets[cleanName];
+
+  let hash = 0;
+  for (let i = 0; i < cleanName.length; i++) {
+    hash = cleanName.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return {
+    bg: `hsla(${hue}, 85%, 60%, 0.15)`,
+    border: `hsl(${hue}, 85%, 60%)`,
+    text: `hsl(${hue}, 90%, 75%)`
+  };
+}
+
+function extractProcessName(conn) {
+  const payload = (conn.rulePayload || '').toLowerCase();
+  const host = (conn.metadata && conn.metadata.host ? conn.metadata.host : '').toLowerCase();
+  const chainsStr = (conn.chains ? conn.chains.join(' ') : '').toLowerCase();
+
+  if (payload.includes('google') || host.includes('google') || host.includes('gstatic') || host.includes('ggpht') || chainsStr.includes('google')) return 'Google';
+  if (payload.includes('apple') || host.includes('apple') || host.includes('icloud') || chainsStr.includes('apple')) return 'Apple';
+  if (payload.includes('telegram') || host.includes('telegram') || host.includes('t.me') || chainsStr.includes('telegram')) return 'Telegram';
+  if (payload.includes('youtube') || host.includes('youtube') || host.includes('googlevideo') || chainsStr.includes('youtube')) return 'YouTube';
+  if (payload.includes('discord') || host.includes('discord') || chainsStr.includes('discord')) return 'Discord';
+  if (payload.includes('tiktok') || host.includes('tiktok') || host.includes('byteoversea') || chainsStr.includes('tiktok')) return 'TikTok';
+  if (payload.includes('meta') || payload.includes('instagram') || payload.includes('facebook') || host.includes('instagram') || host.includes('facebook') || chainsStr.includes('meta')) return 'Meta / IG';
+  if (payload.includes('steam') || host.includes('steam') || chainsStr.includes('steam')) return 'Steam';
+  if (payload.includes('spotify') || host.includes('spotify') || chainsStr.includes('spotify')) return 'Spotify';
+  if (payload.includes('netflix') || host.includes('netflix') || chainsStr.includes('netflix')) return 'Netflix';
+  if (payload.includes('roblox') || host.includes('roblox') || chainsStr.includes('roblox')) return 'Roblox';
+  if (payload.includes('github') || host.includes('github') || chainsStr.includes('github')) return 'GitHub';
+  if (payload.includes('openai') || payload.includes('chatgpt') || host.includes('openai') || chainsStr.includes('openai')) return 'OpenAI';
+  if (payload.includes('anthropic') || host.includes('anthropic') || chainsStr.includes('anthropic')) return 'Anthropic';
+  if (payload.includes('twitter') || payload.includes('x.com') || host.includes('twitter') || host.includes('x.com')) return 'Twitter / X';
+  if (payload.includes('torrent') || host.includes('torrent') || host.includes('tracker')) return 'BitTorrent';
+  if (payload.includes('rutracker') || host.includes('rutracker')) return 'RuTracker';
+  if (payload.includes('kinopoisk') || host.includes('kinopoisk')) return 'KinoPoisk';
+  if (payload.includes('yandex') || host.includes('yandex')) return 'Yandex';
+  if (payload.includes('vk') || host.includes('vk.com') || host.includes('vkuser')) return 'VKontakte';
+
+  if (conn.rulePayload && !conn.rulePayload.includes(':') && !conn.rulePayload.includes('/') && conn.rulePayload.length < 25) {
+    return conn.rulePayload.charAt(0).toUpperCase() + conn.rulePayload.slice(1);
+  }
+
+  if (conn.chains && conn.chains.length > 0) {
+    const firstGroup = conn.chains[0];
+    if (firstGroup && firstGroup !== 'GLOBAL' && firstGroup !== 'DIRECT') {
+      return firstGroup;
+    }
+  }
+
+  if (host && host.includes('.')) {
+    const parts = host.split('.');
+    const mainDomain = parts[parts.length - 2];
+    if (mainDomain && mainDomain.length > 2 && !/^\d+$/.test(mainDomain)) {
+      return mainDomain.charAt(0).toUpperCase() + mainDomain.slice(1);
+    }
+  }
+
+  if (conn.metadata && conn.metadata.processPath) {
+    const parts = conn.metadata.processPath.split(/[/\\]/);
+    return parts[parts.length - 1];
+  }
+  if (conn.metadata && conn.metadata.process) {
+    return conn.metadata.process;
+  }
+
+  return 'Direct / General';
+}
+
+function processPacketLogEntries(connections) {
+  let totalDown = 0;
+  let totalUp = 0;
+
+  for (const conn of connections) {
+    totalDown += (conn.download || 0);
+    totalUp += (conn.upload || 0);
+    
+    const procName = extractProcessName(conn);
+    if (!knownProcesses.has(procName)) {
+      knownProcesses.add(procName);
+      updateProcessFilterDropdown();
+    }
+
+    if (!seenPacketConnIds.has(conn.id)) {
+      const now = new Date();
+      const timeStr = now.toTimeString().split(' ')[0] + '.' + String(now.getMilliseconds()).padStart(3, '0').substring(0, 2);
+      seenPacketConnIds.set(conn.id, timeStr);
+
+      if (packetStreamActive) {
+        const dest = (conn.metadata && conn.metadata.host) 
+          ? `${conn.metadata.host}:${conn.metadata.destinationPort}` 
+          : `${conn.metadata ? conn.metadata.destinationIP : 'unknown'}:${conn.metadata ? conn.metadata.destinationPort : ''}`;
+        
+        const src = conn.metadata ? `${conn.metadata.sourceIP}:${conn.metadata.sourcePort}` : 'local';
+        const proto = conn.metadata ? (conn.metadata.network || 'TCP').toUpperCase() : 'TCP';
+        const chainStr = conn.chains ? conn.chains.join(' ➔ ') : (conn.rule || 'DIRECT');
+
+        const entry = {
+          id: conn.id,
+          time: timeStr,
+          process: procName,
+          protocol: proto,
+          source: src,
+          destination: dest,
+          chain: chainStr,
+          download: conn.download || 0,
+          upload: conn.upload || 0,
+          isNew: true
+        };
+
+        packetLogs.unshift(entry);
+        if (packetLogs.length > 300) {
+          packetLogs.pop();
+        }
+      }
+    } else {
+      const existing = packetLogs.find(p => p.id === conn.id);
+      if (existing) {
+        existing.download = conn.download || 0;
+        existing.upload = conn.upload || 0;
+        existing.isNew = false;
+      }
+    }
+  }
+
+  // Update stats
+  const totalEl = document.getElementById('total-packets-count');
+  const procsEl = document.getElementById('active-processes-count');
+  const downEl = document.getElementById('packets-download-total');
+  const upEl = document.getElementById('packets-upload-total');
+
+  if (totalEl) totalEl.textContent = packetLogs.length;
+  if (procsEl) procsEl.textContent = knownProcesses.size;
+  if (downEl) downEl.textContent = formatBytes(totalDown);
+  if (upEl) upEl.textContent = formatBytes(totalUp);
+
+  if (currentTab === 'packet-monitor') {
+    renderPacketLogsTable();
+  }
+}
+
+function updateProcessFilterDropdown() {
+  const select = document.getElementById('packet-process-filter');
+  if (!select) return;
+  const curr = select.value;
+  let html = `<option value="ALL">Все сервисы / сайты (${knownProcesses.size})</option>`;
+  for (const proc of Array.from(knownProcesses).sort()) {
+    html += `<option value="${proc}">${proc}</option>`;
+  }
+  select.innerHTML = html;
+  select.value = curr;
+}
+
+function filterPacketLogs() {
+  renderPacketLogsTable();
+}
+
+function togglePacketStream() {
+  packetStreamActive = !packetStreamActive;
+  const btn = document.getElementById('btn-toggle-packet-stream');
+  const ind = document.getElementById('packet-live-indicator');
+  if (btn) {
+    btn.textContent = packetStreamActive ? '⏸️ Пауза' : '▶️ Запуск';
+    btn.className = packetStreamActive ? 'btn btn-primary' : 'btn btn-success';
+  }
+  if (ind) {
+    ind.className = packetStreamActive ? 'badge badge-success' : 'badge badge-warning';
+    ind.innerHTML = packetStreamActive 
+      ? '<span style="display:inline-block; width:6px; height:6px; background:#00E676; border-radius:50%; margin-right:6px; box-shadow: 0 0 8px #00E676;"></span>LIVE'
+      : 'PAUSED';
+  }
+}
+
+function clearPacketLogs() {
+  packetLogs = [];
+  seenPacketConnIds.clear();
+  renderPacketLogsTable();
+  const totalEl = document.getElementById('total-packets-count');
+  if (totalEl) totalEl.textContent = '0';
+}
+
+function renderPacketLogsTable() {
+  const tbody = document.getElementById('packet-logs-list');
+  if (!tbody) return;
+
+  const searchVal = (document.getElementById('packet-search-input')?.value || '').toLowerCase().trim();
+  const procFilter = document.getElementById('packet-process-filter')?.value || 'ALL';
+  const protoFilter = document.getElementById('packet-protocol-filter')?.value || 'ALL';
+
+  const filtered = packetLogs.filter(item => {
+    if (procFilter !== 'ALL' && item.process !== procFilter) return false;
+    if (protoFilter !== 'ALL' && item.protocol !== protoFilter) return false;
+    if (searchVal) {
+      const matchSearch = item.process.toLowerCase().includes(searchVal) ||
+                          item.destination.toLowerCase().includes(searchVal) ||
+                          item.source.toLowerCase().includes(searchVal) ||
+                          item.chain.toLowerCase().includes(searchVal);
+      if (!matchSearch) return false;
+    }
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">
+          ${packetLogs.length === 0 ? 'Ожидание сетевых пакетов...' : 'Пакеты по вашему фильтру не найдены'}
+        </td>
+      </tr>`;
+    return;
+  }
+
+  let html = '';
+  for (const item of filtered) {
+    const col = getProcessColor(item.process);
+    const protoClass = item.protocol === 'UDP' ? 'protocol-badge-udp' : 'protocol-badge-tcp';
+    
+    html += `
+      <tr class="packet-row ${item.isNew ? 'new-entry' : ''}">
+        <td style="color: var(--text-muted); font-family: monospace;">${item.time}</td>
+        <td>
+          <span class="process-badge" style="background: ${col.bg}; border: 1px solid ${col.border}; color: ${col.text};">
+            <span class="proc-dot" style="background: ${col.border};"></span>
+            ${item.process}
+          </span>
+        </td>
+        <td><span class="protocol-badge ${protoClass}">${item.protocol}</span></td>
+        <td style="font-family: monospace; color: var(--text-muted); font-size: 0.8rem;">${item.source}</td>
+        <td style="font-family: monospace; font-weight: 600; color: var(--text-primary); word-break: break-all;">${item.destination}</td>
+        <td>
+          <span class="badge" style="background: rgba(255,255,255,0.06); border: 1px solid var(--border-color); color: var(--text-secondary); font-size: 0.78rem;">
+            ${item.chain}
+          </span>
+        </td>
+        <td style="text-align: right; font-family: var(--font-outfit); font-weight: 600;">
+          <span style="color: var(--success); margin-right: 4px;">↓${formatBytes(item.download)}</span>
+          <span style="color: var(--primary);">↑${formatBytes(item.upload)}</span>
+        </td>
+      </tr>`;
+  }
+
+  tbody.innerHTML = html;
+
+  setupPacketTableScrollListener();
+
+  const autoscroll = document.getElementById('packet-autoscroll')?.checked;
+  if (autoscroll) {
+    const wrapper = document.getElementById('packet-table-wrapper');
+    if (wrapper) {
+      isProgrammaticPacketScroll = true;
+      wrapper.scrollTop = 0;
+      setTimeout(() => { isProgrammaticPacketScroll = false; }, 60);
+    }
+  }
+}
+
+let isProgrammaticPacketScroll = false;
+
+function setupPacketTableScrollListener() {
+  const wrapper = document.getElementById('packet-table-wrapper');
+  if (!wrapper || wrapper.dataset.scrollBound) return;
+  wrapper.dataset.scrollBound = 'true';
+
+  wrapper.addEventListener('scroll', () => {
+    if (isProgrammaticPacketScroll) return;
+    
+    const checkbox = document.getElementById('packet-autoscroll');
+    if (!checkbox) return;
+
+    if (wrapper.scrollTop > 30) {
+      if (checkbox.checked) {
+        checkbox.checked = false;
+      }
+    } else if (wrapper.scrollTop <= 5) {
+      if (!checkbox.checked) {
+        checkbox.checked = true;
+      }
+    }
+  });
+}
+
+window.filterPacketLogs = filterPacketLogs;
+window.togglePacketStream = togglePacketStream;
+window.clearPacketLogs = clearPacketLogs;
 
 // Bind connections tab actions
 const btnRefreshConn = document.getElementById('btn-refresh-connections');
@@ -1027,22 +1352,19 @@ function resolveSelectedProxyDelay(proxyName, proxies) {
   const current = proxies[proxyName];
   if (!current) return 0;
   
-  const directDelay = getLastDelay(current);
-  if (directDelay > 0) {
-    return directDelay;
-  }
-  
   let active = current;
   let limit = 5;
   while (active && active.now && limit > 0) {
     const next = proxies[active.now];
     if (!next) break;
     active = next;
-    const d = getLastDelay(active);
-    if (d > 0) return d;
     limit--;
   }
-  return 0;
+  
+  const activeDelay = getLastDelay(active);
+  if (activeDelay > 0) return activeDelay;
+  
+  return getLastDelay(current);
 }
 
 function getLatencyBgColor(delay) {
@@ -1067,7 +1389,7 @@ async function pingProxyNode(nodeName) {
     } else {
       showToast(`❌ Пинг ${nodeName}: таймаут или ошибка`, 'error');
     }
-    loadProxiesDashboard();
+    setTimeout(() => loadProxiesDashboard(), 1000);
   } catch (err) {
     showToast('Ошибка пинга: ' + err.message, 'error');
   }
@@ -1246,6 +1568,7 @@ function renderProxyGroups(proxiesData) {
       </div>
       <div class="pgc-header-right">
         ${providerToUpdate ? `<button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${providerToUpdate}')">🔄</button>` : ''}
+        ${providerToUpdate ? `<button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга подписки" onclick="event.stopPropagation();healthcheckProvider('${providerToUpdate}')">⚡</button>` : ''}
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
         <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
@@ -1608,7 +1931,21 @@ async function selectProxyInGroup(groupName, nodeName) {
     showToast('Ошибка сети: ' + err.message, 'error');
   }
 }
-window.selectProxyInGroup = selectProxyInGroup;
+async function healthcheckGroup(groupName) {
+  try {
+    showToast(`⚡ Измеряем пинг группы: ${groupName}...`);
+    const res = await fetch(`/api/xkeen/proxies/${encodeURIComponent(groupName)}/delay?url=${encodeURIComponent('http://www.gstatic.com/generate_204')}&timeout=5000`);
+    if (res.ok) {
+      showToast(`✅ Пинг группы ${groupName} успешно проверен!`, 'success');
+      await loadProxiesDashboard();
+    } else {
+      showToast(`❌ Ошибка проверки пинга группы ${groupName}`, 'error');
+    }
+  } catch (err) {
+    showToast(`Ошибка сети при тесте пинга: ${err.message}`, 'error');
+  }
+}
+window.healthcheckGroup = healthcheckGroup;
 
 async function healthcheckProvider(providerName) {
   try {

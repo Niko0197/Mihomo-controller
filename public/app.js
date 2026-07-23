@@ -1144,7 +1144,7 @@ async function updateXkeenStatus() {
 }
 
 function updateXkeenTabPlaceholders() {
-  const dependentTabs = ['proxies-dashboard', 'ping', 'traffic', 'connections', 'logs', 'trace'];
+  const dependentTabs = ['proxies-dashboard', 'ping', 'traffic', 'connections', 'packet-monitor', 'logs', 'trace'];
   const isRunning = window.isXkeenRunning;
 
   dependentTabs.forEach(tabId => {

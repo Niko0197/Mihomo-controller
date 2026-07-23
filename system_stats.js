@@ -83,9 +83,8 @@ function getSystemStats() {
       });
 
       if (memTotalKb > 0) {
-        // Если MemAvailable нет, вычисляем примерный объем свободной памяти
-        const freeKb = memAvailableKb || (memFreeKb + buffersKb + cachedKb);
-        const usedKb = memTotalKb - freeKb;
+        const availKb = memAvailableKb > 0 ? memAvailableKb : (memFreeKb + buffersKb + cachedKb);
+        const usedKb = Math.max(0, memTotalKb - availKb);
         
         ramTotalMb = Math.round(memTotalKb / 1024);
         ramUsedMb = Math.round(usedKb / 1024);

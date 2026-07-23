@@ -108,10 +108,10 @@
         <button class="tab-btn" id="tab-btn-subs" onclick="switchTab('subs')">🌐 Подписки</button>
         <button class="tab-btn active" id="tab-btn-proxies-dashboard" onclick="switchTab('proxies-dashboard')">⚡ Прокси-панель</button>
         <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
-        <button class="tab-btn" id="tab-btn-ping" onclick="switchTab('ping')">⏱️ Пинг-тест</button>
         <button class="tab-btn" id="tab-btn-tor" onclick="switchTab('tor')">🌉 Tor мосты</button>
         <button class="tab-btn" id="tab-btn-traffic" onclick="switchTab('traffic')">📊 Трафик</button>
         <button class="tab-btn" id="tab-btn-connections" onclick="switchTab('connections')">🔌 Соединения</button>
+        <button class="tab-btn" id="tab-btn-packet-monitor" onclick="switchTab('packet-monitor')">📦 Мониторинг пакетов</button>
         <button class="tab-btn" id="tab-btn-clients" onclick="switchTab('clients')">💻 Устройства</button>
         <button class="tab-btn" id="tab-btn-logs" onclick="switchTab('logs')">📋 Логи ядра</button>
         <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
@@ -125,28 +125,15 @@
     <!-- Вкладка: Прокси-панель -->
     <div id="tab-content-proxies-dashboard" class="tab-content active">
       <div class="card">
-        <div class="card-title" style="margin-bottom: 20px;">
+        <div class="card-title" style="margin-bottom: 24px;">
           <span>⚡ Управление прокси и группами</span>
-          <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
-            <div class="log-level-tabs" id="proxy-dashboard-tabs">
-              <button class="log-level-btn active" id="btn-subtab-groups" onclick="switchProxySubtab('groups')">Группы выбора</button>
-              <button class="log-level-btn" id="btn-subtab-providers" onclick="switchProxySubtab('providers')">Провайдеры подписок</button>
-            </div>
-            <button class="btn btn-primary" style="font-size: 0.85rem; padding: 6px 16px;" id="btn-ping-all-groups" onclick="healthcheckAllGroups()">⚡ Тест задержки</button>
-          </div>
+          <button class="btn btn-primary" style="font-size: 0.85rem; padding: 6px 16px;" id="btn-ping-all-groups" onclick="healthcheckAllGroups()">⚡ Тест задержки всех</button>
         </div>
 
-        <!-- Под-вкладка 1: Группы выбора -->
-        <div id="proxy-subtab-content-groups" class="proxy-subtab-content">
+        <!-- Секция: Группы выбора -->
+        <div>
           <div id="proxy-groups-container" class="proxy-groups-grid">
             <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка прокси-групп из ядра...</div>
-          </div>
-        </div>
-
-        <!-- Под-вкладка 2: Провайдеры подписок -->
-        <div id="proxy-subtab-content-providers" class="proxy-subtab-content" style="display: none;">
-          <div id="proxy-providers-container" class="proxy-groups-grid">
-            <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка провайдеров прокси...</div>
           </div>
         </div>
       </div>
@@ -310,41 +297,7 @@
       </div>
     </div>
 
-    <!-- Вкладка 6: Пинг-тест -->
-    <div id="tab-content-ping" class="tab-content">
-      <div class="card">
-        <div class="card-title">
-          ⚡ Проверка задержки (Ping) прокси-узлов
-          <div class="btn-group">
-            <button class="btn btn-primary" id="btn-ping-all" onclick="pingAllProxies()">⚡ Проверить все</button>
-            <button class="btn" onclick="loadProxiesList()">🔄 Обновить список</button>
-          </div>
-        </div>
-        
-        <div class="controls-row">
-          <div class="search-wrapper">
-            <input type="text" class="search-input" id="ping-search-box" oninput="renderProxiesList()" placeholder="Поиск по названию прокси...">
-          </div>
-        </div>
 
-        <div id="ping-table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Название прокси</th>
-                <th>Тип</th>
-                <th>Адрес сервера</th>
-                <th>Задержка</th>
-                <th style="width: 100px; text-align: center;">Тест</th>
-              </tr>
-            </thead>
-            <tbody id="ping-list">
-              <!-- Сюда подгрузятся прокси -->
-            </tbody>
-          </table>
-        </div>
-      </div>
-    </div>
 
     <!-- Вкладка 7: Tor мосты -->
     <div id="tab-content-tor" class="tab-content">
@@ -489,6 +442,93 @@
               <tr>
                 <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 30px;">
                   Загрузка списка устройств...
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка: Мониторинг пакетов -->
+    <div id="tab-content-packet-monitor" class="tab-content">
+      <div class="card">
+        <div class="card-title">
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span>📦 Попакетный мониторинг и отслеживание процессов</span>
+            <span class="badge badge-success" id="packet-live-indicator" style="font-size: 0.75rem; padding: 4px 10px; border-radius: 20px;">
+              <span style="display:inline-block; width:6px; height:6px; background:#00E676; border-radius:50%; margin-right:6px; box-shadow: 0 0 8px #00E676;"></span>LIVE
+            </span>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btn-toggle-packet-stream" onclick="togglePacketStream()">⏸️ Пауза</button>
+            <button class="btn btn-danger" onclick="clearPacketLogs()">🗑️ Очистить лог</button>
+          </div>
+        </div>
+        
+        <p class="timestamp" style="margin-bottom: 16px; font-size: 0.9rem; color: var(--text-muted);">
+          Реальное время отслеживания пакетов и сетевых соединений. Каждый процесс подсвечивается уникальным цветом для удобной визуализации.
+        </p>
+
+        <!-- Сводные индикаторы -->
+        <div class="packet-stats-bar" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 20px;">
+          <div class="stat-mini-card">
+            <div class="stat-mini-label">Всего пакетов / потоков</div>
+            <div class="stat-mini-value" id="total-packets-count">0</div>
+          </div>
+          <div class="stat-mini-card">
+            <div class="stat-mini-label">Активных процессов</div>
+            <div class="stat-mini-value" id="active-processes-count">0</div>
+          </div>
+          <div class="stat-mini-card">
+            <div class="stat-mini-label">Входящий трафик</div>
+            <div class="stat-mini-value" id="packets-download-total">0 Б</div>
+          </div>
+          <div class="stat-mini-card">
+            <div class="stat-mini-label">Исходящий трафик</div>
+            <div class="stat-mini-value" id="packets-upload-total">0 Б</div>
+          </div>
+        </div>
+
+        <!-- Фильтры управления -->
+        <div class="controls-row" style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; align-items: center;">
+          <div class="search-wrapper" style="flex: 2; min-width: 200px;">
+            <input type="text" class="search-input" id="packet-search-input" oninput="filterPacketLogs()" placeholder="Поиск по процессу, домену, IP или правилу...">
+          </div>
+          <div style="flex: 1; min-width: 150px;">
+            <select class="form-select" id="packet-process-filter" onchange="filterPacketLogs()">
+              <option value="ALL">Все процессы</option>
+            </select>
+          </div>
+          <div style="flex: 1; min-width: 120px;">
+            <select class="form-select" id="packet-protocol-filter" onchange="filterPacketLogs()">
+              <option value="ALL">Все протоколы</option>
+              <option value="TCP">TCP</option>
+              <option value="UDP">UDP</option>
+            </select>
+          </div>
+          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text-muted); cursor: pointer; user-select: none;">
+            <input type="checkbox" id="packet-autoscroll" checked> Автопрокрутка
+          </label>
+        </div>
+
+        <div id="packet-table-wrapper" style="max-height: 550px; overflow-y: auto; border: 1px solid var(--border-color); border-radius: 12px; background: #161b26;">
+          <table class="packet-table" style="width: 100%; border-collapse: separate; border-spacing: 0; text-align: left; font-size: 0.85rem;">
+            <thead>
+              <tr style="position: sticky; top: 0; z-index: 20;">
+                <th style="padding: 12px 14px; width: 85px; background: #161b26; border-top-left-radius: 12px; border-bottom: 2px solid var(--border-color);">Время</th>
+                <th style="padding: 12px 14px; width: 170px; background: #161b26; border-bottom: 2px solid var(--border-color);">Приложение / Сайт</th>
+                <th style="padding: 12px 14px; width: 80px; background: #161b26; border-bottom: 2px solid var(--border-color);">Протокол</th>
+                <th style="padding: 12px 14px; width: 140px; background: #161b26; border-bottom: 2px solid var(--border-color);">Источник</th>
+                <th style="padding: 12px 14px; background: #161b26; border-bottom: 2px solid var(--border-color);">Назначение (Хост / IP)</th>
+                <th style="padding: 12px 14px; background: #161b26; border-bottom: 2px solid var(--border-color);">Маршрут / Прокси</th>
+                <th style="padding: 12px 14px; width: 140px; text-align: right; white-space: nowrap; background: #161b26; border-top-right-radius: 12px; border-bottom: 2px solid var(--border-color);">Трафик (Down/Up)</th>
+              </tr>
+            </thead>
+            <tbody id="packet-logs-list">
+              <tr>
+                <td colspan="7" style="text-align: center; padding: 40px; color: var(--text-muted);">
+                  Ожидание сетевых пакетов...
                 </td>
               </tr>
             </tbody>

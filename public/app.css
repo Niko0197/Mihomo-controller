@@ -32,14 +32,23 @@
   --font-outfit: 'Outfit', sans-serif;
   --font-inter: 'Inter', sans-serif;
   
-  /* Easing */
-  --m3-easing: cubic-bezier(0.2, 0, 0, 1);
+  /* Easing & 60 FPS Smooth Animations */
+  --m3-easing: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  --m3-easing-emphasized: cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  --m3-easing-decelerate: cubic-bezier(0.0, 0.0, 0.2, 1.0);
 }
 
 * {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
+}
+
+/* 60 FPS GPU Acceleration */
+.card, .pgc-card, .btn, .tab-btn, .toast, .modal, .process-badge, .protocol-badge, .badge, .stat-mini-card {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  transform: translateZ(0);
 }
 
 body {
@@ -1446,6 +1455,16 @@ input[type="checkbox"]:checked::before {
   align-items: center;
   gap: 8px;
   flex-shrink: 0;
+}
+
+.pgc-toggle-arrow {
+  display: inline-block;
+  transition: transform 0.25s cubic-bezier(0.2, 0.0, 0.0, 1.0);
+  will-change: transform;
+}
+
+.pgc-toggle-arrow.rotated {
+  transform: rotate(90deg);
 }
 
 .pgc-count-badge {
@@ -3071,6 +3090,110 @@ input:checked + .slider:before {
   font-size: 0.85rem;
   letter-spacing: 2px;
 }
+
+/* --- Packet Monitor Tab Styling --- */
+.process-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  font-family: var(--font-outfit), monospace;
+  letter-spacing: 0.3px;
+  box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  max-width: 155px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.process-badge:hover {
+  transform: translateY(-1px);
+  filter: brightness(1.15);
+}
+.process-badge .proc-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.protocol-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: var(--font-outfit);
+  letter-spacing: 0.5px;
+}
+.protocol-badge-tcp {
+  background: rgba(41, 182, 246, 0.15);
+  color: #29B6F6;
+  border: 1px solid rgba(41, 182, 246, 0.3);
+}
+.protocol-badge-udp {
+  background: rgba(171, 71, 188, 0.15);
+  color: #AB47BC;
+  border: 1px solid rgba(171, 71, 188, 0.3);
+}
+
+.packet-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  transition: background-color 0.15s ease;
+}
+.packet-row:hover {
+  background: rgba(255, 255, 255, 0.04) !important;
+}
+.packet-row.new-entry {
+  animation: packetRowFlash 1s ease-out;
+}
+
+@keyframes packetRowFlash {
+  0% { background: rgba(0, 230, 118, 0.25); }
+  100% { background: transparent; }
+}
+
+.packet-table th {
+  color: var(--text-muted);
+  font-weight: 600;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  background: #161b26 !important;
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  border-bottom: 2px solid var(--border-color);
+}
+
+.packet-table td {
+  padding: 8px 14px;
+  vertical-align: middle;
+}
+
+.stat-mini-card {
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  padding: 12px 16px;
+}
+.stat-mini-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+.stat-mini-value {
+  font-size: 1.1rem;
+  font-weight: 700;
+  font-family: var(--font-outfit);
+  color: var(--text-primary);
+}
+
 
 
 
