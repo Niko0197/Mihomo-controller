@@ -2204,6 +2204,14 @@ function startSystemStatsPolling() {
       
       const stats = data.stats;
       
+      // Update top bar live stats
+      const topCpu = document.getElementById('top-bar-cpu');
+      const topRam = document.getElementById('top-bar-ram');
+      const topTemp = document.getElementById('top-bar-temp');
+      if (topCpu) topCpu.textContent = stats.cpu + '%';
+      if (topRam) topRam.textContent = stats.ramUsedPercent + '%';
+      if (topTemp) topTemp.textContent = stats.temp + '°C';
+      
       // Update DOM elements
       const cpuVal = document.getElementById('sys-cpu-val');
       const cpuBar = document.getElementById('sys-cpu-bar');
@@ -2725,6 +2733,10 @@ const btnRefreshClients = document.getElementById('btn-refresh-clients');
 if (btnRefreshClients) {
   btnRefreshClients.onclick = () => loadClients();
 }
+
+document.addEventListener('DOMContentLoaded', () => {
+  startSystemStatsPolling();
+});
 
 const clientsSearchBox = document.getElementById('clients-search-box');
 if (clientsSearchBox) {

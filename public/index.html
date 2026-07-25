@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.5.2">
+  <link rel="stylesheet" href="/app.css?v=1.5.4">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.5.2" defer></script>
-  <script src="/app_monitoring.js?v=1.5.2" defer></script>
+  <script src="/app.js?v=1.5.4" defer></script>
+  <script src="/app_monitoring.js?v=1.5.4" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -133,9 +133,27 @@
     <main class="main-content">
       <div class="top-global-bar">
         <div class="top-bar-left">
-          <span class="top-bar-status-dot">●</span>
-          <span class="top-bar-title" id="current-tab-title">Управление прокси и группами</span>
+          <div class="sys-header-stats-container">
+            <span class="sys-header-stat-item" title="Загрузка процессора роутера">
+              <span class="stat-icon">⚡</span>
+              <span class="stat-name">CPU:</span>
+              <strong id="top-bar-cpu" class="stat-val">0%</strong>
+            </span>
+            <span class="sys-header-stat-divider">•</span>
+            <span class="sys-header-stat-item" title="Загрузка оперативной памяти">
+              <span class="stat-icon">🧠</span>
+              <span class="stat-name">RAM:</span>
+              <strong id="top-bar-ram" class="stat-val">0%</strong>
+            </span>
+            <span class="sys-header-stat-divider">•</span>
+            <span class="sys-header-stat-item" title="Температура процессора">
+              <span class="stat-icon">🌡️</span>
+              <span class="stat-name">Temp:</span>
+              <strong id="top-bar-temp" class="stat-val">0°C</strong>
+            </span>
+          </div>
         </div>
+
         <div class="top-bar-right">
           <div class="mode-switcher-container" title="Переключение глобального режима маршрутизации ядра Mihomo">
             <span class="mode-switcher-label">Режим ядра:</span>
