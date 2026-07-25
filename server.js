@@ -2149,21 +2149,26 @@ function handlePingProxy(req, res) {
           if (provObj.proxies && Array.isArray(provObj.proxies)) {
             const node = provObj.proxies.find(p => p.name === name || p.name.trim() === name.trim());
             if (node) {
-              await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck');
-              const updatedProvRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName));
-              if (updatedProvRes.statusCode === 200) {
-                const updatedProv = JSON.parse(updatedProvRes.data);
-                const updatedNode = (updatedProv.proxies || []).find(p => p.name === name || p.name.trim() === name.trim());
-                if (updatedNode) {
-                  const delay = getLastDelayFromNode(updatedNode);
-                  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-                  res.end(JSON.stringify({ success: true, delay: delay > 0 ? delay : 0 }));
-                  return;
-                }
-              }
               const currentDelay = getLastDelayFromNode(node);
+              if (currentDelay > 0) {
+                // Асинхронный запуск обновления в фоне без блокирования ответа!
+                makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck').catch(() => {});
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ success: true, delay: currentDelay }));
+                return;
+              }
+
+              // Если в истории еще не было пинга, проверяем легким одиночным запросом
+              const singleRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/' + encodeURIComponent(node.name) + '/delay?url=' + url + '&timeout=' + timeout);
+              if (singleRes.statusCode === 200) {
+                const parsedSingle = JSON.parse(singleRes.data);
+                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                res.end(JSON.stringify({ success: true, delay: parsedSingle.delay || 0 }));
+                return;
+              }
+
               res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-              res.end(JSON.stringify({ success: true, delay: currentDelay > 0 ? currentDelay : 0 }));
+              res.end(JSON.stringify({ success: true, delay: currentDelay || 0 }));
               return;
             }
           }
