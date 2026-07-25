@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.4.5">
+  <link rel="stylesheet" href="/app.css?v=1.5.2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.4.5" defer></script>
-  <script src="/app_monitoring.js?v=1.4.5" defer></script>
+  <script src="/app.js?v=1.5.2" defer></script>
+  <script src="/app_monitoring.js?v=1.5.2" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -35,35 +35,40 @@
         </div>
       </div>
       
-      <!-- Версия и Ветка -->
-      <div class="sidebar-version-info" id="panel-version-info">
-        <span class="version-label">Версия: <strong id="panel-version-val">...</strong></span>
-        <span class="branch-badge" id="panel-branch-val">...</span>
-      </div>
-      
-      <div class="sidebar-version-info" id="core-version-info" style="margin-top: -6px; cursor: pointer;" onclick="openMihomoUpdateModal()">
-        <span class="version-label">Ядро: <strong id="core-version-val">Загрузка...</strong></span>
-      </div>
-      
-      <div class="sidebar-status-controls">
-        <div class="status-badge" id="xkeen-status-badge">
-          <div class="status-dot" id="xkeen-status-dot"></div>
-          <span id="xkeen-status-text">Загрузка...</span>
+      <!-- Единая карточка системной информации и управления -->
+      <div class="sidebar-system-card">
+        <!-- Блок версий панели и ядра -->
+        <div class="sys-card-versions">
+          <div class="sys-version-row panel-row" id="panel-version-info" onclick="switchTab('updates')" title="Нажмите для управления обновлениями веб-панели">
+            <span class="version-label">Версия: <strong id="panel-version-val">...</strong></span>
+            <span class="branch-badge" id="panel-branch-val">...</span>
+          </div>
+          <div class="sys-version-row core-row" id="core-version-info" onclick="openMihomoUpdateModal()" title="Нажмите для управления обновлениями ядра Mihomo">
+            <span class="version-label">Ядро: <strong id="core-version-val">Загрузка...</strong></span>
+          </div>
         </div>
-        <div class="xkeen-controls">
-          <button id="btn-xkeen-toggle" class="icon-btn" title="Запустить / Остановить XKeen" disabled>
-            <svg viewBox="0 0 24 24" id="svg-xkeen-toggle"><path d="M8 5v14l11-7z"/></svg>
-          </button>
-          <button id="btn-xkeen-restart" class="icon-btn" title="Перезапустить XKeen" disabled>
-            <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
-          </button>
+
+        <!-- Статус API и кнопки управления -->
+        <div class="sys-card-status-section">
+          <div class="status-badge" id="xkeen-status-badge">
+            <div class="status-dot" id="xkeen-status-dot"></div>
+            <span id="xkeen-status-text">Загрузка...</span>
+          </div>
+          <div class="xkeen-controls">
+            <button id="btn-xkeen-toggle" class="icon-btn" title="Запустить / Остановить XKeen" disabled>
+              <svg viewBox="0 0 24 24" id="svg-xkeen-toggle"><path d="M8 5v14l11-7z"/></svg>
+            </button>
+            <button id="btn-xkeen-restart" class="icon-btn" title="Перезапустить XKeen" disabled>
+              <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.958 7.958 0 0 0 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0 1 12 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
+            </button>
+          </div>
         </div>
 
         <!-- Мониторинг системных ресурсов (встроенный) -->
-        <div style="border-top: 1px solid rgba(255, 255, 255, 0.08); margin: 8px -16px -16px -16px; padding: 12px 16px 16px 16px; font-size: 0.82rem; cursor: pointer;" class="system-monitor-card">
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;" id="system-monitor-toggle">
-            <span style="font-weight: 600; color: var(--text-muted); display: flex; align-items: center; gap: 6px; font-family: var(--font-outfit);">📟 Ресурсы роутера</span>
-            <span id="system-monitor-arrow" style="font-size: 0.7rem; color: var(--text-muted);">▸</span>
+        <div class="system-monitor-card">
+          <div class="sys-mon-header" id="system-monitor-toggle">
+            <span class="sys-mon-title">📟 Ресурсы роутера</span>
+            <span id="system-monitor-arrow" class="sys-mon-arrow">▸</span>
           </div>
           <div id="system-monitor-body">
             <div style="margin-bottom: 8px;">

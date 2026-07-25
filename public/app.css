@@ -1273,73 +1273,134 @@ input[type="checkbox"]:checked::before {
   margin-bottom: 8px;
 }
 
-.sidebar-version-info {
+/* Единый объединенный системный блок внизу меню */
+.sidebar-system-card {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--md-sys-color-outline);
+  border-radius: 18px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 16px;
+  font-size: 0.82rem;
+}
+
+.sys-card-versions {
+  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 12px;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.sys-version-row {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 8px 16px;
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid var(--md-sys-color-outline);
-  border-radius: 14px;
-  margin-bottom: 12px;
-  font-size: 0.78rem;
+  font-size: 0.82rem;
   font-family: var(--font-outfit);
+  padding: 8px 12px;
   cursor: pointer;
-  user-select: none;
-  -webkit-user-select: none;
-  transition: background 0.2s var(--m3-easing),
-              border-color 0.2s var(--m3-easing),
-              transform 0.1s var(--m3-easing);
+  transition: background 0.2s var(--m3-easing);
 }
 
-.sidebar-version-info:hover {
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.18);
+.sys-version-row.panel-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.sidebar-version-info:active {
-  transform: scale(0.96);
+.sys-version-row:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.sys-version-row:active {
+  background: rgba(255, 255, 255, 0.1);
 }
 
 .version-label {
   color: var(--text-muted);
+  font-size: 0.82rem;
 }
 
 .version-label strong {
   color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 600;
 }
 
 .branch-badge {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.06);
   color: var(--text);
   border: 1px solid var(--md-sys-color-outline);
   padding: 2px 8px;
   border-radius: 6px;
   font-weight: 600;
-  font-size: 0.72rem;
+  font-size: 0.82rem;
   letter-spacing: 0.5px;
-  transition: all 0.2s var(--m3-easing);
 }
 
-.sidebar-status-controls {
+.sys-update-hint {
+  font-size: 0.82rem;
+  opacity: 0.6;
+  transition: opacity 0.2s ease;
+}
+
+.sys-card-versions:hover .sys-update-hint {
+  opacity: 1;
+}
+
+.sys-card-status-section {
   display: flex;
   flex-direction: column;
+  gap: 10px;
+  padding: 2px 0;
+}
+
+.sys-card-status-section .status-badge {
+  width: 100%;
+  justify-content: center;
+  font-size: 0.74rem;
+  white-space: nowrap;
+  padding: 6px 10px;
+  letter-spacing: 0.2px;
+}
+
+.sys-card-status-section .xkeen-controls {
+  display: flex;
+  justify-content: center;
   gap: 12px;
-  background: rgba(255, 255, 255, 0.015);
-  border: 1px solid var(--md-sys-color-outline);
-  border-radius: 20px;
-  padding: 16px;
 }
 
-.sidebar-status-controls .status-badge {
-  width: 100%;
-  justify-content: center;
+.system-monitor-card {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  padding-top: 10px;
+  padding-bottom: 4px;
+  margin-top: 4px;
+  font-size: 0.82rem;
 }
 
-.sidebar-status-controls .xkeen-controls {
-  width: 100%;
-  justify-content: center;
-  gap: 14px;
+.sys-mon-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.82rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  font-family: var(--font-outfit);
+  padding: 4px 0;
+  margin-bottom: 0;
+  transition: color 0.2s ease;
+}
+
+.sys-mon-header:hover {
+  color: rgba(227, 226, 230, 0.85);
+}
+
+#system-monitor-body {
+  margin-top: 12px;
 }
 
 /* Vertical Tab List */
