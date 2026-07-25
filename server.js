@@ -2071,6 +2071,23 @@ async function handleGetProxies(req, res) {
   }
 }
 
+function getLastDelayFromNode(nodeObj) {
+  if (!nodeObj) return 0;
+  if (Array.isArray(nodeObj.history) && nodeObj.history.length > 0) {
+    const last = nodeObj.history[nodeObj.history.length - 1];
+    return last.delay || 0;
+  }
+  if (nodeObj.extra) {
+    for (const val of Object.values(nodeObj.extra)) {
+      if (val && Array.isArray(val.history) && val.history.length > 0) {
+        const last = val.history[val.history.length - 1];
+        if (last.delay) return last.delay;
+      }
+    }
+  }
+  return 0;
+}
+
 // POST /api/proxies/ping
 function handlePingProxy(req, res) {
   let body = '';
@@ -2114,7 +2131,7 @@ function handlePingProxy(req, res) {
       const timeout = 5000;
       const url = encodeURIComponent(targetPingUrl);
 
-      // 2. Сначала точный прямой замер группы/узла по указанному имени
+      // 2. Пробуем прямой замер если name — это группа или самостоятельный прокси
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
@@ -2124,65 +2141,36 @@ function handlePingProxy(req, res) {
         return;
       }
 
-      // 3. Запрашиваем списки proxies и providers для глубокого разрешения вложенных групп и нод
-      const [proxiesRes, providersRes] = await Promise.all([
-        makeMihomoRequest('GET', '/proxies'),
-        makeMihomoRequest('GET', '/providers/proxies')
-      ]);
-
-      const proxies = (proxiesRes.statusCode === 200) ? (JSON.parse(proxiesRes.data).proxies || {}) : {};
-      const providers = (providersRes.statusCode === 200) ? (JSON.parse(providersRes.data).providers || {}) : {};
-
-      // Разворачиваем вложенные подгруппы до активного конечного узла
-      let targetNode = name;
-      let active = proxies[targetNode];
-      let limit = 5;
-      while (active && active.now && limit > 0) {
-        const next = proxies[active.now];
-        if (next) {
-          active = next;
-          targetNode = active.name || active.now;
-        } else {
-          targetNode = active.now;
-          break;
-        }
-        limit--;
-      }
-
-      if (targetNode === 'DIRECT' || targetNode === 'REJECT') {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: 1 }));
-        return;
-      }
-
-      // Пробуем замер разруленного конечного узла
-      if (targetNode !== name) {
-        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
-        if (mRes.statusCode === 200) {
-          const parsed = JSON.parse(mRes.data);
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
-          return;
-        }
-      }
-
-      // Ищем совпадение имени или разруленной ноды в подписках (providers)
-      for (const [provName, provObj] of Object.entries(providers)) {
-        if (provObj.proxies && Array.isArray(provObj.proxies)) {
-          const found = provObj.proxies.find(p => p.name === targetNode || p.name === name);
-          if (found) {
-            mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/' + encodeURIComponent(found.name) + '/delay?url=' + url + '&timeout=' + timeout);
-            if (mRes.statusCode === 200) {
-              const parsed = JSON.parse(mRes.data);
+      // 3. Если 404 (нода принадлежит подписке из proxy-providers), запрашиваем список провайдеров
+      const providersRes = await makeMihomoRequest('GET', '/providers/proxies');
+      if (providersRes.statusCode === 200) {
+        const providers = JSON.parse(providersRes.data).providers || {};
+        for (const [provName, provObj] of Object.entries(providers)) {
+          if (provObj.proxies && Array.isArray(provObj.proxies)) {
+            const node = provObj.proxies.find(p => p.name === name || p.name.trim() === name.trim());
+            if (node) {
+              await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck');
+              const updatedProvRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName));
+              if (updatedProvRes.statusCode === 200) {
+                const updatedProv = JSON.parse(updatedProvRes.data);
+                const updatedNode = (updatedProv.proxies || []).find(p => p.name === name || p.name.trim() === name.trim());
+                if (updatedNode) {
+                  const delay = getLastDelayFromNode(updatedNode);
+                  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                  res.end(JSON.stringify({ success: true, delay: delay > 0 ? delay : 0 }));
+                  return;
+                }
+              }
+              const currentDelay = getLastDelayFromNode(node);
               res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-              res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+              res.end(JSON.stringify({ success: true, delay: currentDelay > 0 ? currentDelay : 0 }));
               return;
             }
           }
         }
       }
 
-      // 4. Безопасный фолбэк на Cloudflare generate_204
+      // 4. Фолбэк на Cloudflare generate_204 для обычных групп
       const fallbackUrl = encodeURIComponent('http://cp.cloudflare.com/generate_204');
       mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
       if (mRes.statusCode === 200) {
