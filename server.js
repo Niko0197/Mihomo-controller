@@ -2148,10 +2148,24 @@ function handlePingProxy(req, res) {
         console.error('Failed to resolve proxy group active node for ping:', e.message);
       }
 
+      if (targetNode === 'DIRECT' || targetNode === 'REJECT') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, delay: 1 }));
+        return;
+      }
+
       const timeout = 5000;
       const url = encodeURIComponent(targetPingUrl);
       
-      const mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
+      let mRes;
+      if (providerName) {
+        mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(providerName) + '/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
+        if (mRes.statusCode !== 200) {
+          mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
+        }
+      } else {
+        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
+      }
       
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
