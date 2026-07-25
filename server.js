@@ -2107,24 +2107,81 @@ function handlePingProxy(req, res) {
       const timeout = 5000;
       const url = encodeURIComponent(targetPingUrl);
 
+      // Шаг 1: Пробуем прямой легкий замер по указанному имени
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
-      } else {
-        const fallbackUrl = encodeURIComponent('http://cp.cloudflare.com/generate_204');
-        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
+        return;
+      }
+
+      // Шаг 2: Если прямое имя не совпало, ищем реальное имя ноды в списках провайдеров и прокси
+      const [proxiesRes, providersRes] = await Promise.all([
+        makeMihomoRequest('GET', '/proxies'),
+        makeMihomoRequest('GET', '/providers/proxies')
+      ]);
+
+      let matchedNodeName = null;
+      let matchedProviderName = null;
+
+      if (proxiesRes.statusCode === 200) {
+        const proxies = JSON.parse(proxiesRes.data).proxies || {};
+        for (const [pName, pObj] of Object.entries(proxies)) {
+          if (pName === name || pName.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(pName.toLowerCase())) {
+            matchedNodeName = pName;
+            break;
+          }
+        }
+      }
+
+      if (providersRes.statusCode === 200) {
+        const providers = JSON.parse(providersRes.data).providers || {};
+        for (const [provName, provObj] of Object.entries(providers)) {
+          if (provObj.proxies && Array.isArray(provObj.proxies)) {
+            const found = provObj.proxies.find(p => p.name === name || p.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(p.name.toLowerCase()));
+            if (found) {
+              matchedNodeName = found.name;
+              matchedProviderName = provName;
+              break;
+            }
+          }
+        }
+      }
+
+      if (matchedProviderName && matchedNodeName) {
+        mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(matchedProviderName) + '/' + encodeURIComponent(matchedNodeName) + '/delay?url=' + url + '&timeout=' + timeout);
         if (mRes.statusCode === 200) {
           const parsed = JSON.parse(mRes.data);
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
-        } else {
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: 0 })); 
+          return;
         }
       }
+
+      if (matchedNodeName) {
+        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(matchedNodeName) + '/delay?url=' + url + '&timeout=' + timeout);
+        if (mRes.statusCode === 200) {
+          const parsed = JSON.parse(mRes.data);
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+          return;
+        }
+      }
+
+      // Шаг 3: Фолбэк на контрольный URL Cloudflare generate_204
+      const fallbackUrl = encodeURIComponent('http://cp.cloudflare.com/generate_204');
+      mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
+      if (mRes.statusCode === 200) {
+        const parsed = JSON.parse(mRes.data);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+        return;
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, delay: 0 }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: false, message: err.message }));
