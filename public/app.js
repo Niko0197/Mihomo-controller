@@ -14,10 +14,13 @@ function showToast(message, type = 'success') {
   toast.className = 'toast ' + type;
   toast.textContent = message;
   container.appendChild(toast);
+
   setTimeout(() => {
-    toast.style.animation = 'slideIn 0.3s ease reverse forwards';
-    setTimeout(() => toast.remove(), 300);
-  }, 4000);
+    toast.classList.add('toast-hide');
+    setTimeout(() => {
+      if (toast.parentNode) toast.parentNode.removeChild(toast);
+    }, 450);
+  }, 3500);
 }
 
 // Переключение вкладок
