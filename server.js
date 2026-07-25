@@ -2011,6 +2011,113 @@ function handleDeleteProvider(req, res) {
   });
 }
 
+function fetchUrlText(targetUrl, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    if (maxRedirects < 0) {
+      return reject(new Error('Слишком много редиректов (Too many redirects)'));
+    }
+    
+    const client = targetUrl.startsWith('https') ? require('https') : require('http');
+    const req = client.get(targetUrl, {
+      headers: {
+        'User-Agent': 'Mihomo/1.19.29 (Clash Meta; +https://github.com/MetaCubeX/mihomo)'
+      },
+      timeout: 20000
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        let redirectUrl = res.headers.location;
+        if (!redirectUrl.startsWith('http')) {
+          redirectUrl = new URL(redirectUrl, targetUrl).href;
+        }
+        return resolve(fetchUrlText(redirectUrl, maxRedirects - 1));
+      }
+      
+      if (res.statusCode < 200 || res.statusCode >= 300) {
+        return reject(new Error(`HTTP status code ${res.statusCode}`));
+      }
+      
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve(data));
+    });
+    
+    req.on('error', err => reject(err));
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Таймаут скачивания подписки'));
+    });
+  });
+}
+
+async function updateProviderFileManually(providerName) {
+  if (!fs.existsSync(configPath)) {
+    throw new Error('config.yaml не найден');
+  }
+  
+  const configText = fs.readFileSync(configPath, 'utf8');
+  const providers = yamlUtils.getProxyProvidersFromConfig(configText);
+  const prov = providers.find(p => p.name === providerName);
+  
+  if (!prov || !prov.url) {
+    throw new Error(`Подписка ${providerName} не найдена в config.yaml`);
+  }
+  
+  console.log(`[Manual Update] Скачиваем подписку ${providerName} по URL: ${prov.url}`);
+  let rawText = await fetchUrlText(prov.url);
+  
+  if (!rawText || !rawText.trim()) {
+    throw new Error(`Скачанный файл подписки ${providerName} пуст`);
+  }
+  
+  let textToParse = rawText;
+  if (!rawText.includes('proxies:') && !rawText.includes('vless://') && !rawText.includes('vmess://') && !rawText.includes('ss://')) {
+    try {
+      const decoded = Buffer.from(rawText.trim(), 'base64').toString('utf8');
+      if (decoded.includes('vless://') || decoded.includes('vmess://') || decoded.includes('ss://') || decoded.includes('trojan://')) {
+        textToParse = decoded;
+      }
+    } catch (e) {}
+  }
+  
+  const lines = textToParse.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
+  const parsedProxies = [];
+  
+  for (const line of lines) {
+    if (line.includes('://')) {
+      try {
+        const p = yamlUtils.parseProxyUri(line);
+        if (p) parsedProxies.push(p);
+      } catch (e) {}
+    }
+  }
+  
+  let targetPath = prov.path;
+  if (!targetPath) {
+    targetPath = `./proxy_providers/${providerName.toLowerCase()}.yaml`;
+  }
+  
+  const absPath = path.isAbsolute(targetPath) ? targetPath : path.join('/opt/etc/mihomo', targetPath);
+  
+  const dir = path.dirname(absPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+  
+  if (parsedProxies.length > 0) {
+    console.log(`[Manual Update] Распарсено ${parsedProxies.length} нод из URI для ${providerName}`);
+    let yamlContent = 'proxies:\n';
+    for (const proxy of parsedProxies) {
+      const pYaml = yamlUtils.serializeProxyToYaml(proxy);
+      yamlContent += pYaml + '\n';
+    }
+    fs.writeFileSync(absPath, yamlContent, 'utf8');
+  } else {
+    fs.writeFileSync(absPath, rawText, 'utf8');
+  }
+  
+  console.log(`[Manual Update] Успешно сохранен файл ${absPath}`);
+}
+
 // POST /api/providers/update
 function handleUpdateProvider(req, res) {
   let body = '';
@@ -2026,9 +2133,20 @@ function handleUpdateProvider(req, res) {
         return;
       }
       
-      const mRes = await makeMihomoRequest('PUT', '/providers/proxies/' + encodeURIComponent(name));
+      let mRes = await makeMihomoRequest('PUT', '/providers/proxies/' + encodeURIComponent(name));
+      
       if (mRes.statusCode !== 200 && mRes.statusCode !== 204) {
-        throw new Error('Mihomo API вернул код ' + mRes.statusCode);
+        console.log(`[Provider Update] Mihomo API вернул ${mRes.statusCode} для ${name}. Скачиваем и конвертируем вручную...`);
+        await updateProviderFileManually(name);
+        
+        // После записи сконвертированного файла перезагружаем конфиг Mihomo,
+        // чтобы он перечитал провайдер из локального файла (а не скачивал снова с URL)
+        const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+        console.log(`[Provider Update] Перезагрузка конфига Mihomo: HTTP ${reloadRes.statusCode}`);
+        
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, message: `Подписка ${name} обновлена через авто-конвертацию` }));
+        return;
       }
       
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
