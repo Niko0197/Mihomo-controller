@@ -2151,12 +2151,7 @@ function handlePingProxy(req, res) {
       const timeout = 5000;
       const url = encodeURIComponent(targetPingUrl);
       
-      let mRes;
-      if (providerName) {
-        mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(providerName) + '/' + encodeURIComponent(targetNode) + '/healthcheck?url=' + url + '&timeout=' + timeout);
-      } else {
-        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
-      }
+      const mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
@@ -2350,13 +2345,9 @@ function parseAndSendCommits(logStdout, branch, res) {
 
     // Хелпер для определения стабильной версии релиза
     const isStableVersion = (verStr) => {
+      if (!verStr) return false;
       const clean = verStr.startsWith('v') ? verStr.substring(1) : verStr;
-      const parts = clean.split('.');
-      if (parts.length === 3) {
-        const patch = parseInt(parts[2], 10);
-        return patch === 0;
-      }
-      return clean === '1.0.0';
+      return /^\d+\.\d+(\.\d+)?$/.test(clean);
     };
 
     for (const line of lines) {
@@ -2369,13 +2360,19 @@ function parseAndSendCommits(logStdout, branch, res) {
       
       let versionNum = '';
       let commitBranch = '';
-      try {
-        const versionJsonStr = execSync('git show ' + sha + ':public/version.json', { cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
-        const versionData = JSON.parse(versionJsonStr);
-        versionNum = versionData.version || sha.substring(0, 7);
-        commitBranch = versionData.branch || '';
-      } catch (e) {
-        versionNum = sha.substring(0, 7);
+      
+      const releaseMsgMatch = message.match(/release:\s*v?(\d+\.\d+\.\d+)/i);
+      if (releaseMsgMatch) {
+        versionNum = releaseMsgMatch[1];
+      } else {
+        try {
+          const versionJsonStr = execSync('git show ' + sha + ':public/version.json', { cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
+          const versionData = JSON.parse(versionJsonStr);
+          versionNum = versionData.version || sha.substring(0, 7);
+          commitBranch = versionData.branch || '';
+        } catch (e) {
+          versionNum = sha.substring(0, 7);
+        }
       }
       
       versionNum = String(versionNum);
@@ -3432,6 +3429,10 @@ const server = http.createServer(async (req, res) => {
     if (fs.existsSync(configPath)) {
       const configText = fs.readFileSync(configPath, 'utf8');
       const outboundRules = extractOutboundRules(configText);
+      try {
+        fs.writeFileSync(path.join(__dirname, 'public', 'outbound_rules.yaml'), outboundRules, 'utf8');
+        fs.writeFileSync('/opt/etc/mihomo/outbound_rules.yaml', outboundRules, 'utf8');
+      } catch(e) {}
       res.writeHead(200, { 
         'Content-Type': 'text/yaml; charset=utf-8',
         'Content-Disposition': 'inline; filename="outbound_rules.yaml"',

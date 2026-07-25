@@ -1568,7 +1568,7 @@ function renderProxyGroups(proxiesData) {
       </div>
       <div class="pgc-header-right">
         ${providerToUpdate ? `<button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${providerToUpdate}')">🔄</button>` : ''}
-        ${providerToUpdate ? `<button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга подписки" onclick="event.stopPropagation();healthcheckProvider('${providerToUpdate}')">⚡</button>` : ''}
+        ${providerToUpdate ? `<button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга подписки" onclick="event.stopPropagation();pingProxyNode('${group.name.replace(/'/g, "\\'")}')">⚡</button>` : ''}
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
         <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
