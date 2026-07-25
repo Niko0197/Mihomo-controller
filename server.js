@@ -2085,6 +2085,13 @@ function handlePingProxy(req, res) {
         res.end(JSON.stringify({ success: false, message: 'Имя не указано' }));
         return;
       }
+
+      // 1. Для DIRECT или REJECT всегда 1ms
+      if (name === 'DIRECT' || name === 'REJECT') {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, delay: 1 }));
+        return;
+      }
       
       const servicePingUrls = {
         'Apple': 'http://www.apple.com/library/test/success.html',
@@ -2107,7 +2114,7 @@ function handlePingProxy(req, res) {
       const timeout = 5000;
       const url = encodeURIComponent(targetPingUrl);
 
-      // Шаг 1: Пробуем прямой легкий замер по указанному имени
+      // 2. Сначала точный прямой замер группы/узла по указанному имени
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
@@ -2117,60 +2124,29 @@ function handlePingProxy(req, res) {
         return;
       }
 
-      // Шаг 2: Если прямое имя не совпало, ищем реальное имя ноды в списках провайдеров и прокси
-      const [proxiesRes, providersRes] = await Promise.all([
-        makeMihomoRequest('GET', '/proxies'),
-        makeMihomoRequest('GET', '/providers/proxies')
-      ]);
-
-      let matchedNodeName = null;
-      let matchedProviderName = null;
-
-      if (proxiesRes.statusCode === 200) {
-        const proxies = JSON.parse(proxiesRes.data).proxies || {};
-        for (const [pName, pObj] of Object.entries(proxies)) {
-          if (pName === name || pName.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(pName.toLowerCase())) {
-            matchedNodeName = pName;
-            break;
-          }
-        }
-      }
-
-      if (providersRes.statusCode === 200) {
-        const providers = JSON.parse(providersRes.data).providers || {};
-        for (const [provName, provObj] of Object.entries(providers)) {
-          if (provObj.proxies && Array.isArray(provObj.proxies)) {
-            const found = provObj.proxies.find(p => p.name === name || p.name.toLowerCase().includes(name.toLowerCase()) || name.toLowerCase().includes(p.name.toLowerCase()));
-            if (found) {
-              matchedNodeName = found.name;
-              matchedProviderName = provName;
-              break;
+      // 3. Если 404 (нода из подписки proxy-provider), ищем ТОЧНОЕ имя ноды в провайдерах
+      try {
+        const providersRes = await makeMihomoRequest('GET', '/providers/proxies');
+        if (providersRes.statusCode === 200) {
+          const providers = JSON.parse(providersRes.data).providers || {};
+          for (const [provName, provObj] of Object.entries(providers)) {
+            if (provObj.proxies && Array.isArray(provObj.proxies)) {
+              const exactNode = provObj.proxies.find(p => p.name === name);
+              if (exactNode) {
+                mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/' + encodeURIComponent(exactNode.name) + '/delay?url=' + url + '&timeout=' + timeout);
+                if (mRes.statusCode === 200) {
+                  const parsed = JSON.parse(mRes.data);
+                  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                  res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+                  return;
+                }
+              }
             }
           }
         }
-      }
+      } catch (e) {}
 
-      if (matchedProviderName && matchedNodeName) {
-        mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(matchedProviderName) + '/' + encodeURIComponent(matchedNodeName) + '/delay?url=' + url + '&timeout=' + timeout);
-        if (mRes.statusCode === 200) {
-          const parsed = JSON.parse(mRes.data);
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
-          return;
-        }
-      }
-
-      if (matchedNodeName) {
-        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(matchedNodeName) + '/delay?url=' + url + '&timeout=' + timeout);
-        if (mRes.statusCode === 200) {
-          const parsed = JSON.parse(mRes.data);
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
-          return;
-        }
-      }
-
-      // Шаг 3: Фолбэк на контрольный URL Cloudflare generate_204
+      // 4. Безопасный фолбэк на Cloudflare generate_204
       const fallbackUrl = encodeURIComponent('http://cp.cloudflare.com/generate_204');
       mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
       if (mRes.statusCode === 200) {
