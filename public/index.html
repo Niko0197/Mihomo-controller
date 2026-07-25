@@ -102,26 +102,45 @@
       </div>
 
       <nav class="tabs-vertical">
-        <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
-        <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
-        <button class="tab-btn" id="tab-btn-import" onclick="switchTab('import')">🔌 Импорт прокси</button>
-        <button class="tab-btn" id="tab-btn-subs" onclick="switchTab('subs')">🌐 Подписки</button>
+        <div class="nav-section-title">🚀 ОСНОВНОЕ</div>
         <button class="tab-btn active" id="tab-btn-proxies-dashboard" onclick="switchTab('proxies-dashboard')">⚡ Прокси-панель</button>
-        <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
-        <button class="tab-btn" id="tab-btn-tor" onclick="switchTab('tor')">🌉 Tor мосты</button>
+        <button class="tab-btn" id="tab-btn-subs" onclick="switchTab('subs')">🌐 Подписки</button>
+        <button class="tab-btn" id="tab-btn-import" onclick="switchTab('import')">🔌 Импорт прокси</button>
+        <button class="tab-btn" id="tab-btn-clients" onclick="switchTab('clients')">💻 Устройства</button>
+
+        <div class="nav-section-title">📊 МОНИТОРИНГ</div>
         <button class="tab-btn" id="tab-btn-traffic" onclick="switchTab('traffic')">📊 Трафик</button>
         <button class="tab-btn" id="tab-btn-connections" onclick="switchTab('connections')">🔌 Соединения</button>
-        <button class="tab-btn" id="tab-btn-packet-monitor" onclick="switchTab('packet-monitor')">📦 Мониторинг пакетов</button>
-        <button class="tab-btn" id="tab-btn-clients" onclick="switchTab('clients')">💻 Устройства</button>
+        <button class="tab-btn" id="tab-btn-packet-monitor" onclick="switchTab('packet-monitor')">📦 Пакеты</button>
         <button class="tab-btn" id="tab-btn-logs" onclick="switchTab('logs')">📋 Логи ядра</button>
         <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
+
+        <div class="nav-section-title">⚙️ НАСТРОЙКИ</div>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
-        <button class="tab-btn" id="tab-btn-updates" onclick="switchTab('updates')">🔄 Обновления</button>
+        <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
+        <button class="tab-btn" id="tab-btn-tor" onclick="switchTab('tor')">🌉 Tor мосты</button>
+        <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
+        <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
       </nav>
     </aside>
 
     <!-- Правая колонка: Основной контент -->
     <main class="main-content">
+      <div class="top-global-bar">
+        <div class="top-bar-left">
+          <span class="top-bar-status-dot">●</span>
+          <span class="top-bar-title" id="current-tab-title">Управление прокси и группами</span>
+        </div>
+        <div class="top-bar-right">
+          <div class="mode-switcher-container" title="Переключение глобального режима маршрутизации ядра Mihomo">
+            <span class="mode-switcher-label">Режим ядра:</span>
+            <div class="mode-toggle-group">
+              <button class="mode-btn active" id="mode-btn-rule" onclick="setGlobalMihomoMode('rule')">🛡️ Rule (Маршруты)</button>
+              <button class="mode-btn" id="mode-btn-direct" onclick="setGlobalMihomoMode('direct')">🔌 Direct (Аварийное выкл)</button>
+            </div>
+          </div>
+        </div>
+      </div>
     <!-- Вкладка: Прокси-панель -->
     <div id="tab-content-proxies-dashboard" class="tab-content active">
       <div class="card">

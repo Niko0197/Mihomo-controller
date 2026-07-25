@@ -23,13 +23,87 @@ function showToast(message, type = 'success') {
   }, 3500);
 }
 
+// Загрузка и переключение глобального режима ядра Mihomo
+async function loadGlobalMihomoMode() {
+  try {
+    const res = await fetch('/api/mihomo/mode');
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success && data.mode) {
+        updateModeUI(data.mode);
+      }
+    }
+  } catch (e) {}
+}
+
+async function setGlobalMihomoMode(newMode) {
+  try {
+    showToast(`Переключение режима ядра в ${newMode === 'direct' ? 'Direct (Напрямую)' : 'Rule (Маршруты)'}...`, 'info');
+    const res = await fetch('/api/mihomo/mode', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode: newMode })
+    });
+    if (res.ok) {
+      const data = await res.json();
+      if (data.success) {
+        updateModeUI(newMode);
+        if (newMode === 'direct') {
+          showToast('🔌 Аварийный режим Direct включен: трафик идёт напрямую, тумблеры устройств сохранены!', 'warning');
+        } else {
+          showToast('🛡️ Глобальный режим Rule включен: маршрутизация трафика возобновлена!', 'success');
+        }
+      }
+    }
+  } catch (e) {
+    showToast('Ошибка смены режима: ' + e.message, 'error');
+  }
+}
+
+function updateModeUI(mode) {
+  const btnRule = document.getElementById('mode-btn-rule');
+  const btnDirect = document.getElementById('mode-btn-direct');
+  if (btnRule && btnDirect) {
+    btnRule.classList.toggle('active', mode === 'rule');
+    btnDirect.classList.toggle('active', mode === 'direct');
+  }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+  loadGlobalMihomoMode();
+});
+
 // Переключение вкладок
 function switchTab(tabId) {
   document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
   document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   
-  document.getElementById('tab-content-' + tabId).classList.add('active');
-  document.getElementById('tab-btn-' + tabId).classList.add('active');
+  const tabEl = document.getElementById('tab-content-' + tabId);
+  const btnEl = document.getElementById('tab-btn-' + tabId);
+  if (tabEl) tabEl.classList.add('active');
+  if (btnEl) btnEl.classList.add('active');
+  
+  const tabTitles = {
+    'proxies-dashboard': '⚡ Прокси-панель и группы',
+    'subs': '🌐 Подписки прокси-провайдеров',
+    'import': '🔌 Импорт внешних ссылок',
+    'clients': '💻 Управление устройствами сети',
+    'traffic': '📊 График трафика real-time',
+    'connections': '🔌 Активные соединения',
+    'packet-monitor': '📦 Мониторинг сетевых пакетов',
+    'logs': '📋 Системные логи ядра',
+    'trace': '🛰️ Трассировка маршрутов',
+    'rules': '🛠️ Быстрые пользовательские правила',
+    'editor': '📝 Редактор YAML конфигураций',
+    'tor': '🌉 Управление мостами Tor',
+    'qr': '📱 QR-подключения клиентов',
+    'leak': '🔍 Анализ утечек доменов'
+  };
+
+  const titleEl = document.getElementById('current-tab-title');
+  if (titleEl && tabTitles[tabId]) {
+    titleEl.textContent = tabTitles[tabId];
+  }
   
   if (tabId === 'tor') {
     loadTorBridges();

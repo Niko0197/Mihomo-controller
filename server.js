@@ -2284,6 +2284,53 @@ function handleRestartXkeen(req, res) {
   }
 }
 
+// GET /api/mihomo/mode
+async function handleGetMihomoMode(req, res) {
+  try {
+    const mRes = await makeMihomoRequest('GET', '/configs');
+    if (mRes.statusCode === 200) {
+      const data = JSON.parse(mRes.data);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, mode: data.mode || 'rule' }));
+    } else {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: 'Mihomo returned HTTP ' + mRes.statusCode }));
+    }
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// POST /api/mihomo/mode
+function handleSetMihomoMode(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body);
+      const { mode } = payload;
+      if (!mode || (mode !== 'rule' && mode !== 'direct' && mode !== 'global')) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: 'Недопустимый режим (требуется rule, direct или global)' }));
+        return;
+      }
+
+      const mRes = await makeMihomoRequest('PATCH', '/configs', { mode });
+      if (mRes.statusCode === 200 || mRes.statusCode === 204) {
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, mode }));
+      } else {
+        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Mihomo returned HTTP ' + mRes.statusCode }));
+      }
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
 
 // POST /api/server/restart
 function handleServerRestart(req, res) {
@@ -3449,6 +3496,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && pathname === '/api/system/stats') {
     handleGetSystemStats(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/mihomo/mode') {
+    handleGetMihomoMode(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/mihomo/mode') {
+    handleSetMihomoMode(req, res);
     return;
   }
   if (req.method === 'GET' && (pathname === '/api/config/rules.yaml' || pathname === '/api/export/rules.yaml' || pathname === '/rules.yaml' || pathname === '/outbound_rules.yaml')) {
