@@ -2104,76 +2104,26 @@ function handlePingProxy(req, res) {
       };
 
       const targetPingUrl = servicePingUrls[name] || 'http://www.gstatic.com/generate_204';
-
-      let targetNode = name;
-      let providerName = null;
-      try {
-        const [proxiesRes, providersRes] = await Promise.all([
-          makeMihomoRequest('GET', '/proxies'),
-          makeMihomoRequest('GET', '/providers/proxies')
-        ]);
-        
-        if (proxiesRes.statusCode === 200 && providersRes.statusCode === 200) {
-          const proxiesData = JSON.parse(proxiesRes.data);
-          const providersData = JSON.parse(providersRes.data);
-          
-          const proxies = proxiesData.proxies || {};
-          const providers = providersData.providers || {};
-          
-          let active = proxies[targetNode];
-          let limit = 5;
-          while (active && active.now && limit > 0) {
-            const next = proxies[active.now];
-            if (next) {
-              active = next;
-              targetNode = active.name || active.now;
-            } else {
-              targetNode = active.now;
-              break;
-            }
-            limit--;
-          }
-          
-          for (const [pName, prov] of Object.entries(providers)) {
-            if (prov.proxies && Array.isArray(prov.proxies)) {
-              const found = prov.proxies.some(p => p.name === targetNode);
-              if (found) {
-                providerName = pName;
-                break;
-              }
-            }
-          }
-        }
-      } catch (e) {
-        console.error('Failed to resolve proxy group active node for ping:', e.message);
-      }
-
-      if (targetNode === 'DIRECT' || targetNode === 'REJECT') {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: 1 }));
-        return;
-      }
-
       const timeout = 5000;
       const url = encodeURIComponent(targetPingUrl);
-      
-      let mRes;
-      if (providerName) {
-        mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(providerName) + '/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
-        if (mRes.statusCode !== 200) {
-          mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
-        }
-      } else {
-        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetNode) + '/delay?url=' + url + '&timeout=' + timeout);
-      }
+
+      let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
       } else {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: 0 })); 
+        const fallbackUrl = encodeURIComponent('http://cp.cloudflare.com/generate_204');
+        mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
+        if (mRes.statusCode === 200) {
+          const parsed = JSON.parse(mRes.data);
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+        } else {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, delay: 0 })); 
+        }
       }
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
