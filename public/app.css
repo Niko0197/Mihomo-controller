@@ -157,17 +157,20 @@ header {
 
 /* Nav Categories Titles */
 .nav-section-title {
-  font-size: 0.72rem;
+  font-size: 0.83rem;
   font-weight: 700;
-  color: #64748b;
+  color: #38bdf8;
   text-transform: uppercase;
-  letter-spacing: 0.8px;
-  margin: 16px 12px 6px 12px;
+  letter-spacing: 0.9px;
+  margin: 22px 14px 10px 14px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
   user-select: none;
 }
 
 .nav-section-title:first-child {
-  margin-top: 0;
+  margin-top: 4px;
 }
 
 /* Top Global Mode Bar */
