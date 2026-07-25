@@ -141,6 +141,9 @@ async function readHttpStream(url, onChunk, abortSignal) {
   }
 }
 
+let peakDownloadSpeed = 0;
+let peakUploadSpeed = 0;
+
 // --- 1. Real-time Traffic Graph Tab ---
 function initTrafficChart() {
   if (trafficChart) return;
@@ -149,6 +152,14 @@ function initTrafficChart() {
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
   
+  const downloadGradient = ctx.createLinearGradient(0, 0, 0, 340);
+  downloadGradient.addColorStop(0, 'rgba(59, 130, 246, 0.38)');
+  downloadGradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
+
+  const uploadGradient = ctx.createLinearGradient(0, 0, 0, 340);
+  uploadGradient.addColorStop(0, 'rgba(16, 185, 129, 0.38)');
+  uploadGradient.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
+
   trafficChart = new Chart(ctx, {
     type: 'line',
     data: {
@@ -157,65 +168,80 @@ function initTrafficChart() {
         {
           label: 'Скачивание (Download)',
           data: trafficDownloadHistory,
-          borderColor: '#a8c7fa',
-          backgroundColor: 'rgba(168, 199, 250, 0.04)',
+          borderColor: '#3b82f6',
+          backgroundColor: downloadGradient,
           fill: true,
-          tension: 0,
-          borderWidth: 2,
+          tension: 0.4,
+          borderWidth: 2.5,
           pointRadius: 0,
-          pointHoverRadius: 7,
+          pointHoverRadius: 6,
           pointHoverBorderWidth: 3,
-          pointHoverBackgroundColor: '#0d0f14',
-          pointHoverBorderColor: '#a8c7fa'
+          pointHoverBackgroundColor: '#0f172a',
+          pointHoverBorderColor: '#3b82f6'
         },
         {
           label: 'Отдача (Upload)',
           data: trafficUploadHistory,
-          borderColor: '#3ddc84',
-          backgroundColor: 'rgba(61, 220, 132, 0.04)',
+          borderColor: '#10b981',
+          backgroundColor: uploadGradient,
           fill: true,
-          tension: 0,
-          borderWidth: 2,
+          tension: 0.4,
+          borderWidth: 2.5,
           pointRadius: 0,
-          pointHoverRadius: 7,
+          pointHoverRadius: 6,
           pointHoverBorderWidth: 3,
-          pointHoverBackgroundColor: '#0d0f14',
-          pointHoverBorderColor: '#3ddc84'
+          pointHoverBackgroundColor: '#0f172a',
+          pointHoverBorderColor: '#10b981'
         }
       ]
     },
     options: {
       responsive: true,
       maintainAspectRatio: false,
+      animation: false,
       interaction: {
         mode: 'index',
         intersect: false
       },
       plugins: {
         legend: {
+          display: true,
+          position: 'top',
+          align: 'end',
           labels: {
-            color: '#e3e2e6',
-            font: { family: 'Inter', weight: '500' }
+            color: '#94a3b8',
+            usePointStyle: true,
+            pointStyle: 'circle',
+            padding: 16,
+            font: { family: 'Inter', size: 12, weight: '600' }
           }
         },
         tooltip: {
-          backgroundColor: 'rgba(15, 18, 25, 0.95)',
-          bodyFont: { family: 'Inter', size: 13.5, weight: '500' },
-          padding: 10,
-          boxWidth: 10,
-          boxHeight: 10,
-          boxPadding: 6,
-          cornerRadius: 6,
+          enabled: true,
+          backgroundColor: 'rgba(15, 23, 42, 0.95)',
+          titleColor: '#94a3b8',
+          bodyColor: '#f8fafc',
+          borderColor: 'rgba(255, 255, 255, 0.1)',
+          borderWidth: 1,
+          bodyFont: { family: 'Inter', size: 13, weight: '600' },
+          padding: 12,
+          boxWidth: 8,
+          boxHeight: 8,
+          usePointStyle: true,
+          cornerRadius: 10,
           caretPadding: 10,
           callbacks: {
-            title: function() {
-              return ''; // Hide X-axis index/time title as it's not relevant here
+            title: function(items) {
+              if (items.length > 0) {
+                const idx = items[0].dataIndex;
+                const secsAgo = (chartDataPointsLimit - 1 - idx);
+                return secsAgo === 0 ? 'Сейчас' : `${secsAgo} сек назад`;
+              }
+              return '';
             },
             label: function(context) {
               let label = context.dataset.label || '';
-              if (label) {
-                label += ': ';
-              }
+              if (label) label += ': ';
               if (context.parsed.y !== null) {
                 label += formatSpeed(context.parsed.y);
               }
@@ -227,13 +253,30 @@ function initTrafficChart() {
       scales: {
         x: {
           grid: { display: false },
-          ticks: { display: false }
+          ticks: {
+            color: '#64748b',
+            font: { family: 'Inter', size: 11 },
+            maxRotation: 0,
+            autoSkip: true,
+            maxTicksLimit: 7,
+            callback: function(val, index) {
+              const secs = chartDataPointsLimit - 1 - index;
+              if (secs === 0) return 'Сейчас';
+              if (secs % 10 === 0) return `-${secs}s`;
+              return '';
+            }
+          }
         },
         y: {
-          grid: { color: 'rgba(255, 255, 255, 0.05)' },
+          beginAtZero: true,
+          grid: {
+            color: 'rgba(255, 255, 255, 0.04)',
+            drawBorder: false
+          },
           ticks: {
-            color: '#9094a6',
-            font: { family: 'monospace', size: 10 },
+            color: '#64748b',
+            font: { family: 'monospace', size: 11 },
+            padding: 8,
             callback: function(value) {
               return formatSpeed(value);
             }
@@ -259,13 +302,24 @@ function startTrafficStream() {
       if (statusEl) statusEl.textContent = 'Подключение...';
       try {
         await readHttpStream('/api/xkeen/traffic', (data) => {
-          if (statusEl) statusEl.textContent = 'Поток активен';
+          if (statusEl) statusEl.textContent = '● LIVE';
           
           // Shift history values
           trafficDownloadHistory.shift();
           trafficDownloadHistory.push(data.down);
           trafficUploadHistory.shift();
           trafficUploadHistory.push(data.up);
+
+          if (data.down > peakDownloadSpeed) {
+            peakDownloadSpeed = data.down;
+            const peakEl = document.getElementById('speed-download-peak');
+            if (peakEl) peakEl.textContent = 'Пик: ' + formatSpeed(peakDownloadSpeed);
+          }
+          if (data.up > peakUploadSpeed) {
+            peakUploadSpeed = data.up;
+            const peakEl = document.getElementById('speed-upload-peak');
+            if (peakEl) peakEl.textContent = 'Пик: ' + formatSpeed(peakUploadSpeed);
+          }
           
           // Update labels and chart only if currently viewing Traffic tab
           if (currentTab === 'traffic') {

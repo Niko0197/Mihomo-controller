@@ -339,33 +339,60 @@
 
     <!-- Вкладка 8: График трафика -->
     <div id="tab-content-traffic" class="tab-content">
-      <div class="card">
-        <div class="card-title">
-          <span>📊 Трафик в реальном времени</span>
-          <span style="font-size: 0.9rem; font-weight: normal; color: var(--text-muted);" id="traffic-status">Подключение...</span>
+      <div class="card traffic-card-container">
+        <div class="card-title traffic-header-title">
+          <div class="traffic-title-main">
+            <span class="traffic-title-icon">📊</span>
+            <span class="traffic-title-text">Мониторинг трафика</span>
+          </div>
+          <div class="traffic-live-badge" id="traffic-status-badge">
+            <span class="live-dot pulse"></span>
+            <span id="traffic-status">Подключение...</span>
+          </div>
         </div>
         
         <div class="traffic-stats-grid">
           <div class="traffic-stat-card speed-down">
-            <div class="stat-label">⬇️ Скачивание</div>
+            <div class="stat-header">
+              <span class="stat-icon-wrapper down">⬇️</span>
+              <span class="stat-label">Скачивание</span>
+            </div>
             <div class="stat-value" id="speed-download">0 KB/s</div>
+            <div class="stat-sub" id="speed-download-peak">Пик: 0 KB/s</div>
           </div>
+
           <div class="traffic-stat-card speed-up">
-            <div class="stat-label">⬆️ Отдача</div>
+            <div class="stat-header">
+              <span class="stat-icon-wrapper up">⬆️</span>
+              <span class="stat-label">Отдача</span>
+            </div>
             <div class="stat-value" id="speed-upload">0 KB/s</div>
+            <div class="stat-sub" id="speed-upload-peak">Пик: 0 KB/s</div>
           </div>
+
           <div class="traffic-stat-card vol-vpn">
-            <div class="stat-label">🛡️ VPN Объем</div>
+            <div class="stat-header">
+              <span class="stat-icon-wrapper vpn">🛡️</span>
+              <span class="stat-label">VPN Трафик</span>
+            </div>
             <div class="stat-value" id="vol-vpn-bytes">0.00 MB</div>
+            <div class="stat-sub">За сессию</div>
           </div>
+
           <div class="traffic-stat-card vol-direct">
-            <div class="stat-label">🔌 DIRECT Объем</div>
+            <div class="stat-header">
+              <span class="stat-icon-wrapper direct">🔌</span>
+              <span class="stat-label">DIRECT Трафик</span>
+            </div>
             <div class="stat-value" id="vol-direct-bytes">0.00 MB</div>
+            <div class="stat-sub">Прямой поток</div>
           </div>
         </div>
 
-        <div class="chart-container" style="position: relative; height: 350px; margin-top: 24px;">
-          <canvas id="traffic-speed-chart"></canvas>
+        <div class="chart-wrapper-box">
+          <div class="chart-container" style="position: relative; height: 360px;">
+            <canvas id="traffic-speed-chart"></canvas>
+          </div>
         </div>
       </div>
     </div>
