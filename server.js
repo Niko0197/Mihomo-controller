@@ -360,6 +360,18 @@ async function handleCloseConnection(req, res, id) {
   }
 }
 
+// DELETE /api/xkeen/connections (Разорвать все соединения)
+async function handleCloseAllConnections(req, res) {
+  try {
+    const mRes = await makeMihomoRequest('DELETE', '/connections');
+    res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(mRes.data || JSON.stringify({ success: true }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ error: err.message }));
+  }
+}
+
 // GET /api/xkeen/trace?domain=...
 async function handleXkeenTrace(req, res) {
   try {
@@ -3800,6 +3812,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'GET' && pathname === '/api/xkeen/connections') {
     await handleXkeenConnections(req, res);
+    return;
+  }
+  if (req.method === 'DELETE' && pathname === '/api/xkeen/connections') {
+    await handleCloseAllConnections(req, res);
     return;
   }
   if (req.method === 'DELETE' && pathname.startsWith('/api/xkeen/connections/')) {

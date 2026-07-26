@@ -467,6 +467,21 @@ function writeRuleProviderLines(filePath, rules) {
   fs.writeFileSync(filePath, content, 'utf8');
 }
 
+async function closeConnectionsForIp(targetIp) {
+  try {
+    const res = await makeMihomoRequest('GET', '/connections');
+    if (res.statusCode !== 200) return;
+    const data = JSON.parse(res.data);
+    const connections = data.connections || [];
+    const targetConns = connections.filter(c => c.metadata && (c.metadata.sourceIP === targetIp || c.metadata.sourceIP === `::ffff:${targetIp}`));
+    for (const conn of targetConns) {
+      await makeMihomoRequest('DELETE', `/connections/${conn.id}`).catch(() => {});
+    }
+  } catch (err) {
+    console.error(`Ошибка точечного разрыва сокетов для ${targetIp}:`, err.message);
+  }
+}
+
 async function setClientRulesInConfig(ipsInput, targetGroup) {
   const ips = Array.isArray(ipsInput) ? ipsInput : [ipsInput];
   if (ips.length === 0) return false;
@@ -514,53 +529,18 @@ async function setClientRulesInConfig(ipsInput, targetGroup) {
     }
   }
 
-  // 1. Мгновенно за 2 миллисекунды обновляем правила в Mihomo без тяжелого релоада всего сервера
+  // 1. Мгновенно за 1 миллисекунду обновляем правила в Mihomo
   for (const provName of modifiedProviders) {
     try {
       await makeMihomoRequest('PUT', `/providers/rules/${provName}`).catch(() => {});
     } catch (e) {}
   }
 
-  // 2. Тихо сохраняем в config.yaml на диске для историографии
-  if (fs.existsSync(configPath)) {
-    try {
-      let yamlText = fs.readFileSync(configPath, 'utf8');
-      let lines = yamlText.split(/\r?\n/);
-      
-      const findIndices = () => ({
-        startBypassIdx: lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---'),
-        endBypassIdx: lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---'),
-        startVpnIdx: lines.findIndex(l => l.trim() === '# --- CLIENTS VPN RULES ---'),
-        endVpnIdx: lines.findIndex(l => l.trim() === '# --- END CLIENTS VPN RULES ---')
-      });
-
-      let { startBypassIdx, endBypassIdx, startVpnIdx, endVpnIdx } = findIndices();
-      
-      const removeRuleForIp = (targetIp) => {
-        lines = lines.filter(l => !(l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/128,`)));
-      };
-
-      for (const targetIp of ips) {
-        removeRuleForIp(targetIp);
-        const isIpv6 = targetIp.includes(':');
-        const mask = isIpv6 ? '/128' : '/32';
-        const newRule = `  - SRC-IP-CIDR,${targetIp}${mask},${targetGroup}`;
-        
-        let { startBypassIdx: sb, endBypassIdx: eb, startVpnIdx: sv, endVpnIdx: ev } = findIndices();
-        if (targetGroup.toLowerCase() === 'direct' && eb !== -1) {
-          lines.splice(eb, 0, newRule);
-        } else if (ev !== -1) {
-          lines.splice(ev, 0, newRule);
-        }
-      }
-      fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
-    } catch (e) {
-      console.error('Ошибка сохранения config.yaml:', e.message);
-    }
+  // 2. Отсекаем старые сокеты ИМЕННО переключенного устройства
+  for (const targetIp of ips) {
+    await closeConnectionsForIp(targetIp);
   }
 
-  // 3. Отсекаем только старые сокеты конкретного переключенного IP
-  await makeMihomoRequest('DELETE', '/connections').catch(() => {});
   return true;
 }
 
