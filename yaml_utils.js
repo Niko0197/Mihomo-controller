@@ -481,6 +481,132 @@ function removeUseFromGroupsInLines(lines, providerName) {
   }
 }
 
+const SYSTEM_PROTECTED_GROUPS = [
+  'GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3',
+  '18+', 'YouTube', 'Discord', 'Twitch', 'Reddit', 'Meta', 'Spotify', 'Speedtest',
+  'Telegram', 'Viber', 'Steam', 'CDN', 'Google', 'GitHub', 'AI', 'Roblox', 'Twitter',
+  'OpenAI', 'Anthropic', 'TikTok', 'Apple', 'Microsoft', 'Netflix', 'Pinterest',
+  'PlayStation', 'Zoom', 'Docker', 'Epic Games', 'Riot Games', 'LinkedIn', 'Notion',
+  'Patreon', 'SoundCloud', 'Xbox', 'Blizzard', 'Nintendo', 'GitLab', 'Hardware drivers'
+];
+
+// Автоматическая очистка пользовательских групп без proxies/use и удаление их упоминаний из других групп
+function cleanupEmptyGroupsInLines(lines) {
+  let inProxyGroups = false;
+  let currentGroupStart = -1;
+  let currentGroupName = '';
+  let hasProxiesOrUse = false;
+  const groupsToRemove = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inProxyGroups = true;
+      continue;
+    }
+
+    if (inProxyGroups) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        if (currentGroupStart !== -1 && !hasProxiesOrUse && currentGroupName && !SYSTEM_PROTECTED_GROUPS.includes(currentGroupName)) {
+          groupsToRemove.push(currentGroupName);
+        }
+        inProxyGroups = false;
+        currentGroupStart = -1;
+        currentGroupName = '';
+        continue;
+      }
+
+      if (trimmed.startsWith('- name:')) {
+        if (currentGroupStart !== -1 && !hasProxiesOrUse && currentGroupName && !SYSTEM_PROTECTED_GROUPS.includes(currentGroupName)) {
+          groupsToRemove.push(currentGroupName);
+        }
+        currentGroupStart = i;
+        currentGroupName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+        hasProxiesOrUse = false;
+        continue;
+      }
+
+      if (currentGroupStart !== -1) {
+        if (trimmed.startsWith('proxies:') || trimmed.startsWith('use:')) {
+          if (i + 1 < lines.length && lines[i + 1].trim().startsWith('-')) {
+            hasProxiesOrUse = true;
+          }
+        }
+      }
+    }
+  }
+
+  if (inProxyGroups && currentGroupStart !== -1 && !hasProxiesOrUse && currentGroupName && !SYSTEM_PROTECTED_GROUPS.includes(currentGroupName)) {
+    groupsToRemove.push(currentGroupName);
+  }
+
+  for (const gName of groupsToRemove) {
+    let start = -1;
+    let end = -1;
+    let inPG = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed === 'proxy-groups:') {
+        inPG = true;
+        continue;
+      }
+
+      if (inPG) {
+        if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+          if (start !== -1 && end === -1) end = i;
+          break;
+        }
+
+        if (trimmed.startsWith('- name:')) {
+          const name = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+          if (name === gName) {
+            start = i;
+          } else if (start !== -1 && end === -1) {
+            end = i;
+            break;
+          }
+        }
+      }
+    }
+
+    if (start !== -1) {
+      if (end === -1) end = lines.length;
+      lines.splice(start, end - start);
+    }
+
+    let inProxiesSection = false;
+    let i = 0;
+    while (i < lines.length) {
+      const line = lines[i];
+      const trimmed = line.trim();
+
+      if (trimmed.startsWith('proxies:')) {
+        inProxiesSection = true;
+        i++;
+        continue;
+      }
+
+      if (inProxiesSection) {
+        if (trimmed.startsWith('- name:') || (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-'))) {
+          inProxiesSection = false;
+        } else if (trimmed.startsWith('-')) {
+          const proxyInList = trimmed.substring(1).trim().replace(/['"]/g, '');
+          if (proxyInList === gName) {
+            lines.splice(i, 1);
+            continue;
+          }
+        }
+      }
+      i++;
+    }
+  }
+}
+
 module.exports = {
   parseProxyUri,
   serializeProxyToYaml,
@@ -491,5 +617,6 @@ module.exports = {
   addProviderToConfig,
   deleteProviderFromConfig,
   addUseToGroupInLines,
-  removeUseFromGroupsInLines
+  removeUseFromGroupsInLines,
+  cleanupEmptyGroupsInLines
 };

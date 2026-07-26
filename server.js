@@ -1994,6 +1994,7 @@ function handleDeleteProvider(req, res) {
       
       let lines = yamlText.split(/\r?\n/);
       yamlUtils.removeUseFromGroupsInLines(lines, name);
+      yamlUtils.cleanupEmptyGroupsInLines(lines);
       
       fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
       
@@ -3909,12 +3910,14 @@ function handleToggleClientVpn(req, res) {
       const payload = JSON.parse(body);
       const { ip, vpnEnabled } = payload;
       
-      await clientsManager.toggleClientVpn(ip, vpnEnabled);
+      const promise = clientsManager.toggleClientVpn(ip, vpnEnabled);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
+      await promise.catch(() => {});
     } catch (err) {
+      console.error('[Clients Manager Toggle Error]', err.message);
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: err.message }));
+      res.end(JSON.stringify({ success: false, message: err.message, error: err.message }));
     }
   });
 }
@@ -3947,9 +3950,10 @@ function handleSetClientGroup(req, res) {
       const payload = JSON.parse(body);
       const { ip, group } = payload;
       
-      await clientsManager.setClientGroupPreference(ip, group);
+      const promise = clientsManager.setClientGroupPreference(ip, group);
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
+      await promise.catch(() => {});
     } catch (err) {
       console.error('[Clients Manager Error]', err.message);
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });

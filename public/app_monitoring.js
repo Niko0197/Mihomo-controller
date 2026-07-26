@@ -2670,9 +2670,8 @@ async function toggleClientVpn(ip, checkboxEl) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip, vpnEnabled })
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error || 'Server error');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || data.error || 'HTTP ' + res.status);
     
     showToast(`Правила для ${ip} успешно обновлены`);
     loadClients();
@@ -2693,9 +2692,8 @@ async function changeClientGroup(ip, group, selectEl) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ip, group })
     });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    const data = await res.json();
-    if (!data.success) throw new Error(data.error || 'Server error');
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || data.error || 'HTTP ' + res.status);
     
     showToast(`Устройство ${ip} направлено в группу ${group}`);
     loadClients();
