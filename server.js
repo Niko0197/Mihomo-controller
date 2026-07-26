@@ -2435,6 +2435,21 @@ function handleSetMihomoMode(req, res) {
       }
 
       const mRes = await makeMihomoRequest('PATCH', '/configs', { mode });
+      
+      // Сбрасываем все активные соединения, чтобы трафик мгновенно переключился на DIRECT без ожидания закрытия сокетов
+      await makeMihomoRequest('DELETE', '/connections').catch(() => {});
+
+      // Сохраняем выбранный режим в config.yaml на диске
+      if (fs.existsSync(configPath)) {
+        try {
+          let content = fs.readFileSync(configPath, 'utf8');
+          content = content.replace(/^mode:\s*(rule|direct|global)/m, `mode: ${mode}`);
+          fs.writeFileSync(configPath, content, 'utf8');
+        } catch (err) {
+          console.error('Ошибка сохранения mode в config.yaml:', err.message);
+        }
+      }
+
       if (mRes.statusCode === 200 || mRes.statusCode === 204) {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: true, mode }));
