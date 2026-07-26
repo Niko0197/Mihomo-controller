@@ -3935,8 +3935,9 @@ function handleSetClientGroup(req, res) {
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
     } catch (err) {
+      console.error('[Clients Manager Error]', err.message);
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: err.message }));
+      res.end(JSON.stringify({ success: false, message: err.message, error: err.message }));
     }
   });
 }
