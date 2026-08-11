@@ -95,7 +95,6 @@ function switchTab(tabId) {
     'trace': '🛰️ Трассировка маршрутов',
     'rules': '🛠️ Быстрые пользовательские правила',
     'editor': '📝 Редактор YAML конфигураций',
-    'tor': '🌉 Управление мостами Tor',
     'qr': '📱 QR-подключения клиентов',
     'leak': '🔍 Анализ утечек доменов'
   };
@@ -105,9 +104,7 @@ function switchTab(tabId) {
     titleEl.textContent = tabTitles[tabId];
   }
   
-  if (tabId === 'tor') {
-    loadTorBridges();
-  } else if (tabId === 'editor') {
+  if (tabId === 'editor') {
     loadConfigFilesList();
     loadConfigEditor();
     setTimeout(() => {
@@ -909,132 +906,7 @@ async function pingAllProxies() {
   btn.textContent = '⚡ Проверить все';
 }
 
-// === СКАЧИВАНИЕ TOR-МОСТОВ ===
-async function loadTorBridges(force = false) {
-  const textarea = document.getElementById('tor-bridges-textarea');
-  const updateBtn = document.getElementById('btn-tor-force-update');
-  const countSpan = document.getElementById('tor-last-update');
-  
-  if (torData && !force) {
-    renderTorBridges();
-    return;
-  }
-  
-  if (force) {
-    updateBtn.disabled = true;
-    updateBtn.textContent = 'Обновление...';
-    textarea.value = 'Загрузка свежих мостов напрямую из GitHub репозитория...';
-  }
-  
-  try {
-    const url = force ? '/api/tor-bridges/update' : '/api/tor-bridges';
-    const method = force ? 'POST' : 'GET';
-    const fetchUrl = force ? url : url + '?t=' + Date.now();
-    
-    const res = await fetch(fetchUrl, { method });
-    if (!res.ok) throw new Error('Сбой сети при запросе мостов');
-    const data = await res.json();
-    
-    if (data.success) {
-      torData = data.bridges;
-      
-      try {
-        localStorage.setItem('mc_tor_bridges', JSON.stringify({
-          lastUpdated: data.lastUpdated,
-          bridges: data.bridges
-        }));
-      } catch (e) {}
-      
-      renderTorBridges();
-      if (force) showToast('Мосты успешно обновлены с GitHub!');
-    } else {
-      throw new Error(data.error || 'Неизвестная ошибка сервера');
-    }
-  } catch (err) {
-    if (!force && torData) {
-      renderTorBridges();
-      showToast('Кэшированные мосты (ошибка авто-обновления: ' + err.message + ')', 'error');
-    } else {
-      textarea.value = `Ошибка загрузки мостов: ${err.message}\n\nПопробуйте нажать кнопку "Обновить с GitHub" для принудительного скачивания.`;
-      countSpan.textContent = 'Ошибка загрузки';
-    }
-  } finally {
-    updateBtn.disabled = false;
-    updateBtn.textContent = '🔄 Обновить с GitHub';
-  }
-}
 
-// Отрисовка выбранного типа мостов
-function renderTorBridges() {
-  const type = document.getElementById('tor-bridge-type').value;
-  const textarea = document.getElementById('tor-bridges-textarea');
-  const countSpan = document.getElementById('tor-last-update');
-  
-  if (!torData || !torData[type]) {
-    textarea.value = 'Нет доступных мостов для выбранного типа. Нажмите "Обновить с GitHub".';
-    return;
-  }
-  
-  textarea.value = torData[type].trim();
-  
-  try {
-    const cachedBridges = localStorage.getItem('mc_tor_bridges');
-    if (cachedBridges) {
-      const parsed = JSON.parse(cachedBridges);
-      const lastUpdatedDate = new Date(parsed.lastUpdated);
-      countSpan.textContent = `Обновлено: ${lastUpdatedDate.toLocaleString('ru-RU')}`;
-    }
-  } catch (e) {}
-}
-
-// Копирование в буфер
-document.getElementById('btn-tor-copy').onclick = function() {
-  const textarea = document.getElementById('tor-bridges-textarea');
-  if (!textarea.value || textarea.value.startsWith('Ошибка') || textarea.value.startsWith('Загрузка') || textarea.value.startsWith('Нет доступных')) {
-    showToast('Нечего копировать!', 'error');
-    return;
-  }
-  
-  const textToCopy = textarea.value;
-  
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(textToCopy).then(() => {
-      showToast('Все мосты скопированы в буфер обмена!');
-    }).catch(err => {
-      fallbackCopyToClipboard(textToCopy);
-    });
-  } else {
-    fallbackCopyToClipboard(textToCopy);
-  }
-};
-
-function fallbackCopyToClipboard(text) {
-  const tempTextarea = document.createElement('textarea');
-  tempTextarea.value = text;
-  tempTextarea.style.position = 'fixed';
-  tempTextarea.style.left = '-999999px';
-  tempTextarea.style.top = '-999999px';
-  document.body.appendChild(tempTextarea);
-  tempTextarea.select();
-  
-  try {
-    const successful = document.execCommand('copy');
-    document.body.removeChild(tempTextarea);
-    if (successful) {
-      showToast('Все мосты скопированы в буфер обмена!');
-    } else {
-      showToast('Не удалось скопировать мосты', 'error');
-    }
-  } catch (err) {
-    document.body.removeChild(tempTextarea);
-    showToast('Ошибка копирования: ' + err.message, 'error');
-  }
-}
-
-// Принудительное обновление мостов
-document.getElementById('btn-tor-force-update').onclick = function() {
-  loadTorBridges(true);
-};
 
 // Функция для вызова перезапуска сервера на роутере
 async function triggerServerRestart() {
@@ -1732,15 +1604,24 @@ function convertToCustomSelect(selectEl) {
     e.stopPropagation();
     if (selectEl.disabled) return;
     
-    // Close other custom selects first
+    // Close other custom selects first and reset parent tr z-index
     document.querySelectorAll('.custom-select-wrapper').forEach(w => {
-      if (w !== wrapper) w.classList.remove('open');
+      if (w !== wrapper) {
+        w.classList.remove('open');
+        const parentTr = w.closest('tr');
+        if (parentTr) parentTr.style.zIndex = '';
+      }
     });
     
-    wrapper.classList.toggle('open');
+    const isOpen = wrapper.classList.toggle('open');
+    const tr = wrapper.closest('tr');
+    if (tr) {
+      tr.style.zIndex = isOpen ? '99999' : '';
+      tr.style.position = 'relative';
+    }
     
     // If opening, ensure the active option is scrolled into view
-    if (wrapper.classList.contains('open')) {
+    if (isOpen) {
       const selected = dropdown.querySelector('.custom-select-option.selected');
       if (selected) {
         dropdown.scrollTop = selected.offsetTop - dropdown.offsetTop - 10;
@@ -1794,6 +1675,8 @@ function initCustomSelects() {
 document.addEventListener('click', () => {
   document.querySelectorAll('.custom-select-wrapper').forEach(wrapper => {
     wrapper.classList.remove('open');
+    const parentTr = wrapper.closest('tr');
+    if (parentTr) parentTr.style.zIndex = '';
   });
 });
 

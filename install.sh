@@ -160,6 +160,9 @@ PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:
 EOF
 
 chmod +x "$INIT_SCRIPT"
+if [ -f "$INSTALL_DIR/uninstall.sh" ]; then
+    chmod +x "$INSTALL_DIR/uninstall.sh"
+fi
 
 # 6. Запуск веб-панели
 echo "→ Шаг 5: Запуск Mihomo Controller..."
@@ -177,4 +180,7 @@ fi
 echo ""
 echo "  Панель управления доступна по адресу:"
 echo "  http://192.168.1.1:4000"
+echo ""
+echo "  Для полного удаления панели запустите:"
+echo "  sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/uninstall.sh)\""
 echo "========================================="

@@ -1646,6 +1646,13 @@ function renderProxyGroups(proxiesData) {
       if (isCurrentlyCollapsed) {
         card.classList.remove('pgc-collapsed');
         if (arrow) arrow.classList.add('rotated');
+        if (totalNodes > 10) {
+          const hb = card.querySelector('.pgc-health-bar-container');
+          const dots = card.querySelector('.pgc-dots');
+          if (hb) hb.classList.add('hidden-bar');
+          if (dots) dots.classList.remove('hidden-dots');
+        }
+
         if (nodesPanel) {
           const height = nodesPanel.scrollHeight;
           nodesPanel.style.maxHeight = height + 'px';
@@ -1669,6 +1676,13 @@ function renderProxyGroups(proxiesData) {
           nodesPanel.style.opacity = '0';
         }
         if (arrow) arrow.classList.remove('rotated');
+        if (totalNodes > 10) {
+          const hb = card.querySelector('.pgc-health-bar-container');
+          const dots = card.querySelector('.pgc-dots');
+          if (hb) hb.classList.remove('hidden-bar');
+          if (dots) dots.classList.add('hidden-dots');
+        }
+
         card.classList.add('pgc-collapsed');
         localStorage.setItem('pgc-collapsed-' + group.name, 'true');
       }
@@ -1694,89 +1708,134 @@ function renderProxyGroups(proxiesData) {
       <span class="pgc-sel-name">${nowName}</span>
     `;
 
-    // --- Latency dots row (always visible in card body) ---
-    const dotsRow = document.createElement('div');
-    dotsRow.className = 'pgc-dots';
-    group.all.forEach(nodeName => {
-      const np = proxies[nodeName];
-      const isChild = np && np.all && Array.isArray(np.all);
-      const d = isChild ? resolveSelectedProxyDelay(nodeName, proxies) : getLastDelay(np);
-      const dot = document.createElement('span');
-      dot.className = 'pgc-dot ' + getLatencyDotClass(d);
-      dot.title = nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A');
-      if (nodeName === group.now) dot.classList.add('pgc-dot-active');
-      // Dot context menu and hover pointer is available for all groups
-      dot.style.cursor = 'pointer';
-      dot.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        pingProxyNode(nodeName);
+    // --- Latency dots row & Health distribution bar (>10 nodes) ---
+    function createDotsRowElement() {
+      const row = document.createElement('div');
+      row.className = 'pgc-dots';
+      group.all.forEach(nodeName => {
+        const np = proxies[nodeName];
+        const isChild = np && np.all && Array.isArray(np.all);
+        const d = isChild ? resolveSelectedProxyDelay(nodeName, proxies) : getLastDelay(np);
+        const dot = document.createElement('span');
+        dot.className = 'pgc-dot ' + getLatencyDotClass(d);
+        dot.title = nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A');
+        if (nodeName === group.now) dot.classList.add('pgc-dot-active');
+        dot.style.cursor = 'pointer';
+        dot.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pingProxyNode(nodeName);
+        });
+        if (isSelector) {
+          dot.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectProxyInGroup(group.name, nodeName);
+          });
+        }
+        row.appendChild(dot);
       });
-      if (isSelector) {
-        dot.addEventListener('click', () => selectProxyInGroup(group.name, nodeName));
-      }
-      dotsRow.appendChild(dot);
-    });
-
-    // --- Node buttons panel (for all group types) ---
-    const nodesPanel = document.createElement('div');
-    if (totalNodes >= 9) {
-      nodesPanel.className = 'pgc-nodes-panel grid-3-columns';
-    } else {
-      nodesPanel.className = 'pgc-nodes-panel';
-    }
-    
-    if (isCollapsed) {
-      nodesPanel.style.maxHeight = '0px';
-      nodesPanel.style.opacity = '0';
-    } else {
-      nodesPanel.style.maxHeight = 'none';
-      nodesPanel.style.opacity = '1';
+      return row;
     }
 
-    group.all.forEach(nodeName => {
-      const np = proxies[nodeName];
-      const isActive = nodeName === group.now;
-      const isChildGroup = np && np.all && Array.isArray(np.all);
-      const childType = np ? np.type : '';
-      const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
-      const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
+    let dotsRowElement = null;
+    let healthBarElement = null;
 
-      const btn = document.createElement('button');
-      btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
-      btn.setAttribute('data-tooltip', nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A'));
+    if (totalNodes > 10) {
+      let fastCount = 0;
+      let mediumCount = 0;
+      let slowCount = 0;
+      let offlineCount = 0;
 
-      btn.innerHTML = `
-        <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
-        <span class="pgc-nb-name">${nodeName}</span>
-        ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
-        ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
-        ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
+      group.all.forEach(nodeName => {
+        const np = proxies[nodeName];
+        const isChild = np && np.all && Array.isArray(np.all);
+        const d = isChild ? resolveSelectedProxyDelay(nodeName, proxies) : getLastDelay(np);
+        if (d > 0) {
+          if (d < 200) fastCount++;
+          else if (d < 500) mediumCount++;
+          else slowCount++;
+        } else {
+          offlineCount++;
+        }
+      });
+
+      healthBarElement = document.createElement('div');
+      healthBarElement.className = 'pgc-health-bar-container' + (isCollapsed ? '' : ' hidden-bar');
+      healthBarElement.title = `Быстрых: ${fastCount} | Средних: ${mediumCount} | Медленных: ${slowCount} | Недоступно: ${offlineCount} (Нажмите, чтобы развернуть)`;
+      healthBarElement.innerHTML = `
+        ${fastCount > 0 ? `<div class="pgc-hb-segment pgc-hb-fast" style="flex: ${fastCount};"></div>` : ''}
+        ${mediumCount > 0 ? `<div class="pgc-hb-segment pgc-hb-medium" style="flex: ${mediumCount};"></div>` : ''}
+        ${slowCount > 0 ? `<div class="pgc-hb-segment pgc-hb-slow" style="flex: ${slowCount};"></div>` : ''}
+        ${offlineCount > 0 ? `<div class="pgc-hb-segment pgc-hb-offline" style="flex: ${offlineCount};"></div>` : ''}
       `;
 
-      if (isSelector) {
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation();
-          selectProxyInGroup(group.name, nodeName);
-        });
-      } else {
-        btn.style.cursor = 'default';
-        btn.addEventListener('click', (e) => {
-          e.stopPropagation(); // Stop propagation to prevent card collapse
-        });
+      dotsRowElement = createDotsRowElement();
+      if (isCollapsed) {
+        dotsRowElement.classList.add('hidden-dots');
       }
-      btn.addEventListener('contextmenu', (e) => {
-        e.preventDefault();
-        e.stopPropagation();
-        pingProxyNode(nodeName);
+    } else {
+      dotsRowElement = createDotsRowElement();
+    }
+
+    // --- Node buttons panel (ONLY for <= 10 nodes) ---
+    let nodesPanel = null;
+    if (totalNodes <= 10) {
+      nodesPanel = document.createElement('div');
+      nodesPanel.className = 'pgc-nodes-panel';
+      
+      if (isCollapsed) {
+        nodesPanel.style.maxHeight = '0px';
+        nodesPanel.style.opacity = '0';
+      } else {
+        nodesPanel.style.maxHeight = 'none';
+        nodesPanel.style.opacity = '1';
+      }
+
+      group.all.forEach(nodeName => {
+        const np = proxies[nodeName];
+        const isActive = nodeName === group.now;
+        const isChildGroup = np && np.all && Array.isArray(np.all);
+        const childType = np ? np.type : '';
+        const resolvedChildDelay = isChildGroup ? resolveSelectedProxyDelay(nodeName, proxies) : 0;
+        const d = isChildGroup ? resolvedChildDelay : getLastDelay(np);
+
+        const btn = document.createElement('button');
+        btn.className = 'pgc-node-btn' + (isActive ? ' active' : '');
+        btn.setAttribute('data-tooltip', nodeName + ': ' + (d > 0 ? d + 'ms' : 'N/A'));
+
+        btn.innerHTML = `
+          <span class="pgc-nb-dot ${getLatencyDotClass(d)}"></span>
+          <span class="pgc-nb-name">${nodeName}</span>
+          ${isChildGroup ? '<span class="pgc-nb-type">' + childType + '</span>' : ''}
+          ${(!isChildGroup && d > 0) ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : ''}
+          ${isChildGroup ? `<span class="pgc-nb-count" style="color:${getLatencyColor(d)};background:${getLatencyBgColor(d)}">${d > 0 ? d + ' ms' : '—'}</span>` : ''}
+        `;
+
+        if (isSelector) {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectProxyInGroup(group.name, nodeName);
+          });
+        } else {
+          btn.style.cursor = 'default';
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+          });
+        }
+        btn.addEventListener('contextmenu', (e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          pingProxyNode(nodeName);
+        });
+        nodesPanel.appendChild(btn);
       });
-      nodesPanel.appendChild(btn);
-    });
+    }
 
     const body = document.createElement('div');
     body.className = 'pgc-body';
     body.appendChild(selected);
-    body.appendChild(dotsRow);
+    if (healthBarElement) body.appendChild(healthBarElement);
+    if (dotsRowElement) body.appendChild(dotsRowElement);
     if (nodesPanel) body.appendChild(nodesPanel);
 
     card.appendChild(header);
@@ -1969,6 +2028,37 @@ function renderProxyProviders(providersData, proxiesData) {
 }
 
 async function selectProxyInGroup(groupName, nodeName) {
+  // 1. Мгновенное оптимистичное обновление элементов карточки в DOM (0ms UI latency)
+  try {
+    const cards = document.querySelectorAll('.pgc-card');
+    cards.forEach(card => {
+      if (card.dataset.groupName === groupName) {
+        const selName = card.querySelector('.pgc-sel-name');
+        if (selName) selName.textContent = nodeName;
+
+        const btns = card.querySelectorAll('.pgc-node-btn');
+        btns.forEach(btn => {
+          const nameSpan = btn.querySelector('.pgc-nb-name');
+          if (nameSpan && nameSpan.textContent === nodeName) {
+            btn.classList.add('active');
+          } else {
+            btn.classList.remove('active');
+          }
+        });
+
+        const dots = card.querySelectorAll('.pgc-dot');
+        dots.forEach(dot => {
+          if (dot.title && dot.title.startsWith(nodeName + ':')) {
+            dot.classList.add('pgc-dot-active');
+          } else {
+            dot.classList.remove('pgc-dot-active');
+          }
+        });
+      }
+    });
+  } catch (e) {}
+
+  // 2. Отправка команды на сервер
   try {
     const res = await fetch('/api/xkeen/proxies/' + encodeURIComponent(groupName), {
       method: 'PUT',
@@ -1977,7 +2067,7 @@ async function selectProxyInGroup(groupName, nodeName) {
     });
     if (res.ok) {
       showToast('✅ ' + groupName + ' → ' + nodeName);
-      await loadProxiesDashboard();
+      loadProxiesDashboard().catch(() => {});
     } else {
       showToast('Ошибка переключения прокси', 'error');
     }
@@ -2209,7 +2299,7 @@ function startSystemStatsPolling() {
       const topRam = document.getElementById('top-bar-ram');
       const topTemp = document.getElementById('top-bar-temp');
       if (topCpu) topCpu.textContent = stats.cpu + '%';
-      if (topRam) topRam.textContent = stats.ramUsedPercent + '%';
+      if (topRam) topRam.innerHTML = `${stats.ramUsedPercent}%<span class="stat-detail"> (${stats.ramUsedMb}/${stats.ramTotalMb} МБ)</span>`;
       if (topTemp) topTemp.textContent = stats.temp + '°C';
       
       // Update DOM elements

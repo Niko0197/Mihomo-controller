@@ -1301,7 +1301,7 @@ input[type="checkbox"]:checked::before {
   background: rgba(255, 255, 255, 0.02);
   border: 1px solid var(--md-sys-color-outline);
   border-radius: 18px;
-  padding: 12px;
+  padding: 12px 12px 8px 12px;
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -1397,8 +1397,8 @@ input[type="checkbox"]:checked::before {
 
 .system-monitor-card {
   border-top: 1px solid rgba(255, 255, 255, 0.08);
-  padding-top: 10px;
-  padding-bottom: 4px;
+  padding-top: 8px;
+  padding-bottom: 0;
   margin-top: 4px;
   font-size: 0.82rem;
 }
@@ -1413,7 +1413,7 @@ input[type="checkbox"]:checked::before {
   font-weight: 500;
   color: var(--text-muted);
   font-family: var(--font-outfit);
-  padding: 4px 0;
+  padding: 4px 0 2px 0;
   margin-bottom: 0;
   transition: color 0.2s ease;
 }
@@ -1538,23 +1538,38 @@ input[type="checkbox"]:checked::before {
   }
   
   .tabs-vertical {
+    display: flex;
     flex-direction: row;
     flex-wrap: nowrap;
     overflow-x: auto;
-    padding-bottom: 8px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    padding: 4px 0 10px 0;
+    margin-bottom: 8px;
     gap: 8px;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
   }
-  
+  .tabs-vertical::-webkit-scrollbar {
+    display: none;
+  }
+  .tabs-vertical .nav-section-title {
+    display: none;
+  }
   .tabs-vertical .tab-btn {
+    flex: 0 0 auto;
     width: auto;
     white-space: nowrap;
-    padding: 10px 18px;
+    padding: 8px 14px;
+    font-size: 0.82rem;
+    border-radius: 12px;
   }
   
   .main-content {
     margin-left: 0;
     max-width: 100%;
-    padding: 24px 16px;
+    padding: 16px 12px;
   }
 
   #table-wrapper,
@@ -1570,6 +1585,78 @@ input[type="checkbox"]:checked::before {
 
 /* Mobile adjustments for phone screens */
 @media (max-width: 768px) {
+  /* Top bar: stack vertically, full width */
+  .top-global-bar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+    padding: 10px;
+    border-radius: 16px;
+    margin-bottom: 16px;
+  }
+  .top-bar-left,
+  .top-bar-right {
+    width: 100%;
+  }
+
+  /* Stats: single row, compact */
+  .sys-header-stats-container {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 12px;
+    padding: 8px 12px;
+    gap: 10px;
+    font-size: 0.82rem;
+    justify-content: space-between;
+    flex-wrap: nowrap;
+  }
+  .sys-header-stat-item {
+    gap: 4px;
+    font-size: 0.78rem;
+  }
+  .sys-header-stat-item .stat-icon {
+    font-size: 0.9rem;
+  }
+  .sys-header-stat-item .stat-name {
+    display: none;
+  }
+  .sys-header-stat-divider {
+    display: none;
+  }
+
+  /* Mode switcher: full width, compact buttons */
+  .mode-switcher-container {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: 12px;
+    padding: 5px 10px;
+    gap: 8px;
+  }
+  .mode-switcher-label {
+    font-size: 0.75rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+  .mode-toggle-group {
+    flex: 1;
+    min-width: 0;
+  }
+  .mode-btn {
+    flex: 1;
+    min-width: 0;
+    font-size: 0.78rem;
+    padding: 6px 10px;
+    text-align: center;
+    white-space: nowrap;
+  }
+  .mode-btn-full {
+    display: none;
+  }
+
+  /* Stats value: prevent line breaks */
+  .sys-header-stat-item .stat-val {
+    white-space: nowrap;
+  }
   .controls-row {
     flex-direction: column;
     align-items: stretch;
@@ -1797,6 +1884,7 @@ input[type="checkbox"]:checked::before {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  transition: opacity 0.2s ease, transform 0.2s ease, color 0.2s ease;
 }
 
 .pgc-sel-delay {
@@ -1806,39 +1894,168 @@ input[type="checkbox"]:checked::before {
   flex-shrink: 0;
 }
 
-/* --- Latency dots --- */
+/* --- Latency Distribution Health Bar (for >10 locations) --- */
+.pgc-health-bar-container {
+  display: flex;
+  width: 100%;
+  height: 6px;
+  max-height: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 6px 0 8px 0;
+  cursor: pointer;
+  box-sizing: border-box;
+  opacity: 1;
+  transform-origin: top left;
+  transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.25s cubic-bezier(0.4, 0, 0.2, 1),
+              margin 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pgc-health-bar-container:hover {
+  height: 8px;
+  transform: scaleY(1.1);
+}
+.pgc-hb-segment {
+  height: 100%;
+  transition: flex 0.4s cubic-bezier(0.4, 0, 0.2, 1), background-color 0.3s ease;
+}
+.pgc-hb-fast {
+  background-color: #34d399; /* Зеленый */
+}
+.pgc-hb-medium {
+  background-color: #fbbf24; /* Желтый */
+}
+.pgc-hb-slow {
+  background-color: #f87171; /* Красный */
+}
+.pgc-hb-offline {
+  background-color: rgba(255, 255, 255, 0.2); /* Серый недоступные */
+}
+.pgc-health-bar-container.hidden-bar {
+  max-height: 0px !important;
+  opacity: 0 !important;
+  margin: 0 !important;
+  transform: translateY(-6px) scaleY(0);
+  pointer-events: none;
+}
+
+/* --- Latency dots & Enhanced Animations --- */
+@keyframes dotPop {
+  0% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.4);
+  }
+  60% {
+    transform: translateY(0px) scale(1.25);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0px) scale(1);
+  }
+}
+
 .pgc-dots {
   display: flex;
   flex-wrap: wrap;
-  gap: 5px;
-  padding-top: 2px;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 4px;
+  margin: 2px 0;
+  max-height: 500px;
+  opacity: 1;
+  overflow: visible;
+  transform-origin: top left;
+  transition: max-height 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              opacity 0.3s cubic-bezier(0.4, 0, 0.2, 1),
+              padding 0.35s cubic-bezier(0.4, 0, 0.2, 1),
+              transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.pgc-dots.hidden-dots {
+  max-height: 0px !important;
+  opacity: 0 !important;
+  padding: 0 6px !important;
+  margin: 0 !important;
+  transform: translateY(-10px) scaleY(0);
+  pointer-events: none;
+  overflow: hidden !important;
 }
 
 .pgc-dot {
-  width: 10px;
-  height: 10px;
+  width: 11px;
+  height: 11px;
   border-radius: 50%;
   display: inline-block;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease, opacity 0.18s ease, outline 0.18s ease;
   flex-shrink: 0;
+  cursor: pointer;
+  position: relative;
+  box-sizing: border-box;
+  animation: dotPop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) ease-out forwards;
 }
 
 .pgc-dot:hover {
-  transform: scale(1.6);
+  transform: scale(1.45);
+  z-index: 20;
 }
 
-.pgc-dot.lat-fast  { background: #3ddc84; box-shadow: 0 0 0 transparent; }
-.pgc-dot.lat-fast:hover { box-shadow: 0 0 8px rgba(61, 220, 132, 0.5); }
-.pgc-dot.lat-medium { background: #ffb74d; }
-.pgc-dot.lat-medium:hover { box-shadow: 0 0 8px rgba(255, 183, 77, 0.5); }
-.pgc-dot.lat-slow   { background: #ff8a80; }
-.pgc-dot.lat-slow:hover { box-shadow: 0 0 8px rgba(255, 138, 128, 0.5); }
-.pgc-dot.lat-none   { background: rgba(255, 255, 255, 0.12); }
-.pgc-dot.lat-none:hover { box-shadow: 0 0 6px rgba(255, 255, 255, 0.15); }
+.pgc-dot:active {
+  transform: scale(0.85);
+  transition: transform 0.08s ease;
+}
 
+.pgc-dot.lat-fast {
+  background: #34d399;
+}
+.pgc-dot.lat-fast:hover {
+  box-shadow: 0 0 10px rgba(52, 211, 153, 0.7);
+}
+
+.pgc-dot.lat-medium {
+  background: #fbbf24;
+}
+.pgc-dot.lat-medium:hover {
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.7);
+}
+
+.pgc-dot.lat-slow {
+  background: #f87171;
+}
+.pgc-dot.lat-slow:hover {
+  box-shadow: 0 0 10px rgba(248, 113, 113, 0.7);
+}
+
+.pgc-dot.lat-none {
+  background: rgba(255, 255, 255, 0.18);
+}
+.pgc-dot.lat-none:hover {
+  box-shadow: 0 0 8px rgba(255, 255, 255, 0.3);
+}
+
+/* Тонкая элегантная белая обводка активной точки */
 .pgc-dot.pgc-dot-active {
-  outline: 2px solid var(--md-sys-color-primary);
-  outline-offset: 1px;
+  transform: scale(1.1);
+  outline: 1.5px solid rgba(255, 255, 255, 0.95);
+  outline-offset: 1.2px;
+  box-shadow: 0 0 6px rgba(255, 255, 255, 0.6);
+  z-index: 15;
+}
+
+/* Визуальная обратная связь при наведении на точку с обводкой */
+.pgc-dot.pgc-dot-active:hover {
+  transform: scale(1.4) !important;
+  outline-color: #ffffff !important;
+  outline-offset: 2px !important;
+  box-shadow: 0 0 12px rgba(255, 255, 255, 0.95) !important;
+  z-index: 25 !important;
+}
+
+/* Нажатие/клик на точку с обводкой */
+.pgc-dot.pgc-dot-active:active {
+  transform: scale(0.9) !important;
+  outline-offset: 1px !important;
+  transition: transform 0.08s ease !important;
 }
 
 /* --- Expandable node panel --- */
@@ -2493,6 +2710,7 @@ input:checked + .slider:before {
 
 #system-monitor-body.expanded {
   opacity: 1;
+  padding-bottom: 4px;
 }
 
 #system-monitor-arrow {
@@ -2511,6 +2729,18 @@ input:checked + .slider:before {
   width: 100%;
   display: inline-block;
   user-select: none;
+}
+
+.custom-select-wrapper.open {
+  position: relative !important;
+  z-index: 99999 !important;
+}
+
+tr:has(.custom-select-wrapper.open),
+td:has(.custom-select-wrapper.open),
+div:has(.custom-select-wrapper.open) {
+  z-index: 99999 !important;
+  position: relative !important;
 }
 
 /* Specific select wrappers styles to match original layouts */
@@ -2588,25 +2818,27 @@ input:checked + .slider:before {
   transform: rotate(270deg);
 }
 
-.custom-select-dropdown {
-  position: absolute;
-  top: calc(100% + 6px);
-  left: 0;
-  right: 0;
-  background: rgba(18, 22, 32, 0.96);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  border-radius: 12px;
-  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
-  z-index: 2000;
+html body .custom-select-dropdown,
+html body .custom-select-wrapper.open .custom-select-dropdown {
+  position: absolute !important;
+  top: calc(100% + 4px) !important;
+  left: 0 !important;
+  right: 0 !important;
+  background: #0d111a !important;
+  background-color: #0d111a !important;
+  border: 1px solid #2a3142 !important;
+  border-radius: 12px !important;
+  box-shadow: 0 14px 40px rgba(0, 0, 0, 0.98) !important;
+  z-index: 999999 !important;
   opacity: 0;
   transform: translateY(-8px) scale(0.96);
   pointer-events: none;
   overflow: hidden;
   transition: opacity 0.22s cubic-bezier(0.25, 1, 0.5, 1),
               transform 0.22s cubic-bezier(0.25, 1, 0.5, 1);
-  max-height: 250px;
-  overflow-y: auto;
-  box-sizing: border-box;
+  max-height: 250px !important;
+  overflow-y: auto !important;
+  box-sizing: border-box !important;
 }
 
 /* Custom Scrollbar for Dropdown */
@@ -2614,38 +2846,38 @@ input:checked + .slider:before {
   width: 4px;
 }
 .custom-select-dropdown::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.15);
+  background: rgba(255, 255, 255, 0.25);
   border-radius: 2px;
 }
 
-.custom-select-wrapper.open .custom-select-dropdown {
-  opacity: 1;
-  transform: translateY(0) scale(1);
-  pointer-events: auto;
+html body .custom-select-wrapper.open .custom-select-dropdown {
+  opacity: 1 !important;
+  transform: translateY(0) scale(1) !important;
+  pointer-events: auto !important;
 }
 
-.custom-select-option {
-  padding: 10px 16px;
-  color: var(--text-muted);
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  font-size: 0.88rem;
-  text-align: left;
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
+html body .custom-select-option,
+html body .rule-target-select-inline-container .custom-select-option,
+html body .group-select-container .custom-select-option,
+html body .row-group-select-container .custom-select-option {
+  padding: 8px 12px !important;
+  background: #0d111a !important;
+  background-color: #0d111a !important;
+  color: var(--text-muted) !important;
+  cursor: pointer !important;
+  transition: background 0.15s, color 0.15s !important;
+  font-size: 0.82rem !important;
+  text-align: left !important;
+  white-space: nowrap !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  opacity: 1 !important;
 }
 
-.rule-target-select-inline-container .custom-select-option,
-.group-select-container .custom-select-option,
-.row-group-select-container .custom-select-option {
-  padding: 6px 12px;
-  font-size: 0.82rem;
-}
-
-.custom-select-option:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: var(--text);
+html body .custom-select-option:hover {
+  background: #1e2638 !important;
+  background-color: #1e2638 !important;
+  color: var(--text) !important;
 }
 
 .custom-select-option.selected {

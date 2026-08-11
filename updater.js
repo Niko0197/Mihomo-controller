@@ -42,7 +42,7 @@ function getTimestamp() {
 }
 
 // Универсальный клиент для выполнения HTTP-запросов к API Mihomo
-function makeRequest(method, endpoint) {
+function makeRequest(method, endpoint, body = null) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: API_HOST,
@@ -52,7 +52,7 @@ function makeRequest(method, endpoint) {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 10000 // 10 секунд таймаут
+      timeout: 5000
     };
 
     const req = http.request(options, (res) => {
@@ -77,8 +77,27 @@ function makeRequest(method, endpoint) {
       reject(new Error('Превышено время ожидания ответа от API'));
     });
 
+    if (body) {
+      req.write(typeof body === 'string' ? body : JSON.stringify(body));
+    }
+
     req.end();
   });
+}
+
+async function setMihomoMode(mode) {
+  try {
+    await makeRequest('PATCH', '/configs', JSON.stringify({ mode }));
+    const altConfigPath = '/opt/etc/mihomo/config.yaml';
+    if (fs.existsSync(altConfigPath)) {
+      let content = fs.readFileSync(altConfigPath, 'utf8');
+      content = content.replace(/^mode:\s*(rule|direct|global)/m, `mode: ${mode}`);
+      fs.writeFileSync(altConfigPath, content, 'utf8');
+    }
+    console.log(`[${getTimestamp()}] Режим ядра Mihomo успешно переключен в: ${mode}`);
+  } catch (err) {
+    console.error(`[${getTimestamp()}] Ошибка переключения режима ядра на ${mode}: ${err.message}`);
+  }
 }
 
 // Проверка соответствия домена ключевым словам (должны ходить напрямую)
@@ -142,7 +161,7 @@ function isRussianDomain(host) {
 
 function downloadHttpsFile(url) {
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    const req = https.get(url, { timeout: 5000 }, (res) => {
       if (res.statusCode !== 200) {
         reject(new Error(`HTTP статус ${res.statusCode} для ${url}`));
         return;
@@ -150,7 +169,12 @@ function downloadHttpsFile(url) {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => resolve(data));
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error(`Таймаут ожидания 5 сек для ${url}`));
+    });
   });
 }
 
@@ -329,27 +353,18 @@ async function main() {
   if (isAllDown) {
     if (state.allDownSince === 0) {
       state.allDownSince = now;
-      console.log(`[${getTimestamp()}] ВНИМАНИЕ: Все VPN-каналы (StealthSurf 1/2, GitHub) недоступны. Начало отсчета (1 минута до сброса в DIRECT)...`);
-    } else if (state.allDownSince !== -1 && (now - state.allDownSince) >= 50 * 1000) {
-      console.log(`[${getTimestamp()}] КРИТИЧЕСКАЯ ОШИБКА: Все VPN-каналы недоступны более 1 минуты. Отключаем VPN для всех клиентов (перевод в DIRECT).`);
-      try {
-        const clientsManager = require('./clients_manager');
-        const triggered = await clientsManager.disableVpnForAllClients();
-        if (triggered) {
-          console.log(`[${getTimestamp()}] Успешно: Маршруты всех VPN-клиентов сброшены в DIRECT.`);
-        } else {
-          console.log(`[${getTimestamp()}] Инфо: Нет клиентов с активным VPN для отключения.`);
-        }
-      } catch (err) {
-        console.error(`[${getTimestamp()}] Ошибка при сбросе правил клиентов: ${err.message}`);
-      }
-      state.allDownSince = -1; // Чтобы зафиксировать сброс и не спамить
+      console.log(`[${getTimestamp()}] ВНИМАНИЕ: Все VPN-каналы недоступны. Отсчёт 30 секунд до аварийного переключения режима в DIRECT...`);
+    } else if (state.allDownSince !== -1 && (now - state.allDownSince) >= 30 * 1000) {
+      console.log(`[${getTimestamp()}] КРИТИЧЕСКАЯ ОШИБКА: Все VPN-каналы недоступны > 30 сек. Автоматическое переключение общего режима ядра в DIRECT!`);
+      await setMihomoMode('direct');
+      state.allDownSince = -1;
     }
   } else {
     // Если хотя бы один канал поднялся
     if (state.allDownSince !== 0) {
       if (state.allDownSince === -1) {
-        console.log(`[${getTimestamp()}] ИНФО: Сетевые VPN-каналы восстановили работу.`);
+        console.log(`[${getTimestamp()}] ИНФО: VPN-каналы восстановили работу! Автоматический возврат общего режима ядра в RULE (Маршруты).`);
+        await setMihomoMode('rule');
       } else {
         console.log(`[${getTimestamp()}] ИНФО: Угроза отключения снята, каналы частично доступны.`);
       }
@@ -380,7 +395,6 @@ async function main() {
 
           if (host && chains.length > 0) {
             const mainChain = chains[0];
-            // Если трафик пошел через одну из общих прокси-групп (не сервисных)
             const generalGroups = [
               'GLOBAL',
               '🚀Auto-Best',
@@ -394,12 +408,11 @@ async function main() {
             
             if (generalGroups.includes(mainChain)) {
               if (isRussianDomain(host)) {
-                // Если этого домена еще нет в логе, записываем
                 if (!existingLogs.includes(host)) {
                   const chainStr = chains.join(' -> ');
                   const logLine = `[${getTimestamp()}] ВНИМАНИЕ: Домен ${host} пошел через VPN! Цепочка: ${chainStr} | Правило: ${rule}\n`;
                   fs.appendFileSync(logRuPath, logLine, 'utf8');
-                  existingLogs += host + '\n'; // Обновляем локально, чтобы не писать повторно за этот же цикл
+                  existingLogs += host + '\n';
                 }
               }
             }
@@ -408,15 +421,7 @@ async function main() {
       }
     }
   } catch (err) {
-    // Ошибки при сканировании соединений пишем в stderr/stdout
     console.error(`[${getTimestamp()}] Ошибка при сканировании соединений: ${err.message}`);
-  }
-
-  // Обновляем список Tor мостов в фоне
-  try {
-    await updateTorBridges();
-  } catch (err) {
-    console.error(`[${getTimestamp()}] Ошибка фонового обновления Tor мостов: ${err.message}`);
   }
 
   // Проверяем работу веб-сервера и при необходимости запускаем его в фоне
@@ -470,7 +475,8 @@ function ensureServerRunning() {
     const out = fs.openSync(path.join(__dirname, 'server_out.log'), 'a');
     const errFile = fs.openSync(path.join(__dirname, 'server_err.log'), 'a');
 
-    const child = spawn('/opt/bin/node-vpnweb', [path.join(__dirname, 'server.js')], {
+    const nodeBin = process.execPath || '/opt/bin/node';
+    const child = spawn(nodeBin, [path.join(__dirname, 'server.js')], {
       detached: true,
       stdio: ['ignore', out, errFile]
     });

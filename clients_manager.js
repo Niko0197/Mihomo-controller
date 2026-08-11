@@ -492,9 +492,12 @@ async function setClientRulesInConfig(ipsInput, targetGroup) {
     const isIpv6 = targetIp.includes(':');
     const mask = isIpv6 ? '/128' : '/32';
     
-    // Удаляем все старые правила для данного IP
+    // Удаляем все старые правила для данного IP (включая старые IPv6)
     lines = lines.filter(l => !(l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/128,`)));
     
+    // Новые правила пишем только для IPv4 (избегаем застревания динамических Privacy IPv6 смартфона в DIRECT)
+    if (isIpv6) continue;
+
     let { startBypassIdx: sb, endBypassIdx: eb, startVpnIdx: sv, endVpnIdx: ev } = findIndices();
     const newRule = `  - SRC-IP-CIDR,${targetIp}${mask},${targetGroup}`;
 
@@ -550,9 +553,7 @@ async function setClientGroupPreference(ip, group) {
   const activeRules = getClientRulesFromConfig();
   const currentRuleGroup = activeRules.get(ip) || '';
   
-  if (currentRuleGroup !== 'DIRECT') {
-    await setClientRulesInConfig(ips, group);
-  }
+  await setClientRulesInConfig(ips, group);
   
   return true;
 }

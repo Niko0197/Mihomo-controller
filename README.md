@@ -96,6 +96,16 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller
 
 ---
 
+## 🗑️ Удаление
+
+Для полного и чистого удаления панели с роутера выполните команду:
+
+```bash
+sh -c "$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/uninstall.sh)"
+```
+
+---
+
 ## 📄 Лицензия
 
 MIT © 2026

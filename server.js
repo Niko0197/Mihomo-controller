@@ -61,7 +61,7 @@ function makeMihomoRequest(method, endpoint, body = null) {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 60000
+      timeout: 5000
     };
 
     const req = http.request(options, (res) => {
@@ -2234,10 +2234,32 @@ function handlePingProxy(req, res) {
         return;
       }
 
-      // 1. Для DIRECT или REJECT всегда 1ms
-      if (name === 'DIRECT' || name === 'REJECT') {
+      // 1. Для REJECT всегда 0ms (timeout)
+      if (name === 'REJECT') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: 1 }));
+        res.end(JSON.stringify({ success: true, delay: 0 }));
+        return;
+      }
+
+      // 2. Для DIRECT / direct / custom_direct замеряем реальный физический пинг прямого интернет-провайдера
+      const lowerName = name.toLowerCase();
+      if (lowerName === 'direct' || lowerName.includes('direct') || lowerName.includes('прямой')) {
+        const start = Date.now();
+        const pingReq = http.get('http://www.gstatic.com/generate_204', { timeout: 3000 }, (pRes) => {
+          pRes.resume();
+          const elapsed = Date.now() - start;
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, delay: elapsed }));
+        });
+        pingReq.on('error', () => {
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, delay: 0 }));
+        });
+        pingReq.on('timeout', () => {
+          pingReq.destroy();
+          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+          res.end(JSON.stringify({ success: true, delay: 0 }));
+        });
         return;
       }
       
@@ -2259,10 +2281,10 @@ function handlePingProxy(req, res) {
       };
 
       const targetPingUrl = servicePingUrls[name] || 'http://www.gstatic.com/generate_204';
-      const timeout = 5000;
+      const timeout = 3000;
       const url = encodeURIComponent(targetPingUrl);
 
-      // 2. Пробуем прямой замер если name — это группа или самостоятельный прокси
+      // 3. Пробуем прямой замер если name — это группа или самостоятельный прокси
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
       
       if (mRes.statusCode === 200) {
@@ -3720,14 +3742,7 @@ const server = http.createServer(async (req, res) => {
     handleApply(req, res);
     return;
   }
-  if (req.method === 'GET' && pathname === '/api/tor-bridges') {
-    handleGetTorBridges(req, res);
-    return;
-  }
-  if (req.method === 'POST' && pathname === '/api/tor-bridges/update') {
-    await handleUpdateTorBridges(req, res);
-    return;
-  }
+
   if (req.method === 'GET' && pathname === '/api/wifi/info') {
     handleGetWifiInfo(req, res);
     return;

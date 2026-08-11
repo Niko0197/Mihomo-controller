@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.5.4">
+  <link rel="stylesheet" href="/app.css?v=1.6.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.5.4" defer></script>
-  <script src="/app_monitoring.js?v=1.5.4" defer></script>
+  <script src="/app.js?v=1.6.0" defer></script>
+  <script src="/app_monitoring.js?v=1.6.0" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -123,7 +123,7 @@
         <div class="nav-section-title">НАСТРОЙКИ</div>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
-        <button class="tab-btn" id="tab-btn-tor" onclick="switchTab('tor')">🌉 Tor мосты</button>
+
         <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
         <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
       </nav>
@@ -158,8 +158,8 @@
           <div class="mode-switcher-container" title="Переключение глобального режима маршрутизации ядра Mihomo">
             <span class="mode-switcher-label">Режим ядра:</span>
             <div class="mode-toggle-group">
-              <button class="mode-btn active" id="mode-btn-rule" onclick="setGlobalMihomoMode('rule')">🛡️ Rule (Маршруты)</button>
-              <button class="mode-btn" id="mode-btn-direct" onclick="setGlobalMihomoMode('direct')">🔌 Direct (Аварийное выкл)</button>
+              <button class="mode-btn active" id="mode-btn-rule" onclick="setGlobalMihomoMode('rule')">🛡️ Rule<span class="mode-btn-full"> (Маршруты)</span></button>
+              <button class="mode-btn" id="mode-btn-direct" onclick="setGlobalMihomoMode('direct')">🔌 Direct<span class="mode-btn-full"> (Авар. выкл)</span></button>
             </div>
           </div>
         </div>
@@ -341,43 +341,7 @@
 
 
 
-    <!-- Вкладка 7: Tor мосты -->
-    <div id="tab-content-tor" class="tab-content">
-      <div class="card">
-        <div class="card-title">
-          <span>🌉 Свежие Tor мосты (из репозитория Delta-Kronecker)</span>
-          <span class="timestamp" id="tor-last-update">Загрузка...</span>
-        </div>
 
-        <div class="controls-row">
-          <div class="search-wrapper" style="max-width: 300px;">
-            <select id="tor-bridge-type" onchange="renderTorBridges()">
-              <option value="obfs4_tested">obfs4 (Проверенные ⚡)</option>
-              <option value="obfs4">obfs4 (Все)</option>
-              <option value="webtunnel_tested">WebTunnel (Проверенные ⚡)</option>
-              <option value="webtunnel">WebTunnel (Все)</option>
-              <option value="vanilla_tested">Vanilla (Проверенные ⚡)</option>
-              <option value="vanilla">Vanilla (Все)</option>
-            </select>
-          </div>
-          <div class="btn-group">
-            <button class="btn" id="btn-tor-force-update">🔄 Обновить с GitHub</button>
-            <button class="btn btn-primary" id="btn-tor-copy">📋 Копировать все мосты</button>
-          </div>
-        </div>
-
-        <div style="position: relative; margin-top: 15px;">
-          <textarea id="tor-bridges-textarea" readonly placeholder="Загрузка мостов..."></textarea>
-        </div>
-        
-        <div style="margin-top: 15px; padding: 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border-color); border-radius: 6px; font-size: 0.85rem; line-height: 1.5; color: var(--text-muted);">
-          💡 <b>Если мосты из списка заблокированы провайдером:</b><br>
-          1. Используйте встроенный <b>Snowflake</b> в настройках Tor Browser (наиболее надежно в РФ, не требует копирования строчек).<br>
-          2. Получите свежие приватные мосты через официальный Telegram-бот: <a href="https://t.me/GetBridgesBot" target="_blank" style="color: #60a5fa; text-decoration: none; font-weight: 500;">@GetBridgesBot</a> (отправьте команду <code>/bridges</code>).<br>
-          3. Запросите мосты по почте: отправьте письмо на <a href="mailto:bridges@torproject.org" style="color: #60a5fa; text-decoration: none; font-weight: 500;">bridges@torproject.org</a> с почты Gmail или Riseup с текстом <code>get bridges</code> в теле письма.
-        </div>
-      </div>
-    </div>
 
     <!-- Вкладка 8: График трафика -->
     <div id="tab-content-traffic" class="tab-content">
