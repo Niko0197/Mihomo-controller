@@ -1629,7 +1629,6 @@ function renderProxyGroups(proxiesData) {
     const delayText = resolvedActiveDelay > 0 ? `${resolvedActiveDelay} ms` : '—';
 
     // --- Header ---
-    const systemGroupNames = ['GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', 'Auto-Best', 'Manual 1', 'Manual 2', 'Manual 3'];
     const providerMapping = {
       '💎 StealthSurf': 'stealthsurf',
       '💎 StealthSurf 2': 'StealthSurf2',
@@ -1638,18 +1637,14 @@ function renderProxyGroups(proxiesData) {
     
     let providerToUpdate = null;
 
-    if (!systemGroupNames.includes(group.name)) {
-      if (providerMapping[group.name]) {
-        providerToUpdate = providerMapping[group.name];
-      } else if (proxyDashboardData && proxyDashboardData.providers) {
+    if (providerMapping[group.name]) {
+      providerToUpdate = providerMapping[group.name];
+    } else if (group.name.startsWith('⚡ ')) {
+      const candidateName = group.name.substring(2).trim();
+      if (proxyDashboardData && proxyDashboardData.providers) {
         const allProviders = proxyDashboardData.providers.providers || {};
-        for (const [provName, provObj] of Object.entries(allProviders)) {
-          if (provName === 'default') continue;
-          const cleanGroupName = group.name.replace(/^⚡\s*/, '').trim();
-          if (cleanGroupName === provName || group.name === `⚡ ${provName}`) {
-            providerToUpdate = provName;
-            break;
-          }
+        if (allProviders[candidateName]) {
+          providerToUpdate = candidateName;
         }
       }
     }
