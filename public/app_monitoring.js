@@ -1397,9 +1397,22 @@ function switchProxySubtab(subtab) {
 }
 window.switchProxySubtab = switchProxySubtab;
 
+let directClientCachedDelay = 0;
+
 function getLastDelay(proxy) {
-  if (!proxy || !proxy.history || proxy.history.length === 0) return 0;
-  return proxy.history[proxy.history.length - 1].delay || 0;
+  if (!proxy) return 0;
+  const isDirectNode = proxy.name === 'DIRECT' || proxy.name === 'direct';
+  if (proxy.history && proxy.history.length > 0) {
+    const d = proxy.history[proxy.history.length - 1].delay || 0;
+    if (d > 0) {
+      if (isDirectNode) directClientCachedDelay = d;
+      return d;
+    }
+  }
+  if (isDirectNode && directClientCachedDelay > 0) {
+    return directClientCachedDelay;
+  }
+  return 0;
 }
 
 function resolveSelectedProxyDelay(proxyName, proxies) {
@@ -1440,6 +1453,9 @@ async function pingProxyNode(nodeName) {
     const data = await res.json();
     if (data.success && data.delay > 0) {
       showToast(`✅ Пинг ${nodeName}: ${data.delay} ms`, 'success');
+      if (nodeName === 'DIRECT' || nodeName === 'direct') {
+        directClientCachedDelay = data.delay;
+      }
     } else {
       showToast(`❌ Пинг ${nodeName}: таймаут или ошибка`, 'error');
     }
@@ -2163,6 +2179,15 @@ async function healthcheckAllGroups() {
     const providers = data.providers || {};
 
     const tasks = [];
+    tasks.push(
+      fetch('/api/proxies/ping', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: 'DIRECT' })
+      }).then(r => r.json()).then(d => {
+        if (d.success && d.delay > 0) directClientCachedDelay = d.delay;
+      }).catch(() => {})
+    );
     for (const [name, prov] of Object.entries(providers)) {
       if (prov.vehicleType !== 'Compatible' && name !== 'default') {
         tasks.push(

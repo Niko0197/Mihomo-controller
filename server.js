@@ -12,6 +12,7 @@ const API_PORT = 9090;
 const API_HOST = '192.168.1.1';
 const configPath = '/opt/etc/mihomo/config.yaml';
 const logRuPath = path.join(__dirname, 'log_ru.txt');
+let directCachedDelay = 0;
 // Автоматическая ротация текстовых логов (защита флеш-памяти роутера, макс 500 КБ)
 function rotateLogFile(filePath, maxBytes = 500 * 1024) {
   try {
@@ -2248,17 +2249,18 @@ function handlePingProxy(req, res) {
         const pingReq = http.get('http://www.gstatic.com/generate_204', { timeout: 3000 }, (pRes) => {
           pRes.resume();
           const elapsed = Date.now() - start;
+          directCachedDelay = elapsed;
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({ success: true, delay: elapsed }));
         });
         pingReq.on('error', () => {
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: 0 }));
+          res.end(JSON.stringify({ success: true, delay: directCachedDelay || 0 }));
         });
         pingReq.on('timeout', () => {
           pingReq.destroy();
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: 0 }));
+          res.end(JSON.stringify({ success: true, delay: directCachedDelay || 0 }));
         });
         return;
       }
@@ -3166,8 +3168,25 @@ function triggerSelfRestart() {
 async function handleGetXkeenProxies(req, res) {
   try {
     const mRes = await makeMihomoRequest('GET', '/proxies');
+    let dataStr = mRes.data;
+    try {
+      const parsed = JSON.parse(mRes.data);
+      if (parsed && parsed.proxies) {
+        const directProxy = parsed.proxies['DIRECT'] || parsed.proxies['direct'];
+        if (directProxy) {
+          const hasHistory = directProxy.history && directProxy.history.length > 0 && directProxy.history[directProxy.history.length - 1].delay > 0;
+          if (hasHistory) {
+            directCachedDelay = directProxy.history[directProxy.history.length - 1].delay;
+          } else if (directCachedDelay > 0) {
+            directProxy.history = [{ time: new Date().toISOString(), delay: directCachedDelay }];
+          }
+        }
+        dataStr = JSON.stringify(parsed);
+      }
+    } catch (e) {}
+
     res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(mRes.data);
+    res.end(dataStr);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
