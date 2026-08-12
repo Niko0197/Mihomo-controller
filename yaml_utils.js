@@ -675,9 +675,12 @@ function syncAllProviderGroupsInConfig(yamlText) {
         const groupCardName = `⚡ ${providerName}`;
         const newGroupLines = [
           `  - name: '${groupCardName}'`,
-          `    type: select`,
+          `    type: url-test`,
           `    use:`,
           `      - ${providerName}`,
+          `    url: http://cp.cloudflare.com/generate_204`,
+          `    interval: 300`,
+          `    tolerance: 50`,
           ``
         ];
         lines.splice(groupsIndex + 1, 0, ...newGroupLines);
@@ -752,9 +755,12 @@ function ensureProviderGroupInLines(lines, providerName) {
       const groupCardName = `⚡ ${providerName}`;
       const newGroupLines = [
         `  - name: '${groupCardName}'`,
-        `    type: select`,
+        `    type: url-test`,
         `    use:`,
         `      - ${providerName}`,
+        `    url: http://cp.cloudflare.com/generate_204`,
+        `    interval: 300`,
+        `    tolerance: 50`,
         ``
       ];
       lines.splice(groupsIndex + 1, 0, ...newGroupLines);

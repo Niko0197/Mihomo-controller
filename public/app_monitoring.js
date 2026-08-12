@@ -1634,7 +1634,17 @@ function renderProxyGroups(proxiesData) {
       '💎 StealthSurf 2': 'StealthSurf2',
       '🎱 GitHub': 'Igareck_Black_VPN'
     };
-    const providerToUpdate = providerMapping[group.name];
+    let providerToUpdate = providerMapping[group.name];
+    if (!providerToUpdate && proxyDashboardData && proxyDashboardData.providers) {
+      const allProviders = proxyDashboardData.providers.providers || {};
+      for (const [provName, provObj] of Object.entries(allProviders)) {
+        if (provName === 'default') continue;
+        if (group.name.includes(provName) || (group.use && Array.isArray(group.use) && group.use.includes(provName))) {
+          providerToUpdate = provName;
+          break;
+        }
+      }
+    }
 
     const header = document.createElement('div');
     header.className = 'pgc-header';
