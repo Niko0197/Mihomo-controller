@@ -1646,7 +1646,7 @@ function renderProxyGroups(proxiesData) {
         for (const [provName, provObj] of Object.entries(allProviders)) {
           if (provName === 'default') continue;
           const cleanGroupName = group.name.replace(/^⚡\s*/, '').trim();
-          if (cleanGroupName === provName || group.name.includes(provName)) {
+          if (cleanGroupName === provName || group.name === `⚡ ${provName}`) {
             providerToUpdate = provName;
             break;
           }
@@ -1664,7 +1664,7 @@ function renderProxyGroups(proxiesData) {
       </div>
       <div class="pgc-header-right">
         ${providerToUpdate ? `<button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${providerToUpdate}')">🔄</button>` : ''}
-        <button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга" onclick="event.stopPropagation();${providerToUpdate ? `healthcheckProvider('${providerToUpdate}')` : `healthcheckGroup('${group.name.replace(/'/g, "\\'")}')`}">⚡</button>
+        ${providerToUpdate ? `<button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга подписки" onclick="event.stopPropagation();healthcheckProvider('${providerToUpdate}')">⚡</button>` : ''}
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
         <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
