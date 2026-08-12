@@ -1874,6 +1874,8 @@ function handleAddProvider(req, res) {
   req.on('end', async () => {
     const backupPath = configPath + '.tmp_bak';
     try {
+      const payload = JSON.parse(body);
+      const { name, url, interval, groups } = payload;
       const parsedInterval = parseInt(interval, 10);
       const finalInterval = isNaN(parsedInterval) || parsedInterval <= 0 ? 3600 : parsedInterval;
       
