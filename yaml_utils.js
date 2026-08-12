@@ -607,34 +607,67 @@ function cleanupEmptyGroupsInLines(lines) {
   }
 }
 
-// Автоматическая синхронизация собственных прокси-групп для ВСЕХ подписок
+// Автоматическая синхронизация собственных прокси-групп для ВСЕХ подписок без дубликатов
 function syncAllProviderGroupsInConfig(yamlText) {
   const providers = getProxyProvidersFromConfig(yamlText);
   let lines = yamlText.split(/\r?\n/);
   
+  const ignoreGroupNames = ['GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3'];
+
   providers.forEach(p => {
     const providerName = p.name;
-    let inProxyGroups = false;
     let hasGroup = false;
 
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i];
-      const trimmed = line.trim();
-      if (trimmed === 'proxy-groups:') {
-        inProxyGroups = true;
-        continue;
-      }
-      if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
-        break;
-      }
-      if (inProxyGroups && trimmed.startsWith('- name:')) {
-        const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
-        if (gName === providerName || gName === `💎 ${providerName}` || gName === `🎱 ${providerName}` || gName === `⚡ ${providerName}` || gName === `🌐 ${providerName}`) {
+    let inProxyGroups = false;
+    let currentGroupName = '';
+    let groupUses = [];
+
+    const checkCurrentGroup = () => {
+      if (currentGroupName && !ignoreGroupNames.includes(currentGroupName)) {
+        if (groupUses.length === 1 && groupUses[0] === providerName) {
           hasGroup = true;
-          break;
         }
       }
+    };
+
+    let idx = 0;
+    while (idx < lines.length) {
+      const line = lines[idx];
+      const trimmed = line.trim();
+
+      if (trimmed === 'proxy-groups:') {
+        inProxyGroups = true;
+        idx++;
+        continue;
+      }
+
+      if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        checkCurrentGroup();
+        inProxyGroups = false;
+      }
+
+      if (inProxyGroups) {
+        if (trimmed.startsWith('- name:')) {
+          checkCurrentGroup();
+          currentGroupName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+          groupUses = [];
+        } else if (trimmed.startsWith('use:')) {
+          let j = idx + 1;
+          while (j < lines.length) {
+            const uLine = lines[j].trim();
+            if (uLine.startsWith('-')) {
+              const uName = uLine.substring(1).trim().replace(/['"]/g, '');
+              groupUses.push(uName);
+            } else {
+              break;
+            }
+            j++;
+          }
+        }
+      }
+      idx++;
     }
+    checkCurrentGroup();
 
     if (!hasGroup) {
       const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
@@ -660,27 +693,58 @@ function syncAllProviderGroupsInConfig(yamlText) {
 }
 
 function ensureProviderGroupInLines(lines, providerName) {
-  let inProxyGroups = false;
+  const ignoreGroupNames = ['GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3'];
   let hasGroup = false;
+  let inProxyGroups = false;
+  let currentGroupName = '';
+  let groupUses = [];
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    const trimmed = line.trim();
-    if (trimmed === 'proxy-groups:') {
-      inProxyGroups = true;
-      continue;
-    }
-    if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
-      break;
-    }
-    if (inProxyGroups && trimmed.startsWith('- name:')) {
-      const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
-      if (gName === providerName || gName === `💎 ${providerName}` || gName === `🎱 ${providerName}` || gName === `⚡ ${providerName}` || gName === `🌐 ${providerName}`) {
+  const checkCurrentGroup = () => {
+    if (currentGroupName && !ignoreGroupNames.includes(currentGroupName)) {
+      if (groupUses.length === 1 && groupUses[0] === providerName) {
         hasGroup = true;
-        break;
       }
     }
+  };
+
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inProxyGroups = true;
+      idx++;
+      continue;
+    }
+
+    if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+      checkCurrentGroup();
+      inProxyGroups = false;
+    }
+
+    if (inProxyGroups) {
+      if (trimmed.startsWith('- name:')) {
+        checkCurrentGroup();
+        currentGroupName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+        groupUses = [];
+      } else if (trimmed.startsWith('use:')) {
+        let j = idx + 1;
+        while (j < lines.length) {
+          const uLine = lines[j].trim();
+          if (uLine.startsWith('-')) {
+            const uName = uLine.substring(1).trim().replace(/['"]/g, '');
+            groupUses.push(uName);
+          } else {
+            break;
+          }
+          j++;
+        }
+      }
+    }
+    idx++;
   }
+  checkCurrentGroup();
 
   if (!hasGroup) {
     const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
