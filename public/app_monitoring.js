@@ -1548,8 +1548,9 @@ function renderProxyGroups(proxiesData) {
   }
 
   // Сортировка групп в нужном порядке:
-  // 1 ряд: Auto-Best, Manual 1, Manual 2, StealthSurf
-  // 2 ряд и далее: StealthSurf 2, затем сервисы (Zoom, GitHub и др.) по алфавиту
+  // 1 ряд: Auto-Best, Manual 1, Manual 2, Manual 3
+  // 2 ряд: Подписки (StealthSurf, GitHub, Пробка 3 дня и др.)
+  // 3 ряд: сервисы (Google, TikTok, YouTube и др.) по алфавиту
   const priorityOrder = [
     '🚀Auto-Best',
     '⚙️Manual 1',
@@ -1558,9 +1559,7 @@ function renderProxyGroups(proxiesData) {
     '💎 StealthSurf',
     '💎 StealthSurf 2',
     '🎱 GitHub',
-    'Google',
-    'TikTok',
-    'YouTube'
+    '⚡ Пробка 3 дня'
   ];
 
   groups.sort((a, b) => {
@@ -1573,6 +1572,13 @@ function renderProxyGroups(proxiesData) {
     if (idxA !== -1) return -1;
     if (idxB !== -1) return 1;
     
+    // Подписки с иконками ⚡, 💎, 🎱 поднимаем выше сервисов
+    const isSubA = a.name.startsWith('⚡') || a.name.startsWith('💎') || a.name.startsWith('🎱');
+    const isSubB = b.name.startsWith('⚡') || b.name.startsWith('💎') || b.name.startsWith('🎱');
+
+    if (isSubA && !isSubB) return -1;
+    if (!isSubA && isSubB) return 1;
+
     return a.name.localeCompare(b.name);
   });
 

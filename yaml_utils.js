@@ -624,7 +624,7 @@ function syncAllProviderGroupsInConfig(yamlText) {
 
     const checkCurrentGroup = () => {
       if (currentGroupName && !ignoreGroupNames.includes(currentGroupName)) {
-        if (groupUses.length === 1 && groupUses[0] === providerName) {
+        if (groupUses.includes(providerName)) {
           hasGroup = true;
         }
       }
@@ -701,7 +701,7 @@ function ensureProviderGroupInLines(lines, providerName) {
 
   const checkCurrentGroup = () => {
     if (currentGroupName && !ignoreGroupNames.includes(currentGroupName)) {
-      if (groupUses.length === 1 && groupUses[0] === providerName) {
+      if (groupUses.includes(providerName)) {
         hasGroup = true;
       }
     }

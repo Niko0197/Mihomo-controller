@@ -1832,12 +1832,6 @@ async function handleGetProviders(req, res) {
     let yamlText = '';
     if (fs.existsSync(configPath)) {
       yamlText = fs.readFileSync(configPath, 'utf8');
-      const syncedYaml = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
-      if (syncedYaml !== yamlText) {
-        fs.writeFileSync(configPath, syncedYaml, 'utf8');
-        yamlText = syncedYaml;
-        makeMihomoRequest('PUT', '/configs', { path: configPath }).catch(() => {});
-      }
     }
     const providers = yamlUtils.getProxyProvidersFromConfig(yamlText);
     
@@ -4452,6 +4446,7 @@ function startServer(attempt) {
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log('[VPN Web Controller] Сервер успешно запущен по адресу http://0.0.0.0:' + PORT + '/');
+    makeMihomoRequest('PUT', '/configs', { path: configPath }).catch(() => {});
   });
 
   server.once('error', (err) => {
