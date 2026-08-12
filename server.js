@@ -1832,6 +1832,12 @@ async function handleGetProviders(req, res) {
     let yamlText = '';
     if (fs.existsSync(configPath)) {
       yamlText = fs.readFileSync(configPath, 'utf8');
+      const syncedYaml = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
+      if (syncedYaml !== yamlText) {
+        fs.writeFileSync(configPath, syncedYaml, 'utf8');
+        yamlText = syncedYaml;
+        makeMihomoRequest('PUT', '/configs', { path: configPath }).catch(() => {});
+      }
     }
     const providers = yamlUtils.getProxyProvidersFromConfig(yamlText);
     

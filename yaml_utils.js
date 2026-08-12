@@ -607,7 +607,58 @@ function cleanupEmptyGroupsInLines(lines) {
   }
 }
 
-// Автоматическое создание собственной прокси-группы для провайдера подписки
+// Автоматическая синхронизация собственных прокси-групп для ВСЕХ подписок
+function syncAllProviderGroupsInConfig(yamlText) {
+  const providers = getProxyProvidersFromConfig(yamlText);
+  let lines = yamlText.split(/\r?\n/);
+  
+  providers.forEach(p => {
+    const providerName = p.name;
+    let inProxyGroups = false;
+    let hasGroup = false;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      if (trimmed === 'proxy-groups:') {
+        inProxyGroups = true;
+        continue;
+      }
+      if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        break;
+      }
+      if (inProxyGroups && trimmed.startsWith('- name:')) {
+        const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+        if (gName === providerName || gName === `💎 ${providerName}` || gName === `🎱 ${providerName}` || gName === `⚡ ${providerName}` || gName === `🌐 ${providerName}`) {
+          hasGroup = true;
+          break;
+        }
+      }
+    }
+
+    if (!hasGroup) {
+      const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
+      if (groupsIndex !== -1) {
+        const groupCardName = `⚡ ${providerName}`;
+        const newGroupLines = [
+          `  - name: '${groupCardName}'`,
+          `    type: select`,
+          `    use:`,
+          `      - ${providerName}`,
+          ``
+        ];
+        lines.splice(groupsIndex + 1, 0, ...newGroupLines);
+        
+        // Внедряем карточку группы в GLOBAL и подписку в Auto-Best
+        injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
+        addUseToGroupInLines(lines, '🚀Auto-Best', providerName);
+      }
+    }
+  });
+
+  return lines.join('\n');
+}
+
 function ensureProviderGroupInLines(lines, providerName) {
   let inProxyGroups = false;
   let hasGroup = false;
@@ -624,7 +675,7 @@ function ensureProviderGroupInLines(lines, providerName) {
     }
     if (inProxyGroups && trimmed.startsWith('- name:')) {
       const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
-      if (gName === providerName || gName === `💎 ${providerName}` || gName === `🌐 ${providerName}`) {
+      if (gName === providerName || gName === `💎 ${providerName}` || gName === `🎱 ${providerName}` || gName === `⚡ ${providerName}` || gName === `🌐 ${providerName}`) {
         hasGroup = true;
         break;
       }
@@ -634,14 +685,16 @@ function ensureProviderGroupInLines(lines, providerName) {
   if (!hasGroup) {
     const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
     if (groupsIndex !== -1) {
+      const groupCardName = `⚡ ${providerName}`;
       const newGroupLines = [
-        `  - name: 🌐 ${providerName}`,
+        `  - name: '${groupCardName}'`,
         `    type: select`,
         `    use:`,
         `      - ${providerName}`,
         ``
       ];
       lines.splice(groupsIndex + 1, 0, ...newGroupLines);
+      injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
     }
   }
 }
@@ -782,5 +835,6 @@ module.exports = {
   removeUseFromGroupsInLines,
   cleanupEmptyGroupsInLines,
   ensureProviderGroupInLines,
+  syncAllProviderGroupsInConfig,
   reorderProvidersInConfig
 };
