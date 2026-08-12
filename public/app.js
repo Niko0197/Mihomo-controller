@@ -744,12 +744,13 @@ function hideAddSubModal() {
 async function saveSubscription() {
   const name = document.getElementById('sub-name').value.trim();
   const url = document.getElementById('sub-url').value.trim();
-  const interval = parseInt(document.getElementById('sub-interval').value.trim(), 10);
+  const rawInterval = document.getElementById('sub-interval').value.trim();
+  const interval = rawInterval ? (parseInt(rawInterval, 10) || 3600) : 3600;
   const oldName = document.getElementById('edit-sub-old-name').value;
   const btn = document.getElementById('btn-save-sub');
   
-  if (!name || !url || isNaN(interval)) {
-    showToast('Пожалуйста, заполните все поля корректно!', 'error');
+  if (!name || !url) {
+    showToast('Пожалуйста, укажите название и ссылку на подписку!', 'error');
     return;
   }
   

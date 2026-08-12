@@ -329,12 +329,13 @@ function addProviderToConfig(yamlText, name, url, interval) {
     `  ${name}:`,
     `    type: http`,
     `    url: "${url}"`,
-    `    interval: ${interval}`,
+    `    interval: ${interval || 3600}`,
     `    path: ./proxy_providers/${name.toLowerCase()}.yaml`,
     `    health-check:`,
     `      enable: true`,
-    `      url: http://www.gstatic.com/generate_204`,
-    `      interval: 300`
+    `      url: http://cp.cloudflare.com/generate_204`,
+    `      interval: 300`,
+    `      tolerance: 50`
   ];
   
   lines.splice(providersIndex + 1, 0, ...providerYaml);

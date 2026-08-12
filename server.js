@@ -1874,19 +1874,19 @@ function handleAddProvider(req, res) {
   req.on('end', async () => {
     const backupPath = configPath + '.tmp_bak';
     try {
-      const payload = JSON.parse(body);
-      const { name, url, interval, groups } = payload;
+      const parsedInterval = parseInt(interval, 10);
+      const finalInterval = isNaN(parsedInterval) || parsedInterval <= 0 ? 3600 : parsedInterval;
       
-      if (!name || !url || isNaN(interval)) {
+      if (!name || !url) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ success: false, message: 'Неполные параметры' }));
+        res.end(JSON.stringify({ success: false, message: 'Укажите название и URL подписки' }));
         return;
       }
       
       fs.copyFileSync(configPath, backupPath);
       
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.addProviderToConfig(yamlText, name, url, interval);
+      yamlText = yamlUtils.addProviderToConfig(yamlText, name, url, finalInterval);
       
       let lines = yamlText.split(/\r?\n/);
       

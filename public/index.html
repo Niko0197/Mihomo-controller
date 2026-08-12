@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.6.10">
+  <link rel="stylesheet" href="/app.css?v=1.6.11">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.6.10" defer></script>
-  <script src="/app_monitoring.js?v=1.6.10" defer></script>
+  <script src="/app.js?v=1.6.11" defer></script>
+  <script src="/app_monitoring.js?v=1.6.11" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -289,16 +289,19 @@
         
         <!-- Форма добавления/редактирования подписки (скрыта по умолчанию) -->
         <div id="add-sub-modal" style="display: none;">
-          <h3 style="font-family: var(--font-outfit); margin-bottom: 15px;" id="sub-modal-title">Добавить новую подписку</h3>
+          <h3 style="font-family: var(--font-outfit); margin-bottom: 10px;" id="sub-modal-title">Добавить новую подписку</h3>
+          <p style="font-size: 0.85rem; color: #a0aec0; margin-bottom: 15px;">
+            💡 Поддерживаются любые подписки: ссылки на YAML, Base64 и **прямые .txt файлы со списками vless/vmess/trojan** (например с GitHub). Подписка автоматически получит авто-группу <span style="color: #48bb78; font-weight: 600;">URLTest</span> с 1-часовым обновлением и исключит нерабочие ноды.
+          </p>
           <input type="hidden" id="edit-sub-old-name">
           <div class="sub-grid-container">
             <div>
               <label class="modal-label">Название подписки (латиницей, без пробелов)</label>
-              <input type="text" id="sub-name" class="search-input" placeholder="например: custom_sub">
+              <input type="text" id="sub-name" class="search-input" placeholder="например: goida_vpn">
             </div>
             <div>
-              <label class="modal-label">Ссылка на подписку (URL)</label>
-              <input type="text" id="sub-url" class="search-input" placeholder="https://...">
+              <label class="modal-label">Ссылка на подписку (URL или .txt)</label>
+              <input type="text" id="sub-url" class="search-input" placeholder="https://... или https://.../1.txt">
             </div>
             <div>
               <label class="modal-label">Интервал обновления (в секундах)</label>
