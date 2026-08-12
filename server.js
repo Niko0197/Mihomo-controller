@@ -52,7 +52,7 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 // Вспомогательная функция для выполнения HTTP-запросов к API Mihomo
-function makeMihomoRequest(method, endpoint, body = null) {
+function makeMihomoRequest(method, endpoint, body = null, timeoutMs = 5000) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: API_HOST,
@@ -62,7 +62,7 @@ function makeMihomoRequest(method, endpoint, body = null) {
       headers: {
         'Content-Type': 'application/json',
       },
-      timeout: 5000
+      timeout: timeoutMs
     };
 
     const req = http.request(options, (res) => {
@@ -3287,7 +3287,7 @@ async function handleGetXkeenProviders(req, res) {
 // GET /api/xkeen/providers/:name/healthcheck
 async function handleGetXkeenProviderHealth(req, res, name) {
   try {
-    const mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(name) + '/healthcheck');
+    const mRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(name) + '/healthcheck', null, 25000);
     res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(mRes.data);
   } catch (err) {

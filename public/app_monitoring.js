@@ -1540,7 +1540,9 @@ function renderProxyGroups(proxiesData) {
 
   for (const [name, proxy] of Object.entries(proxies)) {
     if (excludeNames.includes(name)) continue;
-    if (proxy.all && Array.isArray(proxy.all)) {
+    const pType = (proxy.type || '').toLowerCase();
+    const isGroupType = ['selector', 'fallback', 'urltest', 'url-test', 'loadbalance', 'load-balance', 'relay'].includes(pType);
+    if ((proxy.all && Array.isArray(proxy.all)) || isGroupType) {
       groups.push({ name, ...proxy });
     }
   }
