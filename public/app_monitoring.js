@@ -1629,19 +1629,27 @@ function renderProxyGroups(proxiesData) {
     const delayText = resolvedActiveDelay > 0 ? `${resolvedActiveDelay} ms` : '—';
 
     // --- Header ---
+    const systemGroupNames = ['GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', 'Auto-Best', 'Manual 1', 'Manual 2', 'Manual 3'];
     const providerMapping = {
       '💎 StealthSurf': 'stealthsurf',
       '💎 StealthSurf 2': 'StealthSurf2',
       '🎱 GitHub': 'Igareck_Black_VPN'
     };
-    let providerToUpdate = providerMapping[group.name];
-    if (!providerToUpdate && proxyDashboardData && proxyDashboardData.providers) {
-      const allProviders = proxyDashboardData.providers.providers || {};
-      for (const [provName, provObj] of Object.entries(allProviders)) {
-        if (provName === 'default') continue;
-        if (group.name.includes(provName) || (group.use && Array.isArray(group.use) && group.use.includes(provName))) {
-          providerToUpdate = provName;
-          break;
+    
+    let providerToUpdate = null;
+
+    if (!systemGroupNames.includes(group.name)) {
+      if (providerMapping[group.name]) {
+        providerToUpdate = providerMapping[group.name];
+      } else if (proxyDashboardData && proxyDashboardData.providers) {
+        const allProviders = proxyDashboardData.providers.providers || {};
+        for (const [provName, provObj] of Object.entries(allProviders)) {
+          if (provName === 'default') continue;
+          const cleanGroupName = group.name.replace(/^⚡\s*/, '').trim();
+          if (cleanGroupName === provName || group.name.includes(provName)) {
+            providerToUpdate = provName;
+            break;
+          }
         }
       }
     }
@@ -1656,7 +1664,7 @@ function renderProxyGroups(proxiesData) {
       </div>
       <div class="pgc-header-right">
         ${providerToUpdate ? `<button class="pgc-hc-btn" title="Обновить подписку" onclick="event.stopPropagation();updateProviderSub('${providerToUpdate}')">🔄</button>` : ''}
-        ${providerToUpdate ? `<button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга подписки" onclick="event.stopPropagation();healthcheckProvider('${providerToUpdate}')">⚡</button>` : ''}
+        <button class="pgc-hc-btn pgc-hc-bolt" title="Тест пинга" onclick="event.stopPropagation();${providerToUpdate ? `healthcheckProvider('${providerToUpdate}')` : `healthcheckGroup('${group.name.replace(/'/g, "\\'")}')`}">⚡</button>
         <span class="pgc-count-badge" style="color: ${getLatencyColor(resolvedActiveDelay)}; background: ${getLatencyBgColor(resolvedActiveDelay)}">${delayText}</span>
         <span class="pgc-toggle-arrow ${isCollapsed ? '' : 'rotated'}">▸</span>
       </div>
