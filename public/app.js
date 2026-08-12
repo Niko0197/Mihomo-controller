@@ -494,9 +494,34 @@ document.getElementById('btn-import-links').onclick = async function() {
 };
 
 // === ФУНКЦИОНАЛ МЕНЕДЖЕРА ПОДПИСОК ===
+async function moveSubPriority(list, index, direction) {
+  const names = list.map(s => s.name);
+  const targetIndex = index + direction;
+  if (targetIndex < 0 || targetIndex >= names.length) return;
+  
+  const temp = names[index];
+  names[index] = names[targetIndex];
+  names[targetIndex] = temp;
+  
+  try {
+    showToast('⏳ Сохранение нового приоритета подписок...');
+    const res = await fetch('/api/providers/reorder', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order: names })
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) throw new Error(data.message || 'Ошибка изменения порядка');
+    showToast('✅ Приоритет подписок сохранён!');
+    loadSubscriptions();
+  } catch (e) {
+    showToast(e.message, 'error');
+  }
+}
+
 async function loadSubscriptions() {
   const tbody = document.getElementById('subs-list');
-  tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;">Загрузка списка подписок...</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;">Загрузка списка подписок...</td></tr>';
   
   try {
     const res = await fetch('/api/providers');
@@ -507,12 +532,40 @@ async function loadSubscriptions() {
     
     tbody.innerHTML = '';
     if (list.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="6" style="text-align:center;color:var(--text-muted);">Нет настроенных подписок</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;color:var(--text-muted);">Нет настроенных подписок</td></tr>';
       return;
     }
     
-    list.forEach(sub => {
+    list.forEach((sub, idx) => {
       const tr = document.createElement('tr');
+
+      // Кнопки приоритета (вверх / вниз)
+      const tdPriority = document.createElement('td');
+      tdPriority.style.whiteSpace = 'nowrap';
+      tdPriority.style.width = '70px';
+      tdPriority.style.textAlign = 'center';
+
+      const btnUp = document.createElement('button');
+      btnUp.className = 'btn';
+      btnUp.style.padding = '3px 6px';
+      btnUp.style.fontSize = '0.8rem';
+      btnUp.style.marginRight = '3px';
+      btnUp.textContent = '⬆️';
+      btnUp.disabled = idx === 0;
+      btnUp.title = 'Повысить приоритет подписки';
+      btnUp.onclick = () => moveSubPriority(list, idx, -1);
+
+      const btnDown = document.createElement('button');
+      btnDown.className = 'btn';
+      btnDown.style.padding = '3px 6px';
+      btnDown.style.fontSize = '0.8rem';
+      btnDown.textContent = '⬇️';
+      btnDown.disabled = idx === list.length - 1;
+      btnDown.title = 'Понизить приоритет подписки';
+      btnDown.onclick = () => moveSubPriority(list, idx, 1);
+
+      tdPriority.appendChild(btnUp);
+      tdPriority.appendChild(btnDown);
       
       const tdName = document.createElement('td');
       tdName.style.fontWeight = '600';
@@ -616,6 +669,7 @@ async function loadSubscriptions() {
       tdActions.appendChild(btnEdit);
       tdActions.appendChild(btnDel);
       
+      tr.appendChild(tdPriority);
       tr.appendChild(tdName);
       tr.appendChild(tdUrl);
       tr.appendChild(tdInterval);

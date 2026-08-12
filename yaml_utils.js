@@ -607,6 +607,168 @@ function cleanupEmptyGroupsInLines(lines) {
   }
 }
 
+// Автоматическое создание собственной прокси-группы для провайдера подписки
+function ensureProviderGroupInLines(lines, providerName) {
+  let inProxyGroups = false;
+  let hasGroup = false;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === 'proxy-groups:') {
+      inProxyGroups = true;
+      continue;
+    }
+    if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+      break;
+    }
+    if (inProxyGroups && trimmed.startsWith('- name:')) {
+      const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+      if (gName === providerName || gName === `💎 ${providerName}` || gName === `🌐 ${providerName}`) {
+        hasGroup = true;
+        break;
+      }
+    }
+  }
+
+  if (!hasGroup) {
+    const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
+    if (groupsIndex !== -1) {
+      const newGroupLines = [
+        `  - name: 🌐 ${providerName}`,
+        `    type: select`,
+        `    use:`,
+        `      - ${providerName}`,
+        ``
+      ];
+      lines.splice(groupsIndex + 1, 0, ...newGroupLines);
+    }
+  }
+}
+
+// Переупорядочивание подписок (proxy-providers) и их вызовов (use:) во всех группах
+function reorderProvidersInConfig(yamlText, orderNames) {
+  const lines = yamlText.split(/\r?\n/);
+  
+  // 1. Извлекаем текущие блоки proxy-providers
+  let inProviders = false;
+  let providerBlocks = {};
+  let currentProv = null;
+  let currentLines = [];
+  let providersStartIndex = -1;
+  let providersEndIndex = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-providers:') {
+      inProviders = true;
+      providersStartIndex = i;
+      continue;
+    }
+
+    if (inProviders) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        providersEndIndex = i;
+        if (currentProv) providerBlocks[currentProv] = currentLines;
+        inProviders = false;
+        break;
+      }
+
+      if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
+        if (currentProv) providerBlocks[currentProv] = currentLines;
+        currentProv = trimmed.slice(0, -1).trim();
+        currentLines = [line];
+        continue;
+      }
+
+      if (currentProv) {
+        currentLines.push(line);
+      }
+    }
+  }
+
+  if (inProviders && currentProv) {
+    providerBlocks[currentProv] = currentLines;
+    if (providersEndIndex === -1) providersEndIndex = lines.length;
+  }
+
+  if (providersStartIndex !== -1 && Object.keys(providerBlocks).length > 0) {
+    let newProviderLines = [];
+    orderNames.forEach(name => {
+      if (providerBlocks[name]) {
+        newProviderLines.push(...providerBlocks[name]);
+        delete providerBlocks[name];
+      }
+    });
+    Object.values(providerBlocks).forEach(blk => newProviderLines.push(...blk));
+
+    lines.splice(providersStartIndex + 1, providersEndIndex - (providersStartIndex + 1), ...newProviderLines);
+  }
+
+  // 2. Сортируем списки use: во всех прокси-группах в соответствии с orderNames
+  let inProxyGroups = false;
+  let inUse = false;
+  let useStartIndex = -1;
+  let useItems = [];
+
+  const flushUseSort = () => {
+    if (useStartIndex !== -1 && useItems.length > 0) {
+      useItems.sort((a, b) => {
+        const idxA = orderNames.indexOf(a.name);
+        const idxB = orderNames.indexOf(b.name);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return 0;
+      });
+      const sortedLines = useItems.map(item => item.line);
+      lines.splice(useStartIndex, useItems.length, ...sortedLines);
+    }
+    useStartIndex = -1;
+    useItems = [];
+  };
+
+  let idx = 0;
+  while (idx < lines.length) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inProxyGroups = true;
+      idx++;
+      continue;
+    }
+
+    if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+      flushUseSort();
+      inProxyGroups = false;
+    }
+
+    if (inProxyGroups) {
+      if (trimmed.startsWith('- name:')) {
+        flushUseSort();
+        inUse = false;
+      } else if (trimmed.startsWith('use:')) {
+        flushUseSort();
+        inUse = true;
+        useStartIndex = idx + 1;
+      } else if (inUse && trimmed.startsWith('-')) {
+        const name = trimmed.substring(1).trim().replace(/['"]/g, '');
+        useItems.push({ name, line });
+      } else if (inUse && (!line.startsWith(' ') || trimmed.startsWith('proxies:') || trimmed.startsWith('type:'))) {
+        flushUseSort();
+        inUse = false;
+      }
+    }
+    idx++;
+  }
+  flushUseSort();
+
+  return lines.join('\n');
+}
+
 module.exports = {
   parseProxyUri,
   serializeProxyToYaml,
@@ -618,5 +780,7 @@ module.exports = {
   deleteProviderFromConfig,
   addUseToGroupInLines,
   removeUseFromGroupsInLines,
-  cleanupEmptyGroupsInLines
+  cleanupEmptyGroupsInLines,
+  ensureProviderGroupInLines,
+  reorderProvidersInConfig
 };

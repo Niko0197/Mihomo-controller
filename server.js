@@ -1889,6 +1889,13 @@ function handleAddProvider(req, res) {
       yamlText = yamlUtils.addProviderToConfig(yamlText, name, url, interval);
       
       let lines = yamlText.split(/\r?\n/);
+      
+      // Автоматически создаем отдельную прокси-группу для новой подписки
+      yamlUtils.ensureProviderGroupInLines(lines, name);
+      
+      // Добавляем новую подписку в мульти-группу Auto-Best
+      yamlUtils.addUseToGroupInLines(lines, '🚀Auto-Best', name);
+
       if (groups && Array.isArray(groups)) {
         for (const groupName of groups) {
           yamlUtils.addUseToGroupInLines(lines, groupName, name);
@@ -1896,6 +1903,55 @@ function handleAddProvider(req, res) {
       }
       
       fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
+      
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
+        try {
+          const parsedError = JSON.parse(reloadRes.data);
+          if (parsedError.message) errorMsg = parsedError.message;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+      
+      fs.copyFileSync(backupPath, configPath + '.bak');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+      
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+    } catch (err) {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, configPath);
+        fs.unlinkSync(backupPath);
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, message: err.message }));
+    }
+  });
+}
+
+// POST /api/providers/reorder
+function handleReorderProviders(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    const backupPath = configPath + '.tmp_bak';
+    try {
+      const payload = JSON.parse(body);
+      const { order } = payload;
+      
+      if (!Array.isArray(order)) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: false, message: 'Неверный формат порядка' }));
+        return;
+      }
+      
+      fs.copyFileSync(configPath, backupPath);
+      
+      let yamlText = fs.readFileSync(configPath, 'utf8');
+      yamlText = yamlUtils.reorderProvidersInConfig(yamlText, order);
+      
+      fs.writeFileSync(configPath, yamlText, 'utf8');
       
       const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
       if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
@@ -3806,6 +3862,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && pathname === '/api/providers/delete') {
     handleDeleteProvider(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/providers/reorder') {
+    handleReorderProviders(req, res);
     return;
   }
   if (req.method === 'POST' && pathname === '/api/providers/update') {
