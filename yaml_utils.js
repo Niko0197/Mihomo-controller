@@ -608,90 +608,92 @@ function cleanupEmptyGroupsInLines(lines) {
   }
 }
 
+function getGroupCardNameForProvider(providerName) {
+  if (providerName === 'stealthsurf') return '💎 StealthSurf';
+  if (providerName === 'Igareck_Black_VPN') return '🎱 GitHub';
+  return `⚡ ${providerName}`;
+}
+
+function sortProxiesInAutoBestInLines(lines, orderedCardNames) {
+  let inProxyGroups = false;
+  let inAutoBest = false;
+  let inProxies = false;
+  let proxiesStartIndex = -1;
+  let proxyItems = [];
+
+  const flushSort = () => {
+    if (proxiesStartIndex !== -1 && proxyItems.length > 0) {
+      proxyItems.sort((a, b) => {
+        const idxA = orderedCardNames.indexOf(a.name);
+        const idxB = orderedCardNames.indexOf(b.name);
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+        return 0;
+      });
+      const sortedLines = proxyItems.map(item => item.line);
+      lines.splice(proxiesStartIndex, proxyItems.length, ...sortedLines);
+    }
+    proxiesStartIndex = -1;
+    proxyItems = [];
+  };
+
+  let i = 0;
+  while (i < lines.length) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inProxyGroups = true;
+      i++;
+      continue;
+    }
+
+    if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+      flushSort();
+      break;
+    }
+
+    if (inProxyGroups) {
+      if (trimmed.startsWith('- name:')) {
+        flushSort();
+        const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+        inAutoBest = (gName === '🚀Auto-Best');
+        inProxies = false;
+      } else if (inAutoBest && trimmed.startsWith('proxies:')) {
+        flushSort();
+        inProxies = true;
+        proxiesStartIndex = i + 1;
+      } else if (inAutoBest && inProxies && trimmed.startsWith('-')) {
+        const pName = trimmed.substring(1).trim().replace(/['"]/g, '');
+        proxyItems.push({ name: pName, line });
+      } else if (inAutoBest && inProxies && (!line.startsWith(' ') || trimmed.startsWith('type:') || trimmed.startsWith('url:'))) {
+        flushSort();
+        inProxies = false;
+      }
+    }
+    i++;
+  }
+  flushSort();
+}
+
 // Автоматическая синхронизация собственных прокси-групп для ВСЕХ подписок без дубликатов
 function syncAllProviderGroupsInConfig(yamlText) {
   const providers = getProxyProvidersFromConfig(yamlText);
   let lines = yamlText.split(/\r?\n/);
-  
-  const ignoreGroupNames = ['GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3'];
+  const orderedCardNames = providers.map(p => getGroupCardNameForProvider(p.name));
 
   providers.forEach(p => {
     const providerName = p.name;
-    let hasGroup = false;
+    const groupCardName = getGroupCardNameForProvider(providerName);
 
-    let inProxyGroups = false;
-    let currentGroupName = '';
-    let groupUses = [];
+    ensureProviderGroupInLines(lines, providerName);
 
-    const checkCurrentGroup = () => {
-      if (currentGroupName && !ignoreGroupNames.includes(currentGroupName)) {
-        if (groupUses.includes(providerName)) {
-          hasGroup = true;
-        }
-      }
-    };
-
-    let idx = 0;
-    while (idx < lines.length) {
-      const line = lines[idx];
-      const trimmed = line.trim();
-
-      if (trimmed === 'proxy-groups:') {
-        inProxyGroups = true;
-        idx++;
-        continue;
-      }
-
-      if (inProxyGroups && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
-        checkCurrentGroup();
-        inProxyGroups = false;
-      }
-
-      if (inProxyGroups) {
-        if (trimmed.startsWith('- name:')) {
-          checkCurrentGroup();
-          currentGroupName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
-          groupUses = [];
-        } else if (trimmed.startsWith('use:')) {
-          let j = idx + 1;
-          while (j < lines.length) {
-            const uLine = lines[j].trim();
-            if (uLine.startsWith('-')) {
-              const uName = uLine.substring(1).trim().replace(/['"]/g, '');
-              groupUses.push(uName);
-            } else {
-              break;
-            }
-            j++;
-          }
-        }
-      }
-      idx++;
-    }
-    checkCurrentGroup();
-
-    if (!hasGroup) {
-      const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
-      if (groupsIndex !== -1) {
-        const groupCardName = `⚡ ${providerName}`;
-        const newGroupLines = [
-          `  - name: '${groupCardName}'`,
-          `    type: url-test`,
-          `    use:`,
-          `      - ${providerName}`,
-          `    url: http://cp.cloudflare.com/generate_204`,
-          `    interval: 300`,
-          `    tolerance: 50`,
-          ``
-        ];
-        lines.splice(groupsIndex + 1, 0, ...newGroupLines);
-        
-        // Внедряем карточку группы в GLOBAL и подписку в Auto-Best
-        injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
-        addUseToGroupInLines(lines, '🚀Auto-Best', providerName);
-      }
-    }
+    injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
+    injectProxyIntoGroup(lines, '🚀Auto-Best', groupCardName);
   });
+
+  sortProxiesInAutoBestInLines(lines, orderedCardNames);
 
   return lines.join('\n');
 }
@@ -750,10 +752,11 @@ function ensureProviderGroupInLines(lines, providerName) {
   }
   checkCurrentGroup();
 
+  const groupCardName = getGroupCardNameForProvider(providerName);
+
   if (!hasGroup) {
     const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
     if (groupsIndex !== -1) {
-      const groupCardName = `⚡ ${providerName}`;
       const newGroupLines = [
         `  - name: '${groupCardName}'`,
         `    type: url-test`,
@@ -768,6 +771,9 @@ function ensureProviderGroupInLines(lines, providerName) {
       injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
     }
   }
+
+  injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
+  injectProxyIntoGroup(lines, '🚀Auto-Best', groupCardName);
 }
 
 // Переупорядочивание подписок (proxy-providers) и их вызовов (use:) во всех группах

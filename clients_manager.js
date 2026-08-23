@@ -213,36 +213,49 @@ async function saveTrafficDb() {
 // Вспомогательные функции для работы со структурированной БД клиентов (совместимой со строками)
 function getClientData(key) {
   const entry = clientsDb[key];
-  if (!entry) return { name: '', group: '' };
+  if (!entry) return { name: '', group: '', zapretMode: 'default' };
   if (typeof entry === 'string') {
-    return { name: entry, group: '' };
+    return { name: entry, group: '', zapretMode: 'default' };
   }
   return {
     name: entry.name || '',
-    group: entry.group || ''
+    group: entry.group || '',
+    zapretMode: entry.zapretMode || 'default'
   };
 }
 
 function setClientName(key, name) {
   if (!clientsDb[key]) {
-    clientsDb[key] = { name: '', group: '' };
+    clientsDb[key] = { name: '', group: '', zapretMode: 'default' };
   } else if (typeof clientsDb[key] === 'string') {
-    clientsDb[key] = { name: clientsDb[key], group: '' };
+    clientsDb[key] = { name: clientsDb[key], group: '', zapretMode: 'default' };
   }
   clientsDb[key].name = name.trim();
-  if (!clientsDb[key].name && !clientsDb[key].group) {
+  if (!clientsDb[key].name && !clientsDb[key].group && clientsDb[key].zapretMode === 'default') {
     delete clientsDb[key];
   }
 }
 
 function setClientGroup(key, group) {
   if (!clientsDb[key]) {
-    clientsDb[key] = { name: '', group: '' };
+    clientsDb[key] = { name: '', group: '', zapretMode: 'default' };
   } else if (typeof clientsDb[key] === 'string') {
-    clientsDb[key] = { name: clientsDb[key], group: '' };
+    clientsDb[key] = { name: clientsDb[key], group: '', zapretMode: 'default' };
   }
   clientsDb[key].group = group.trim();
-  if (!clientsDb[key].name && !clientsDb[key].group) {
+  if (!clientsDb[key].name && !clientsDb[key].group && clientsDb[key].zapretMode === 'default') {
+    delete clientsDb[key];
+  }
+}
+
+function setClientZapret(key, mode) {
+  if (!clientsDb[key]) {
+    clientsDb[key] = { name: '', group: '', zapretMode: 'default' };
+  } else if (typeof clientsDb[key] === 'string') {
+    clientsDb[key] = { name: clientsDb[key], group: '', zapretMode: 'default' };
+  }
+  clientsDb[key].zapretMode = mode;
+  if (!clientsDb[key].name && !clientsDb[key].group && clientsDb[key].zapretMode === 'default') {
     delete clientsDb[key];
   }
 }
@@ -384,12 +397,132 @@ function renameClient(ip, name) {
   return true;
 }
 
-// Считывание текущих правил назначения прокси-групп по клиентам из config.yaml
+const clientsRulesPath = path.join(path.dirname(configPath), 'clients_rules.yaml');
+
+// Функция чтения файла clients_rules.yaml
+function readClientsRulesText() {
+  if (fs.existsSync(clientsRulesPath)) {
+    return fs.readFileSync(clientsRulesPath, 'utf8');
+  }
+  if (fs.existsSync(configPath)) {
+    const configText = fs.readFileSync(configPath, 'utf8');
+    const lines = configText.split(/\r?\n/);
+    const extractBlock = (startMarker, endMarker) => {
+      const s = lines.findIndex(l => l.trim() === startMarker);
+      const e = lines.findIndex(l => l.trim() === endMarker);
+      if (s !== -1 && e !== -1 && e >= s) {
+        return lines.slice(s, e + 1).map(l => l.trim());
+      }
+      return [startMarker, endMarker];
+    };
+    const bypass = extractBlock('# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---');
+    const zapret = extractBlock('# --- CLIENTS ZAPRET RULES ---', '# --- END CLIENTS ZAPRET RULES ---');
+    const vpn = extractBlock('# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---');
+
+    const defaultContent = [
+      '# ============================================================',
+      '#   Mihomo Controller — Правила маршрутизации устройств (Clients)',
+      '# ============================================================',
+      '',
+      ...bypass,
+      '',
+      ...zapret,
+      '',
+      ...vpn,
+      ''
+    ].join('\n');
+
+    try {
+      fs.writeFileSync(clientsRulesPath, defaultContent, 'utf8');
+    } catch (e) {}
+    return defaultContent;
+  }
+  return '';
+}
+
+const mihomoRulesDir = path.join(path.dirname(configPath), 'rules');
+
+function ensureRuleFile(filename, items) {
+  if (!fs.existsSync(mihomoRulesDir)) {
+    try { fs.mkdirSync(mihomoRulesDir, { recursive: true }); } catch (e) {}
+  }
+  const filePath = path.join(mihomoRulesDir, filename);
+  let content = 'payload:';
+  if (!items || items.length === 0) {
+    content += ' []\n';
+  } else {
+    content += '\n' + items.map(ip => `  - SRC-IP-CIDR,${ip}/32`).join('\n') + '\n';
+  }
+  fs.writeFileSync(filePath, content, 'utf8');
+}
+
+// Синхронизирует правила из единого clients_rules.yaml в файлы rule-providers
+function syncClientsRulesToConfig() {
+  const clientsRulesText = readClientsRulesText();
+  const crLines = clientsRulesText.split(/\r?\n/);
+
+  const bypassIps = [];
+  const zapretNfqws1Ips = [];
+  const zapretNfqws2Ips = [];
+  const vpnManual1Ips = [];
+  const vpnManual2Ips = [];
+  const vpnManual3Ips = [];
+  const vpnAutobestIps = [];
+
+  let currentBlock = '';
+  for (const line of crLines) {
+    const trimmed = line.trim();
+    if (trimmed === '# --- CLIENTS BYPASS RULES ---') { currentBlock = 'bypass'; continue; }
+    if (trimmed === '# --- END CLIENTS BYPASS RULES ---') { currentBlock = ''; continue; }
+    if (trimmed === '# --- CLIENTS ZAPRET RULES ---') { currentBlock = 'zapret'; continue; }
+    if (trimmed === '# --- END CLIENTS ZAPRET RULES ---') { currentBlock = ''; continue; }
+    if (trimmed === '# --- CLIENTS VPN RULES ---') { currentBlock = 'vpn'; continue; }
+    if (trimmed === '# --- END CLIENTS VPN RULES ---') { currentBlock = ''; continue; }
+
+    if (currentBlock === 'bypass') {
+      if (trimmed.startsWith('- SRC-IP-CIDR,')) {
+        const ip = trimmed.split(',')[1].split('/')[0].trim();
+        if (ip && !bypassIps.includes(ip)) bypassIps.push(ip);
+      }
+    } else if (currentBlock === 'zapret') {
+      const match = trimmed.match(/SRC-IP-CIDR,([^,/]+)/);
+      if (match) {
+        const ip = match[1].trim();
+        if (trimmed.includes('NFQWS 1')) {
+          if (!zapretNfqws1Ips.includes(ip)) zapretNfqws1Ips.push(ip);
+        } else if (trimmed.includes('NFQWS 2')) {
+          if (!zapretNfqws2Ips.includes(ip)) zapretNfqws2Ips.push(ip);
+        }
+      }
+    } else if (currentBlock === 'vpn') {
+      if (trimmed.startsWith('- SRC-IP-CIDR,')) {
+        const parts = trimmed.split(',');
+        const ip = parts[1].split('/')[0].trim();
+        const group = parts[2] ? parts[2].trim() : '';
+        if (group.includes('Manual 1')) { if (!vpnManual1Ips.includes(ip)) vpnManual1Ips.push(ip); }
+        else if (group.includes('Manual 2')) { if (!vpnManual2Ips.includes(ip)) vpnManual2Ips.push(ip); }
+        else if (group.includes('Manual 3')) { if (!vpnManual3Ips.includes(ip)) vpnManual3Ips.push(ip); }
+        else if (group.includes('Auto-Best') || !group) { if (!vpnAutobestIps.includes(ip)) vpnAutobestIps.push(ip); }
+      }
+    }
+  }
+
+  ensureRuleFile('clients_bypass.yaml', bypassIps);
+  ensureRuleFile('clients_zapret_nfqws1.yaml', zapretNfqws1Ips);
+  ensureRuleFile('clients_zapret_nfqws2.yaml', zapretNfqws2Ips);
+  ensureRuleFile('clients_vpn_manual1.yaml', vpnManual1Ips);
+  ensureRuleFile('clients_vpn_manual2.yaml', vpnManual2Ips);
+  ensureRuleFile('clients_vpn_manual3.yaml', vpnManual3Ips);
+  ensureRuleFile('clients_vpn_autobest.yaml', vpnAutobestIps);
+
+  return true;
+}
+
+// Считывание текущих правил назначения прокси-групп по клиентам из clients_rules.yaml
 function getClientRulesFromConfig() {
   const rules = new Map(); // IP => groupName
   try {
-    if (!fs.existsSync(configPath)) return rules;
-    const yamlText = fs.readFileSync(configPath, 'utf8');
+    const yamlText = readClientsRulesText();
     const lines = yamlText.split(/\r?\n/);
     
     const parseBlock = (startMarker, endMarker) => {
@@ -420,7 +553,7 @@ function getClientRulesFromConfig() {
     parseBlock('# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---');
 
   } catch (err) {
-    console.error('Ошибка чтения правил клиентов из конфига:', err.message);
+    console.error('Ошибка чтения правил клиентов из clients_rules.yaml:', err.message);
   }
   return rules;
 }
@@ -445,11 +578,7 @@ async function setClientRulesInConfig(ipsInput, targetGroup) {
   if (ips.length === 0) return false;
   if (!targetGroup) throw new Error('Группа не указана');
 
-  if (!fs.existsSync(configPath)) {
-    throw new Error('Конфиг config.yaml не найден');
-  }
-
-  let yamlText = fs.readFileSync(configPath, 'utf8');
+  let yamlText = readClientsRulesText();
   let lines = yamlText.split(/\r?\n/);
   
   const findIndices = () => ({
@@ -462,25 +591,14 @@ async function setClientRulesInConfig(ipsInput, targetGroup) {
   let { startBypassIdx, endBypassIdx, startVpnIdx, endVpnIdx } = findIndices();
 
   if (startBypassIdx === -1 || endBypassIdx === -1) {
-    const rulesIdx = lines.findIndex(l => l.trim() === 'rules:');
-    if (rulesIdx !== -1) {
-      lines.splice(rulesIdx + 1, 0, 
-        '  # --- CLIENTS BYPASS RULES ---',
-        '  # --- END CLIENTS BYPASS RULES ---'
-      );
-      const idxs = findIndices();
-      startBypassIdx = idxs.startBypassIdx;
-      endBypassIdx = idxs.endBypassIdx;
-    }
+    lines.unshift('# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---', '');
+    const idxs = findIndices();
+    startBypassIdx = idxs.startBypassIdx;
+    endBypassIdx = idxs.endBypassIdx;
   }
 
   if (startVpnIdx === -1 || endVpnIdx === -1) {
-    let matchIdx = lines.findIndex(l => l.trim().startsWith('- MATCH,'));
-    if (matchIdx === -1) matchIdx = lines.length - 1;
-    lines.splice(matchIdx, 0, 
-      '  # --- CLIENTS VPN RULES ---',
-      '  # --- END CLIENTS VPN RULES ---'
-    );
+    lines.push('', '# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---');
     const idxs = findIndices();
     startVpnIdx = idxs.startVpnIdx;
     endVpnIdx = idxs.endVpnIdx;
@@ -492,14 +610,13 @@ async function setClientRulesInConfig(ipsInput, targetGroup) {
     const isIpv6 = targetIp.includes(':');
     const mask = isIpv6 ? '/128' : '/32';
     
-    // Удаляем все старые правила для данного IP (включая старые IPv6)
+    // Удаляем все старые правила для данного IP
     lines = lines.filter(l => !(l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/32,`) || l.trim().startsWith(`- SRC-IP-CIDR,${targetIp}/128,`)));
     
-    // Новые правила пишем только для IPv4 (избегаем застревания динамических Privacy IPv6 смартфона в DIRECT)
     if (isIpv6) continue;
 
     let { startBypassIdx: sb, endBypassIdx: eb, startVpnIdx: sv, endVpnIdx: ev } = findIndices();
-    const newRule = `  - SRC-IP-CIDR,${targetIp}${mask},${targetGroup}`;
+    const newRule = `- SRC-IP-CIDR,${targetIp}${mask},${targetGroup}`;
 
     if (isDirect) {
       if (eb !== -1) lines.splice(eb, 0, newRule);
@@ -510,12 +627,13 @@ async function setClientRulesInConfig(ipsInput, targetGroup) {
     }
   }
 
-  fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
+  fs.writeFileSync(clientsRulesPath, lines.join('\n'), 'utf8');
 
-  // Быстрая перезагрузка Mihomo для подхвата правила
+  // Синхронизируем провайдеры и перезагружаем ядро Mihomo
+  syncClientsRulesToConfig();
   await makeMihomoRequest('PUT', '/configs', { path: configPath }).catch(() => {});
 
-  // Отсекаем сокеты ИСКЛЮЧИТЕЛЬНО целевого устройства (ПК и другие устройства не трогаются!)
+  // Отсекаем сокеты целевого устройства
   for (const targetIp of ips) {
     await closeConnectionsForIp(targetIp);
   }
@@ -550,11 +668,92 @@ async function setClientGroupPreference(ip, group) {
   }
   saveDb();
 
-  const activeRules = getClientRulesFromConfig();
-  const currentRuleGroup = activeRules.get(ip) || '';
-  
   await setClientRulesInConfig(ips, group);
+  return true;
+}
+
+// Установка правил Запрета для клиента в clients_rules.yaml
+async function setClientZapretRulesInConfig(ipsInput, mode) {
+  const ips = Array.isArray(ipsInput) ? ipsInput : [ipsInput];
+  if (ips.length === 0) return false;
+
+  let yamlText = readClientsRulesText();
+  let lines = yamlText.split(/\r?\n/);
+
+  const findIndices = () => ({
+    startZapretIdx: lines.findIndex(l => l.trim() === '# --- CLIENTS ZAPRET RULES ---'),
+    endZapretIdx: lines.findIndex(l => l.trim() === '# --- END CLIENTS ZAPRET RULES ---')
+  });
+
+  let { startZapretIdx, endZapretIdx } = findIndices();
+
+  if (startZapretIdx === -1 || endZapretIdx === -1) {
+    lines.push('', '# --- CLIENTS ZAPRET RULES ---', '# --- END CLIENTS ZAPRET RULES ---');
+    const idxs = findIndices();
+    startZapretIdx = idxs.startZapretIdx;
+    endZapretIdx = idxs.endZapretIdx;
+  }
+
+  for (const targetIp of ips) {
+    if (targetIp.includes(':')) continue;
+
+    // Удаляем предыдущие zapret правила для этого IP
+    lines = lines.filter(l => !(l.includes(`SRC-IP-CIDR,${targetIp}/32`) && l.includes('RULE-SET,youtube@domain')));
+
+    let { startZapretIdx: sz, endZapretIdx: ez } = findIndices();
+
+    if (mode === 'nfqws1') {
+      const newRule = `- AND,((SRC-IP-CIDR,${targetIp}/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)`;
+      if (ez !== -1) lines.splice(ez, 0, newRule);
+      else if (sz !== -1) lines.splice(sz + 1, 0, newRule);
+    } else if (mode === 'nfqws2') {
+      const newRule = `- AND,((SRC-IP-CIDR,${targetIp}/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)`;
+      if (ez !== -1) lines.splice(ez, 0, newRule);
+      else if (sz !== -1) lines.splice(sz + 1, 0, newRule);
+    }
+  }
+
+  fs.writeFileSync(clientsRulesPath, lines.join('\n'), 'utf8');
+
+  syncClientsRulesToConfig();
+  await makeMihomoRequest('PUT', '/configs', { path: configPath }).catch(() => {});
+
+  for (const targetIp of ips) {
+    await closeConnectionsForIp(targetIp);
+  }
+
+  return true;
+}
+
+// Установка/сохранение предпочтительной стратегии Запрета клиента
+async function setClientZapretPreference(ip, mode) {
+  if (!ip) throw new Error('IP адрес не указан');
+  const validModes = ['default', 'nfqws1', 'nfqws2'];
+  const targetMode = validModes.includes(mode) ? mode : 'default';
   
+  let mac = '';
+  let ips = [ip];
+  try {
+    const list = getClientsList();
+    const found = list.find(c => c.ip === ip || (c.altIps && c.altIps.includes(ip)));
+    if (found) {
+      if (found.mac) mac = found.mac.toUpperCase();
+      ips = [found.ip, ...(found.altIps || [])];
+    }
+  } catch (e) {
+    console.error('Ошибка при определении MAC для смены Запрета:', e.message);
+  }
+
+  setClientZapret(ip, targetMode);
+  if (mac) {
+    setClientZapret(mac, targetMode);
+  }
+  for (const altIp of ips) {
+    setClientZapret(altIp, targetMode);
+  }
+  saveDb();
+
+  await setClientZapretRulesInConfig(ips, targetMode);
   return true;
 }
 
@@ -756,6 +955,8 @@ function getClientsList() {
     const name = resolveClientName(ip, mac, hostByMac, hostByIp);
     const savedGroup = resolveClientGroup(ip, mac);
     const currentRuleGroup = activeRules.get(ip) || '';
+    const normMac = mac ? mac.toUpperCase() : '';
+    const zapretMode = getClientData(normMac).zapretMode || getClientData(ip).zapretMode || 'default';
     
     // VPN включен, если текущее правило в конфиге НЕ равно DIRECT
     const vpnEnabled = currentRuleGroup !== 'DIRECT';
@@ -770,6 +971,7 @@ function getClientsList() {
       mac,
       name,
       group,
+      zapretMode,
       vpnEnabled,
       active,
       downSpeed: 0,
@@ -1031,17 +1233,13 @@ function getClientsList() {
 }
 
 // Отключение VPN для всех клиентов (перевод в DIRECT)
+// Отключение VPN для всех клиентов (перевод в DIRECT)
 async function disableVpnForAllClients() {
-  if (!fs.existsSync(configPath)) {
-    throw new Error('Конфиг config.yaml не найден');
-  }
-
-  let yamlText = fs.readFileSync(configPath, 'utf8');
+  let yamlText = readClientsRulesText();
   let lines = yamlText.split(/\r?\n/);
   
   let startBypassIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS BYPASS RULES ---');
   let endBypassIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS BYPASS RULES ---');
-  
   let startVpnIdx = lines.findIndex(l => l.trim() === '# --- CLIENTS VPN RULES ---');
   let endVpnIdx = lines.findIndex(l => l.trim() === '# --- END CLIENTS VPN RULES ---');
   
@@ -1058,7 +1256,7 @@ async function disableVpnForAllClients() {
     }
   }
 
-  if (vpnRules.length === 0) return false; // Нет клиентов с включенным VPN
+  if (vpnRules.length === 0) return false;
 
   // Удаляем их из блока VPN
   lines.splice(startVpnIdx + 1, endVpnIdx - startVpnIdx - 1);
@@ -1071,10 +1269,9 @@ async function disableVpnForAllClients() {
   const directRules = vpnRules.map(r => {
     const parts = r.split(',');
     parts[2] = 'DIRECT';
-    return '  ' + parts.join(',');
+    return parts.join(',');
   });
 
-  // Отфильтровываем дубликаты
   const existingBypassRules = lines.slice(startBypassIdx + 1, endBypassIdx);
   const newDirectRules = directRules.filter(newRule => {
     const newIp = newRule.split(',')[1];
@@ -1083,10 +1280,9 @@ async function disableVpnForAllClients() {
 
   lines.splice(endBypassIdx, 0, ...newDirectRules);
 
-  // Сохраняем файл
-  fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
+  fs.writeFileSync(clientsRulesPath, lines.join('\n'), 'utf8');
+  syncClientsRulesToConfig();
 
-  // Перезагружаем конфиг в Mihomo
   await makeMihomoRequest('PUT', '/configs', { path: configPath });
   return true;
 }
@@ -1115,7 +1311,9 @@ module.exports = {
   toggleClientVpn,
   renameClient,
   setClientGroupPreference,
+  setClientZapretPreference,
   disableVpnForAllClients,
+  syncClientsRulesToConfig,
   saveTrafficDb,
   saveTrafficDbSync
 };

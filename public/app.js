@@ -7,6 +7,20 @@ let configEditor = null; // Инстанс CodeMirror
 let currentConfigFileId = 'config';
 let configFiles = [];
 
+// Отключение залипающих нативных браузерных подсказок (title) на мобильных экранах
+if (typeof window !== 'undefined') {
+  document.addEventListener('touchstart', function(e) {
+    const el = e.target.closest('[title]');
+    if (el) {
+      const title = el.getAttribute('title');
+      if (title) {
+        el.setAttribute('data-original-title', title);
+        el.removeAttribute('title');
+      }
+    }
+  }, { passive: true, capture: true });
+}
+
 // Показ уведомлений
 function showToast(message, type = 'success') {
   const container = document.getElementById('toast-container');
@@ -38,7 +52,12 @@ async function loadGlobalMihomoMode() {
 
 async function setGlobalMihomoMode(newMode) {
   try {
-    showToast(`Переключение режима ядра в ${newMode === 'direct' ? 'Direct (Напрямую)' : 'Rule (Маршруты)'}...`, 'info');
+    let msg = 'Переключение режима...';
+    if (newMode === 'direct') msg = 'Переключение в Direct (Выкл)...';
+    else if (newMode === 'zapret') msg = 'Переключение в режим Запрета (Без VPN)...';
+    else if (newMode === 'rule') msg = 'Переключение в режим VPN (Маршруты)...';
+    
+    showToast(msg, 'info');
     const res = await fetch('/api/mihomo/mode', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -49,9 +68,11 @@ async function setGlobalMihomoMode(newMode) {
       if (data.success) {
         updateModeUI(newMode);
         if (newMode === 'direct') {
-          showToast('🔌 Аварийный режим Direct включен: трафик идёт напрямую, тумблеры устройств сохранены!', 'warning');
+          showToast('🔌 Режим Direct включен: весь трафик идёт напрямую!', 'warning');
+        } else if (newMode === 'zapret') {
+          showToast('⚡ Режим Только Запрет включен: VPN отключен, YouTube идёт через Запрет!', 'warning');
         } else {
-          showToast('🛡️ Глобальный режим Rule включен: маршрутизация трафика возобновлена!', 'success');
+          showToast('🛡️ Глобальный режим VPN включен: маршрутизация трафика возобновлена!', 'success');
         }
       }
     }
@@ -62,11 +83,11 @@ async function setGlobalMihomoMode(newMode) {
 
 function updateModeUI(mode) {
   const btnRule = document.getElementById('mode-btn-rule');
+  const btnZapret = document.getElementById('mode-btn-zapret');
   const btnDirect = document.getElementById('mode-btn-direct');
-  if (btnRule && btnDirect) {
-    btnRule.classList.toggle('active', mode === 'rule');
-    btnDirect.classList.toggle('active', mode === 'direct');
-  }
+  if (btnRule) btnRule.classList.toggle('active', mode === 'rule');
+  if (btnZapret) btnZapret.classList.toggle('active', mode === 'zapret');
+  if (btnDirect) btnDirect.classList.toggle('active', mode === 'direct');
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -93,6 +114,7 @@ function switchTab(tabId) {
     'packet-monitor': '📦 Мониторинг сетевых пакетов',
     'logs': '📋 Системные логи ядра',
     'trace': '🛰️ Трассировка маршрутов',
+    'dpi': '⚡ Тюнер DPI и авто-ротация',
     'rules': '🛠️ Быстрые пользовательские правила',
     'editor': '📝 Редактор YAML конфигураций',
     'qr': '📱 QR-подключения клиентов',
@@ -116,12 +138,29 @@ function switchTab(tabId) {
     loadSubscriptions();
   } else if (tabId === 'ping') {
     loadProxiesList();
+  } else if (tabId === 'dpi') {
+    loadDpiStatus();
   } else if (tabId === 'rules') {
     loadDynamicRulesTab();
   } else if (tabId === 'updates') {
     loadVersionsList();
   } else if (tabId === 'qr') {
     loadQrConnections();
+  } else if (tabId === 'connections') {
+    if (typeof startConnectionsPolling === 'function') startConnectionsPolling(false);
+    if (typeof loadConnections === 'function') loadConnections();
+  } else if (tabId === 'traffic') {
+    if (typeof initAllTrafficCharts === 'function') initAllTrafficCharts();
+    if (typeof updateAllTrafficCharts === 'function') updateAllTrafficCharts();
+  } else if (tabId === 'packet-monitor') {
+    if (typeof startConnectionsPolling === 'function') startConnectionsPolling(false);
+  } else if (tabId === 'logs') {
+    if (typeof reRenderLogs === 'function') reRenderLogs();
+  } else if (tabId === 'clients') {
+    if (typeof startClientsPolling === 'function') startClientsPolling(false);
+    if (typeof loadClientsData === 'function') loadClientsData();
+  } else if (tabId === 'leak') {
+    loadData();
   } else {
     loadData();
   }
@@ -331,18 +370,10 @@ async function loadConfigEditor() {
   if (!configEditor) return;
   
   const saveBtn = document.getElementById('btn-save-config');
-  if (currentConfigFileId === 'config_compiled') {
-    configEditor.setOption('readOnly', true);
-    if (saveBtn) {
-      saveBtn.disabled = true;
-      saveBtn.title = 'Скомпилированный файл предназначен только для экспорта';
-    }
-  } else {
-    configEditor.setOption('readOnly', false);
-    if (saveBtn) {
-      saveBtn.disabled = false;
-      saveBtn.title = '';
-    }
+  configEditor.setOption('readOnly', false);
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.title = '';
   }
 
   configEditor.setValue('Загрузка конфигурации с роутера...');
@@ -1586,7 +1617,9 @@ function convertToCustomSelect(selectEl) {
   const wrapper = document.createElement('div');
   wrapper.className = 'custom-select-wrapper';
   if (selectEl.className) {
-    wrapper.classList.add(selectEl.className + '-container');
+    selectEl.className.trim().split(/\s+/).forEach(cls => {
+      if (cls) wrapper.classList.add(cls + '-container');
+    });
   }
 
   if (selectEl.style.width) {
@@ -2422,4 +2455,446 @@ function fallbackCopyTextToClipboard(text) {
 
   document.body.removeChild(textArea);
 }
+
+// ============================================================
+// ⚡ DPI Tuner, Benchmark & Auto-Heal Controller
+// ============================================================
+
+let currentDpiSettings = null;
+let currentDpiPresets = [];
+
+async function loadDpiStatus() {
+  try {
+    const res = await fetch('/api/dpi/status');
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if (data.success) {
+      currentDpiSettings = data.settings;
+      currentDpiPresets = data.presets || [];
+      updateDpiSlotsUI(data.settings);
+      
+      if (data.settings.lastBenchmark && data.settings.lastBenchmark.results) {
+        renderDpiBenchmarkTable(data.settings.lastBenchmark.results, data.settings.lastBenchmark.testedAt);
+      } else {
+        renderDpiDefaultPresetsTable(currentDpiPresets);
+      }
+
+      // Настройки Auto-Heal
+      if (data.settings.autoHeal) {
+        const cb = document.getElementById('dpi-autoheal-enabled');
+        const inpInt = document.getElementById('dpi-autoheal-interval');
+        const inpThresh = document.getElementById('dpi-autoheal-threshold');
+        const logEl = document.getElementById('dpi-autoheal-last-log');
+        if (cb) cb.checked = Boolean(data.settings.autoHeal.enabled);
+        if (inpInt) inpInt.value = data.settings.autoHeal.intervalHours || 24;
+        if (inpThresh) inpThresh.value = data.settings.autoHeal.minSpeedMbps || 8;
+        if (logEl && data.settings.autoHeal.lastLog) {
+          logEl.textContent = 'Статус: ' + data.settings.autoHeal.lastLog;
+        }
+      }
+    }
+  } catch (err) {
+    console.error('Ошибка загрузки статуса DPI:', err);
+    showToast('Ошибка загрузки настроек DPI: ' + err.message, 'error');
+  }
+}
+window.loadDpiStatus = loadDpiStatus;
+
+function updateDpiSlotsUI(settings) {
+  if (!settings || !settings.slots) return;
+
+  ['slot1', 'slot2'].forEach(slotId => {
+    const slot = settings.slots[slotId];
+    if (!slot) return;
+
+    // Аргументы
+    const argsEl = document.getElementById(`dpi-${slotId}-args`);
+    if (argsEl) argsEl.textContent = slot.currentArgs || '--split 1+s --disorder 1+s';
+
+    // Замочек
+    const lockBtn = document.getElementById(`dpi-${slotId}-lock-btn`);
+    if (lockBtn) {
+      const isLocked = Boolean(slot.locked);
+      lockBtn.classList.toggle('locked', isLocked);
+      lockBtn.innerHTML = `
+        <span class="lock-icon">${isLocked ? '🔒' : '🔓'}</span>
+        <span class="lock-text">${isLocked ? 'Зафиксировано' : 'Авто-ротация'}</span>
+      `;
+      lockBtn.setAttribute('title', isLocked 
+        ? 'Замочек ЗАКРЫТ: Параметры зафиксированы вручную, авто-ротация не меняет эту стратегию' 
+        : 'Замочек ОТКРЫТ: Раз в сутки стратегия проверяется и автоматически улучшается при проседании скорости');
+    }
+
+    // Телеметрия
+    const ytEl = document.getElementById(`dpi-${slotId}-yt-val`);
+    const discEl = document.getElementById(`dpi-${slotId}-disc-val`);
+    const pingEl = document.getElementById(`dpi-${slotId}-ping-val`);
+
+    if (slot.lastTest) {
+      if (ytEl) {
+        const speed = slot.lastTest.speedMbps || 0;
+        ytEl.innerHTML = `<span class="dpi-badge ${speed >= 50 ? 'dpi-badge-excellent' : (speed >= 15 ? 'dpi-badge-good' : (speed >= 3 ? 'dpi-badge-slow' : 'dpi-badge-failed'))}">${speed} Мбит/с</span>`;
+      }
+      if (discEl) {
+        discEl.innerHTML = slot.lastTest.discordOk ? '<span style="color: #3ddc84;">🟢 OK</span>' : '<span style="color: #ef4444;">🔴 Блок</span>';
+      }
+      if (pingEl) {
+        pingEl.textContent = slot.lastTest.pingMs ? `${slot.lastTest.pingMs} мс` : '-';
+      }
+    } else {
+      if (ytEl) ytEl.textContent = 'Не тестировался';
+      if (discEl) discEl.textContent = '-';
+      if (pingEl) pingEl.textContent = '-';
+    }
+  });
+}
+
+// Переключение замочка (Lock/Unlock)
+async function toggleSlotLockUI(slotId) {
+  if (!currentDpiSettings || !currentDpiSettings.slots || !currentDpiSettings.slots[slotId]) return;
+  const slot = currentDpiSettings.slots[slotId];
+  const nextState = !slot.locked;
+
+  // Оптимистичное обновление UI
+  slot.locked = nextState;
+  updateDpiSlotsUI(currentDpiSettings);
+
+  try {
+    const res = await fetch('/api/dpi/lock', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slotId, locked: nextState })
+    });
+    const data = await res.json();
+    if (data.success) {
+      const slotName = slot.name || slotId;
+      if (nextState) {
+        showToast(`🔒 ${slotName} зафиксирован: авто-ротация отключена для этого слота`, 'warning');
+      } else {
+        showToast(`🔓 Авто-ротация для ${slotName} включена! Раз в сутки параметры будут проверяться`, 'success');
+      }
+    } else {
+      throw new Error(data.error || 'Ошибка');
+    }
+  } catch (err) {
+    // Откат при ошибке
+    slot.locked = !nextState;
+    updateDpiSlotsUI(currentDpiSettings);
+    showToast('Ошибка переключения замочка: ' + err.message, 'error');
+  }
+}
+window.toggleSlotLockUI = toggleSlotLockUI;
+
+// Отрисовка дефолтного списка пресетов до запуска бенчмарка
+function renderDpiDefaultPresetsTable(presets) {
+  const tbody = document.getElementById('dpi-benchmark-tbody');
+  if (!tbody) return;
+
+  if (!presets || presets.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+          Нажмите кнопку «🚀 Запустить бенчмарк», чтобы протестировать все стратегии
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = presets.map(p => `
+    <tr class="packet-row">
+      <td style="padding: 12px 16px;">
+        <div style="font-weight: 600; color: var(--text); font-family: var(--font-outfit);">${p.name}</div>
+        <div style="font-size: 0.78rem; color: var(--text-muted);">${p.desc || ''}</div>
+      </td>
+      <td style="padding: 12px 16px;">
+        <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 6px; font-size: 0.82rem; color: #a8c7fa;">${p.args}</code>
+      </td>
+      <td style="padding: 12px 16px; text-align: center; color: var(--text-muted);">
+        <span class="dpi-badge" style="background: rgba(255,255,255,0.05); color: var(--text-muted);">Ожидает теста</span>
+      </td>
+      <td style="padding: 12px 16px; text-align: center; color: var(--text-muted);">-</td>
+      <td style="padding: 12px 16px; text-align: center; color: var(--text-muted);">-</td>
+      <td style="padding: 12px 16px; text-align: right;">
+        <div class="dpi-apply-btn-group">
+          <button class="btn-dpi-apply" onclick="applyDpiPreset('slot1', '${p.args.replace(/'/g, "\\'")}', '${p.name.replace(/'/g, "\\'")}')">📺 Для ТВ</button>
+          <button class="btn-dpi-apply" onclick="applyDpiPreset('slot2', '${p.args.replace(/'/g, "\\'")}', '${p.name.replace(/'/g, "\\'")}')">📱 Для Смартфонов</button>
+        </div>
+      </td>
+    </tr>
+  `).join('');
+}
+
+// Отрисовка результатов бенчмарка
+function renderDpiBenchmarkTable(results, testedAt) {
+  const tbody = document.getElementById('dpi-benchmark-tbody');
+  const timeEl = document.getElementById('dpi-last-benchmark-time');
+  if (timeEl && testedAt) {
+    timeEl.textContent = `Последний тест: ${new Date(testedAt).toLocaleString('ru-RU')}`;
+  }
+  if (!tbody) return;
+
+  if (!results || results.length === 0) {
+    tbody.innerHTML = `
+      <tr>
+        <td colspan="6" style="text-align: center; color: var(--danger); padding: 30px 0;">
+          Тест завершился без результатов
+        </td>
+      </tr>
+    `;
+    return;
+  }
+
+  tbody.innerHTML = results.map((r, idx) => {
+    const speed = r.speedMbps || 0;
+    let badgeClass = 'dpi-badge-failed';
+    let badgeText = `${speed} Мбит/с`;
+    if (speed >= 60) {
+      badgeClass = 'dpi-badge-excellent';
+      badgeText = `⭐ ${speed} Мбит/с`;
+    } else if (speed >= 20) {
+      badgeClass = 'dpi-badge-good';
+      badgeText = `🟢 ${speed} Мбит/с`;
+    } else if (speed >= 5) {
+      badgeClass = 'dpi-badge-slow';
+      badgeText = `🟡 ${speed} Мбит/с`;
+    } else {
+      badgeText = `🔴 ${speed} Мбит/с`;
+    }
+
+    const discordBadge = r.discordOk 
+      ? '<span style="color: #3ddc84; font-weight: 600;">🟢 OK</span>' 
+      : '<span style="color: #ef4444; font-weight: 600;">🔴 Блок</span>';
+
+    const pingText = r.pingMs ? `${r.pingMs} мс` : '-';
+
+    return `
+      <tr class="packet-row" style="${idx === 0 && speed >= 20 ? 'background: rgba(61, 220, 132, 0.04);' : ''}">
+        <td style="padding: 12px 16px;">
+          <div style="font-weight: 600; color: var(--text); font-family: var(--font-outfit); display: flex; align-items: center; gap: 8px;">
+            ${r.name || 'Пользовательский пресет'}
+            ${idx === 0 && speed >= 20 ? '<span class="dpi-badge dpi-badge-excellent" style="font-size: 0.7rem; padding: 2px 6px;">ТОП-1</span>' : ''}
+          </div>
+          <div style="font-size: 0.78rem; color: var(--text-muted);">${r.desc || ''}</div>
+        </td>
+        <td style="padding: 12px 16px;">
+          <code style="background: rgba(0,0,0,0.3); padding: 4px 8px; border-radius: 6px; font-size: 0.82rem; color: #a8c7fa;">${r.args}</code>
+        </td>
+        <td style="padding: 12px 16px; text-align: center;">
+          <span class="dpi-badge ${badgeClass}">${badgeText}</span>
+        </td>
+        <td style="padding: 12px 16px; text-align: center;">${discordBadge}</td>
+        <td style="padding: 12px 16px; text-align: center; color: var(--text); font-weight: 500;">${pingText}</td>
+        <td style="padding: 12px 16px; text-align: right;">
+          <div class="dpi-apply-btn-group">
+            <button class="btn-dpi-apply" onclick="applyDpiPreset('slot1', '${r.args.replace(/'/g, "\\'")}', '${(r.name || r.args).replace(/'/g, "\\'")}')">📺 Для ТВ</button>
+            <button class="btn-dpi-apply" onclick="applyDpiPreset('slot2', '${r.args.replace(/'/g, "\\'")}', '${(r.name || r.args).replace(/'/g, "\\'")}')">📱 Для Смартфонов</button>
+          </div>
+        </td>
+      </tr>
+    `;
+  }).join('');
+}
+
+// Запуск полного бенчмарка
+async function runDpiBenchmark() {
+  const btn = document.getElementById('btn-run-dpi-benchmark');
+  const progressBox = document.getElementById('dpi-benchmark-progress-container');
+  const progressBar = document.getElementById('dpi-progress-bar');
+  const progressTitle = document.getElementById('dpi-progress-title');
+  const progressCounter = document.getElementById('dpi-progress-counter');
+
+  if (btn) btn.disabled = true;
+  if (progressBox) progressBox.style.display = 'block';
+  if (progressBar) progressBar.style.width = '10%';
+  if (progressTitle) progressTitle.textContent = '🚀 Тестирование стратегий на изолированном порту 10809...';
+  if (progressCounter) progressCounter.textContent = 'Запуск...';
+
+  showToast('🚀 Запущен бенчмарк стратегий DPI. Основная сеть работает без прерываний!', 'info');
+
+  let progressInterval = setInterval(() => {
+    if (progressBar) {
+      let currentWidth = parseFloat(progressBar.style.width) || 10;
+      if (currentWidth < 90) {
+        progressBar.style.width = (currentWidth + Math.random() * 12) + '%';
+      }
+    }
+  }, 400);
+
+  try {
+    const res = await fetch('/api/dpi/benchmark', { method: 'POST' });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    clearInterval(progressInterval);
+
+    if (progressBar) progressBar.style.width = '100%';
+
+    if (data.success && data.results) {
+      renderDpiBenchmarkTable(data.results, data.testedAt);
+      showToast(`✅ Бенчмарк завершен! Протестировано ${data.results.length} стратегий.`, 'success');
+      loadDpiStatus();
+    } else {
+      throw new Error(data.error || 'Ошибка теста');
+    }
+  } catch (err) {
+    clearInterval(progressInterval);
+    console.error('Ошибка бенчмарка DPI:', err);
+    showToast('Ошибка выполнения бенчмарка: ' + err.message, 'error');
+  } finally {
+    setTimeout(() => {
+      if (progressBox) progressBox.style.display = 'none';
+      if (btn) btn.disabled = false;
+    }, 800);
+  }
+}
+window.runDpiBenchmark = runDpiBenchmark;
+
+// Тестирование пользовательских флагов
+async function testCustomDpiArgs() {
+  const input = document.getElementById('dpi-custom-args-input');
+  const btn = document.getElementById('btn-test-custom-dpi');
+  const resultBox = document.getElementById('dpi-custom-result');
+  if (!input || !input.value.trim()) {
+    showToast('Введите аргументы ByeDPI для теста', 'warning');
+    return;
+  }
+
+  const args = input.value.trim();
+  if (btn) btn.disabled = true;
+  if (resultBox) {
+    resultBox.style.display = 'block';
+    resultBox.innerHTML = '<span class="spinner"></span> Тестируем пресет на порту 10809...';
+  }
+
+  try {
+    const res = await fetch('/api/dpi/test-custom', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ args })
+    });
+    const data = await res.json();
+    if (data.success && data.result) {
+      const r = data.result;
+      const speed = r.speedMbps || 0;
+      let badgeClass = speed >= 50 ? 'dpi-badge-excellent' : (speed >= 15 ? 'dpi-badge-good' : (speed >= 3 ? 'dpi-badge-slow' : 'dpi-badge-failed'));
+      
+      resultBox.innerHTML = `
+        <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div>
+            <div style="font-weight: 600; color: var(--text); margin-bottom: 4px;">Результат проверки:</div>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+              <span class="dpi-badge ${badgeClass}">YouTube 4K: ${speed} Мбит/с</span>
+              <span style="font-size: 0.85rem;">Discord: ${r.discordOk ? '🟢 OK' : '🔴 Блок'}</span>
+              <span style="font-size: 0.85rem; color: var(--text-muted);">Пинг: ${r.pingMs || 0} мс</span>
+            </div>
+          </div>
+          <div class="dpi-apply-btn-group">
+            <button class="btn btn-primary" style="font-size: 0.8rem; padding: 6px 12px;" onclick="applyDpiPreset('slot1', '${args.replace(/'/g, "\\'")}', 'Пользовательский пресет')">📺 Применить для ТВ</button>
+            <button class="btn btn-primary" style="font-size: 0.8rem; padding: 6px 12px;" onclick="applyDpiPreset('slot2', '${args.replace(/'/g, "\\'")}', 'Пользовательский пресет')">📱 Применить для Смартфонов</button>
+          </div>
+        </div>
+      `;
+      showToast('Тестирование пользовательского пресета завершено', 'success');
+    } else {
+      throw new Error(data.error || 'Ошибка');
+    }
+  } catch (err) {
+    if (resultBox) {
+      resultBox.innerHTML = `<span style="color: var(--danger);">Ошибка: ${err.message}</span>`;
+    }
+    showToast('Ошибка теста: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.testCustomDpiArgs = testCustomDpiArgs;
+
+// Применение пресета к слоту
+async function applyDpiPreset(slotId, args, presetName) {
+  const slotName = slotId === 'slot1' ? '⚡ NFQWS 1 (ТВ)' : '⚡ NFQWS 2 (Смартфон/ПК)';
+  try {
+    showToast(`Применяем стратегию к ${slotName}...`, 'info');
+    const res = await fetch('/api/dpi/apply', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ slotId, args })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showToast(`✅ Стратегия успешно применена к ${slotName}! Служба перезапущена.`, 'success');
+      loadDpiStatus();
+    } else {
+      throw new Error(data.error || 'Ошибка применения');
+    }
+  } catch (err) {
+    showToast(`Ошибка применения: ${err.message}`, 'error');
+  }
+}
+window.applyDpiPreset = applyDpiPreset;
+
+// Принудительный запуск фоновой авто-ротации прямо сейчас
+async function triggerDpiAutoHealNow() {
+  const btn = document.getElementById('btn-run-dpi-autoheal');
+  if (btn) btn.disabled = true;
+  showToast('⚡ Запуск проверки авто-ротации для открытых слотов 🔓...', 'info');
+
+  try {
+    const res = await fetch('/api/dpi/auto-heal/run', { method: 'POST' });
+    const data = await res.json();
+    if (data.success) {
+      const results = data.results || [];
+      const changed = results.filter(r => r.action === 'auto_healed');
+      if (changed.length > 0) {
+        showToast(`✅ Авто-ротация обновила ${changed.length} слот(ов) на более быстрые стратегии!`, 'success');
+      } else {
+        showToast('✅ Проверка завершена: текущие стратегии работают стабильно или зафиксированы 🔒', 'success');
+      }
+      loadDpiStatus();
+    } else {
+      throw new Error(data.error || 'Ошибка');
+    }
+  } catch (err) {
+    showToast('Ошибка авто-проверки: ' + err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+window.triggerDpiAutoHealNow = triggerDpiAutoHealNow;
+
+// Выдвижная панель настроек
+function toggleDpiSettingsDrawer() {
+  const drawer = document.getElementById('dpi-settings-drawer');
+  if (drawer) {
+    drawer.style.display = drawer.style.display === 'none' ? 'block' : 'none';
+  }
+}
+window.toggleDpiSettingsDrawer = toggleDpiSettingsDrawer;
+
+// Сохранение настроек авто-ротации
+async function saveDpiAutoHealSettings() {
+  const cb = document.getElementById('dpi-autoheal-enabled');
+  const inpInt = document.getElementById('dpi-autoheal-interval');
+  const inpThresh = document.getElementById('dpi-autoheal-threshold');
+
+  const payload = {
+    enabled: cb ? cb.checked : true,
+    intervalHours: inpInt ? parseInt(inpInt.value) || 24 : 24,
+    minSpeedMbps: inpThresh ? parseFloat(inpThresh.value) || 8 : 8
+  };
+
+  try {
+    const res = await fetch('/api/dpi/auto-heal/settings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (res.ok) {
+      showToast('Настройки авто-ротации сохранены', 'success');
+    }
+  } catch (err) {
+    showToast('Ошибка сохранения настроек: ' + err.message, 'error');
+  }
+}
+window.saveDpiAutoHealSettings = saveDpiAutoHealSettings;
+
 

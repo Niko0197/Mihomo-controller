@@ -84,7 +84,7 @@ if [ ! -d "$TEMP_DIR" ]; then
     exit 1
 fi
 
-# 4. Установка или обновление
+# 4. Установка или обновление файлов проекта
 if [ "$MODE" = "update" ]; then
     echo "→ Шаг 3: Обновление файлов (пользовательские данные сохраняются)..."
 
@@ -96,8 +96,7 @@ if [ "$MODE" = "update" ]; then
     fi
 
     # Обновляем только код приложения, НЕ трогая пользовательские данные
-    # Список файлов кода для обновления:
-    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js install.sh uninstall.sh; do
+    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js dpi_manager.js install.sh uninstall.sh config.yaml; do
         if [ -f "$TEMP_DIR/$FILE" ]; then
             cp -f "$TEMP_DIR/$FILE" "$INSTALL_DIR/$FILE"
             echo "  ✓ Обновлён: $FILE"
@@ -111,12 +110,10 @@ if [ "$MODE" = "update" ]; then
         echo "  ✓ Обновлён: public/ (веб-интерфейс)"
     fi
 
-    # Обновляем README
     if [ -f "$TEMP_DIR/README.md" ]; then
         cp -f "$TEMP_DIR/README.md" "$INSTALL_DIR/README.md"
     fi
 
-    # Обновляем .gitignore
     if [ -f "$TEMP_DIR/.gitignore" ]; then
         cp -f "$TEMP_DIR/.gitignore" "$INSTALL_DIR/.gitignore"
     fi
@@ -124,27 +121,93 @@ if [ "$MODE" = "update" ]; then
     echo ""
     echo "  Сохранены без изменений:"
     echo "    • clients_db.json (база клиентов)"
-    echo "    • tor_bridges.json (Tor-мосты)"
+    echo "    • traffic_db.json (статистика трафика)"
+    echo "    • dpi_settings.json (настройки DPI и замочков)"
     echo "    • log.txt, *.log (логи)"
-    echo "    • config.yaml.bak (бэкап конфига)"
+    echo "    • /opt/etc/mihomo/config.yaml (текущая конфигурация)"
 
 else
     echo "→ Шаг 3: Чистая установка..."
 
-    # Очищаем старую версию если есть
     rm -rf "$INSTALL_DIR"
-
-    # Перемещаем из временной директории
     mv "$TEMP_DIR" "$INSTALL_DIR"
 
     echo "  ✓ Файлы установлены в $INSTALL_DIR"
 fi
 
-# Удаляем временные файлы
 rm -rf "$TEMP_DIR"
 
-# 5. Создание/обновление службы автозапуска
-echo "→ Шаг 4: Настройка службы автозапуска..."
+# 5. Установка и настройка встроенного DPI-Bypass (YouTube SOCKS5)
+echo "→ Шаг 4: Настройка встроенного DPI-Bypass для YouTube (2 независимых службы SOCKS5)..."
+ARCH=$(uname -m)
+case "$ARCH" in
+    aarch64|arm64) DPI_ARCH="aarch64" ;;
+    mips) DPI_ARCH="mips" ;;
+    mipsel) DPI_ARCH="mipsel" ;;
+    armv7*|armhf) DPI_ARCH="armv7l" ;;
+    *) DPI_ARCH="aarch64" ;;
+esac
+
+if [ ! -f "/opt/bin/ciadpi" ]; then
+    echo "  Скачиваем DPI-демон для архитектуры $DPI_ARCH..."
+    curl -sL "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-${DPI_ARCH}.tar.gz" | tar -xz -C /tmp/ 2>/dev/null
+    if [ -f "/tmp/ciadpi-${DPI_ARCH}" ]; then
+        mv "/tmp/ciadpi-${DPI_ARCH}" /opt/bin/ciadpi
+        chmod +x /opt/bin/ciadpi
+    fi
+fi
+
+# Создаем симлинки для независимого управления процессами
+ln -sf /opt/bin/ciadpi /opt/bin/ciadpi-1
+ln -sf /opt/bin/ciadpi /opt/bin/ciadpi-2
+
+# Удаляем старую службу если была
+rm -f /opt/etc/init.d/S52ciadpi-youtube 2>/dev/null
+
+# 1. Служба S52ciadpi-1 (⚡ NFQWS 1 — ТВ, порт 10805)
+cat << 'EOF' > /opt/etc/init.d/S52ciadpi-1
+#!/bin/sh
+
+ENABLED=yes
+PROCS=/opt/bin/ciadpi-1
+PREARGS=""
+ARGS="-i 127.0.0.1 -p 10805 --split 1+s --disorder 1+s -D --pidfile /opt/var/run/ciadpi-1.pid"
+DESC="ciadpi-1 (NFQWS 1 - TV)"
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func
+EOF
+chmod +x /opt/etc/init.d/S52ciadpi-1
+/opt/etc/init.d/S52ciadpi-1 restart 2>/dev/null
+
+# 2. Служба S53ciadpi-2 (⚡ NFQWS 2 — Смартфоны/ПК, порт 10806)
+cat << 'EOF' > /opt/etc/init.d/S53ciadpi-2
+#!/bin/sh
+
+ENABLED=yes
+PROCS=/opt/bin/ciadpi-2
+PREARGS=""
+ARGS="-i 127.0.0.1 -p 10806 --tlsrec 1 -D --pidfile /opt/var/run/ciadpi-2.pid"
+DESC="ciadpi-2 (NFQWS 2 - Phone/PC)"
+PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+. /opt/etc/init.d/rc.func
+EOF
+chmod +x /opt/etc/init.d/S53ciadpi-2
+/opt/etc/init.d/S53ciadpi-2 restart 2>/dev/null
+
+echo "  ✓ Службы YouTube DPI-Bypass настроены и запущены (NFQWS 1: 10805, NFQWS 2: 10806)"
+
+# 6. Развертывание базовой конфигурации config.yaml
+echo "→ Шаг 5: Проверка и развертывание конфигурации Mihomo..."
+mkdir -p /opt/etc/mihomo/proxy_providers
+if [ ! -f "/opt/etc/mihomo/config.yaml" ] && [ -f "$INSTALL_DIR/config.yaml" ]; then
+    cp "$INSTALL_DIR/config.yaml" /opt/etc/mihomo/config.yaml
+    echo "  ✓ Развернут готовый config.yaml с преднастроенной маршрутизацией и YouTube DPI"
+fi
+
+# 7. Создание/обновление службы автозапуска веб-панели
+echo "→ Шаг 6: Настройка службы автозапуска веб-панели..."
 
 cat << 'EOF' > "$INIT_SCRIPT"
 #!/bin/sh
@@ -164,8 +227,8 @@ if [ -f "$INSTALL_DIR/uninstall.sh" ]; then
     chmod +x "$INSTALL_DIR/uninstall.sh"
 fi
 
-# 6. Запуск веб-панели
-echo "→ Шаг 5: Запуск Mihomo Controller..."
+# 8. Запуск веб-панели
+echo "→ Шаг 7: Запуск Mihomo Controller..."
 if [ -f "$INIT_SCRIPT" ]; then
     "$INIT_SCRIPT" restart
 fi
@@ -178,9 +241,9 @@ else
     echo "  ✓ Установка успешно завершена!"
 fi
 echo ""
-echo "  Панель управления доступна по адресу:"
-echo "  http://192.168.1.1:4000"
+echo "  YouTube DPI-Bypass: Работает из коробки (порт 10805)"
+echo "  Панель управления: http://192.168.1.1:4000"
 echo ""
 echo "  Для полного удаления панели запустите:"
-echo "  sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/uninstall.sh)\""
+echo "  sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/$GITHUB_USER/$REPO_NAME/$BRANCH/uninstall.sh)\""
 echo "========================================="

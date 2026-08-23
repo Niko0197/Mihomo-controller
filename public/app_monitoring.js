@@ -15,21 +15,49 @@ let userScrolledUpMap = {
   error: false
 };
 
-let trafficChart = null;
+let trafficChartMode = 'split'; // 'split', 'combined', 'vpn', 'direct'
+let trafficChart = null; // Combined or single chart
+let trafficChartVPN = null; // Dedicated VPN chart
+let trafficChartDirect = null; // Dedicated DIRECT chart
+
 const chartDataPointsLimit = 60;
 let trafficDownloadHistory = Array(chartDataPointsLimit).fill(0);
 let trafficUploadHistory = Array(chartDataPointsLimit).fill(0);
+let vpnDownloadHistory = Array(chartDataPointsLimit).fill(0);
+let vpnUploadHistory = Array(chartDataPointsLimit).fill(0);
+let directDownloadHistory = Array(chartDataPointsLimit).fill(0);
+let directUploadHistory = Array(chartDataPointsLimit).fill(0);
 let trafficLabels = Array(chartDataPointsLimit).fill('');
 
-// Volumes tracking state
+// Per-Device Traffic Tracking State
+let trafficChartClients = null;
+let selectedTrafficClientIp = 'ALL';
+let clientTrafficHistories = new Map(); // ip => { ip, name, vpnDown: [], vpnUp: [], directDown: [], directUp: [], curVpnDown: 0, curVpnUp: 0, curDirectDown: 0, curDirectUp: 0, lastSeen: Date.now() }
+let clientTrafficColorMap = new Map();
+const clientColorPalette = [
+  { vpn: '#38bdf8', direct: '#34d399' }, // Sky / Emerald
+  { vpn: '#c084fc', direct: '#fbbf24' }, // Purple / Amber
+  { vpn: '#f472b6', direct: '#2dd4bf' }, // Pink / Teal
+  { vpn: '#818cf8', direct: '#a3e635' }, // Indigo / Lime
+  { vpn: '#fb7185', direct: '#60a5fa' }, // Rose / Blue
+  { vpn: '#fb923c', direct: '#4ade80' }, // Orange / Green
+  { vpn: '#22d3ee', direct: '#e879f9' }, // Cyan / Fuchsia
+  { vpn: '#a78bfa', direct: '#facc15' }  // Violet / Yellow
+];
+
+// Volumes & instantaneous rates tracking state
 let activeConnectionsMap = new Map();
+let lastConnBytesMap = new Map();
 let vpnDownloadAccum = 0;
 let vpnUploadAccum = 0;
 let directDownloadAccum = 0;
 let directUploadAccum = 0;
 
-// Last bytes map for calculating per-connection speed
-let lastConnBytesMap = new Map();
+let instVpnDown = 0;
+let instVpnUp = 0;
+let instDirectDown = 0;
+let instDirectUp = 0;
+let lastVolumeCheckTime = Date.now();
 
 // Helper to format bytes
 function formatBytes(bytes) {
@@ -76,7 +104,7 @@ window.switchTab = function(tabId) {
     startClientsPolling(true); // Silent background polling
   }
   
-  // If user switched to traffic tab, initialize and refresh the chart immediately
+  // If user switched to traffic tab, initialize and refresh the charts immediately
   if (tabId === 'traffic') {
     const speedDownEl = document.getElementById('speed-download');
     const speedUpEl = document.getElementById('speed-upload');
@@ -86,12 +114,8 @@ window.switchTab = function(tabId) {
     if (speedDownEl) speedDownEl.textContent = formatSpeed(lastDown);
     if (speedUpEl) speedUpEl.textContent = formatSpeed(lastUp);
     
-    if (!trafficChart) {
-      initTrafficChart();
-    }
-    if (trafficChart) {
-      trafficChart.update('none');
-    }
+    initAllTrafficCharts();
+    updateAllTrafficCharts();
   } else if (tabId === 'logs') {
     if (window.isXkeenRunning) {
       reRenderLogs();
@@ -144,147 +168,668 @@ async function readHttpStream(url, onChunk, abortSignal) {
 let peakDownloadSpeed = 0;
 let peakUploadSpeed = 0;
 
-// --- 1. Real-time Traffic Graph Tab ---
-function initTrafficChart() {
-  if (trafficChart) return;
-  
-  const canvas = document.getElementById('traffic-speed-chart');
-  if (!canvas) return;
-  const ctx = canvas.getContext('2d');
-  
-  const downloadGradient = ctx.createLinearGradient(0, 0, 0, 340);
-  downloadGradient.addColorStop(0, 'rgba(59, 130, 246, 0.38)');
-  downloadGradient.addColorStop(1, 'rgba(59, 130, 246, 0.0)');
-
-  const uploadGradient = ctx.createLinearGradient(0, 0, 0, 340);
-  uploadGradient.addColorStop(0, 'rgba(16, 185, 129, 0.38)');
-  uploadGradient.addColorStop(1, 'rgba(16, 185, 129, 0.0)');
-
-  trafficChart = new Chart(ctx, {
-    type: 'line',
-    data: {
-      labels: trafficLabels,
-      datasets: [
-        {
-          label: 'Скачивание (Download)',
-          data: trafficDownloadHistory,
-          borderColor: '#3b82f6',
-          backgroundColor: downloadGradient,
-          fill: true,
-          tension: 0.4,
-          borderWidth: 2.5,
-          pointRadius: 0,
-          pointHoverRadius: 6,
-          pointHoverBorderWidth: 3,
-          pointHoverBackgroundColor: '#0f172a',
-          pointHoverBorderColor: '#3b82f6'
-        },
-        {
-          label: 'Отдача (Upload)',
-          data: trafficUploadHistory,
-          borderColor: '#10b981',
-          backgroundColor: uploadGradient,
-          fill: true,
-          tension: 0.4,
-          borderWidth: 2.5,
-          pointRadius: 0,
-          pointHoverRadius: 6,
-          pointHoverBorderWidth: 3,
-          pointHoverBackgroundColor: '#0f172a',
-          pointHoverBorderColor: '#10b981'
-        }
-      ]
+// Helper to create common chart options
+function buildTrafficChartOptions(customTitle) {
+  return {
+    responsive: true,
+    maintainAspectRatio: false,
+    animation: false,
+    interaction: {
+      mode: 'index',
+      intersect: false
     },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: {
-        mode: 'index',
-        intersect: false
-      },
-      plugins: {
-        legend: {
-          display: true,
-          position: 'top',
-          align: 'end',
-          labels: {
-            color: '#94a3b8',
-            usePointStyle: true,
-            pointStyle: 'circle',
-            padding: 16,
-            font: { family: 'Inter', size: 12, weight: '600' }
-          }
-        },
-        tooltip: {
-          enabled: true,
-          backgroundColor: 'rgba(15, 23, 42, 0.95)',
-          titleColor: '#94a3b8',
-          bodyColor: '#f8fafc',
-          borderColor: 'rgba(255, 255, 255, 0.1)',
-          borderWidth: 1,
-          bodyFont: { family: 'Inter', size: 13, weight: '600' },
-          padding: 12,
-          boxWidth: 8,
-          boxHeight: 8,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        align: 'end',
+        labels: {
+          color: '#94a3b8',
           usePointStyle: true,
-          cornerRadius: 10,
-          caretPadding: 10,
-          callbacks: {
-            title: function(items) {
-              if (items.length > 0) {
-                const idx = items[0].dataIndex;
-                const secsAgo = (chartDataPointsLimit - 1 - idx);
-                return secsAgo === 0 ? 'Сейчас' : `${secsAgo} сек назад`;
-              }
-              return '';
-            },
-            label: function(context) {
-              let label = context.dataset.label || '';
-              if (label) label += ': ';
-              if (context.parsed.y !== null) {
-                label += formatSpeed(context.parsed.y);
-              }
-              return label;
+          pointStyle: 'circle',
+          padding: 12,
+          font: { family: 'Inter', size: 11, weight: '600' }
+        }
+      },
+      tooltip: {
+        enabled: true,
+        backgroundColor: 'rgba(15, 23, 42, 0.95)',
+        titleColor: '#94a3b8',
+        bodyColor: '#f8fafc',
+        borderColor: 'rgba(255, 255, 255, 0.1)',
+        borderWidth: 1,
+        bodyFont: { family: 'Inter', size: 12, weight: '600' },
+        padding: 10,
+        boxWidth: 8,
+        boxHeight: 8,
+        usePointStyle: true,
+        cornerRadius: 10,
+        caretPadding: 8,
+        callbacks: {
+          title: function(items) {
+            if (items.length > 0) {
+              const idx = items[0].dataIndex;
+              const secsAgo = (chartDataPointsLimit - 1 - idx);
+              return secsAgo === 0 ? 'Сейчас' : `${secsAgo} сек назад`;
             }
+            return '';
+          },
+          label: function(context) {
+            let label = context.dataset.label || '';
+            if (label) label += ': ';
+            if (context.parsed.y !== null) {
+              label += formatSpeed(context.parsed.y);
+            }
+            return label;
+          }
+        }
+      }
+    },
+    scales: {
+      x: {
+        grid: { display: false },
+        ticks: {
+          color: '#64748b',
+          font: { family: 'Inter', size: 10 },
+          maxRotation: 0,
+          autoSkip: true,
+          maxTicksLimit: 6,
+          callback: function(val, index) {
+            const secs = chartDataPointsLimit - 1 - index;
+            if (secs === 0) return 'Сейчас';
+            if (secs % 10 === 0) return `-${secs}s`;
+            return '';
           }
         }
       },
-      scales: {
-        x: {
-          grid: { display: false },
-          ticks: {
-            color: '#64748b',
-            font: { family: 'Inter', size: 11 },
-            maxRotation: 0,
-            autoSkip: true,
-            maxTicksLimit: 7,
-            callback: function(val, index) {
-              const secs = chartDataPointsLimit - 1 - index;
-              if (secs === 0) return 'Сейчас';
-              if (secs % 10 === 0) return `-${secs}s`;
-              return '';
-            }
-          }
+      y: {
+        beginAtZero: true,
+        grid: {
+          color: 'rgba(255, 255, 255, 0.04)',
+          drawBorder: false
         },
-        y: {
-          beginAtZero: true,
-          grid: {
-            color: 'rgba(255, 255, 255, 0.04)',
-            drawBorder: false
-          },
-          ticks: {
-            color: '#64748b',
-            font: { family: 'monospace', size: 11 },
-            padding: 8,
-            callback: function(value) {
-              return formatSpeed(value);
-            }
+        ticks: {
+          color: '#64748b',
+          font: { family: 'monospace', size: 10 },
+          padding: 6,
+          callback: function(value) {
+            return formatSpeed(value);
           }
         }
       }
     }
+  };
+}
+
+// Helper to get client friendly display name
+function getClientDisplayName(ip) {
+  if (!ip) return 'Неизвестно';
+  if (typeof allClients !== 'undefined' && Array.isArray(allClients)) {
+    const found = allClients.find(c => c && (c.ip === ip || c.ip === ip.split(':')[0]));
+    if (found && found.name) return found.name;
+  }
+  return ip;
+}
+
+// Build datasets for Client Traffic Chart (dedicated or multi-device)
+function buildClientChartDatasets(ctx) {
+  if (!ctx) return [];
+  
+  if (selectedTrafficClientIp !== 'ALL') {
+    const hist = clientTrafficHistories.get(selectedTrafficClientIp);
+    const clientName = hist ? hist.name : getClientDisplayName(selectedTrafficClientIp);
+    const vpnDown = hist ? hist.vpnDown : Array(chartDataPointsLimit).fill(0);
+    const vpnUp = hist ? hist.vpnUp : Array(chartDataPointsLimit).fill(0);
+    const directDown = hist ? hist.directDown : Array(chartDataPointsLimit).fill(0);
+    const directUp = hist ? hist.directUp : Array(chartDataPointsLimit).fill(0);
+
+    const vpnDownGrad = ctx.createLinearGradient(0, 0, 0, 240);
+    vpnDownGrad.addColorStop(0, 'rgba(56, 189, 248, 0.38)');
+    vpnDownGrad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+    const directDownGrad = ctx.createLinearGradient(0, 0, 0, 240);
+    directDownGrad.addColorStop(0, 'rgba(52, 211, 153, 0.38)');
+    directDownGrad.addColorStop(1, 'rgba(52, 211, 153, 0.0)');
+
+    return [
+      {
+        label: `🛡️ ${clientName} — VPN Скачивание (Down)`,
+        data: vpnDown,
+        borderColor: '#38bdf8',
+        backgroundColor: vpnDownGrad,
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2.2,
+        pointRadius: 0,
+        pointHoverRadius: 5
+      },
+      {
+        label: `🛡️ ${clientName} — VPN Отдача (Up)`,
+        data: vpnUp,
+        borderColor: '#c084fc',
+        borderWidth: 2.0,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 4
+      },
+      {
+        label: `🔌 ${clientName} — DIRECT Скачивание (Down)`,
+        data: directDown,
+        borderColor: '#34d399',
+        backgroundColor: directDownGrad,
+        fill: true,
+        tension: 0.4,
+        borderWidth: 2.2,
+        pointRadius: 0,
+        pointHoverRadius: 5
+      },
+      {
+        label: `🔌 ${clientName} — DIRECT Отдача (Up)`,
+        data: directUp,
+        borderColor: '#fbbf24',
+        borderWidth: 2.0,
+        tension: 0.4,
+        pointRadius: 0,
+        pointHoverRadius: 4
+      }
+    ];
+  }
+
+  // ALL clients view: Show top active devices with distinct color lines
+  const datasets = [];
+  const entries = Array.from(clientTrafficHistories.values())
+    .filter(h => h.vpnDown.some(v => v > 0) || h.directDown.some(v => v > 0) || h.curVpnDown > 0 || h.curDirectDown > 0)
+    .sort((a, b) => (b.curVpnDown + b.curDirectDown + b.curVpnUp + b.curDirectUp) - (a.curVpnDown + a.curDirectDown + a.curVpnUp + a.curDirectUp));
+
+  const listToShow = entries.length > 0 ? entries.slice(0, 6) : Array.from(clientTrafficHistories.values()).slice(0, 4);
+
+  listToShow.forEach((hist, idx) => {
+    const colors = clientColorPalette[idx % clientColorPalette.length];
+    const name = hist.name || hist.ip;
+    
+    datasets.push({
+      label: `🛡️ ${name} (VPN)`,
+      data: hist.vpnDown,
+      borderColor: colors.vpn,
+      borderWidth: 2.2,
+      tension: 0.4,
+      pointRadius: 0,
+      pointHoverRadius: 4
+    });
+    datasets.push({
+      label: `🔌 ${name} (DIRECT)`,
+      data: hist.directDown,
+      borderColor: colors.direct,
+      borderWidth: 2.0,
+      borderDash: [5, 4],
+      tension: 0.4,
+      pointRadius: 0,
+      pointHoverRadius: 4
+    });
   });
+
+  if (datasets.length === 0) {
+    datasets.push({
+      label: 'Ожидание трафика подключенных устройств...',
+      data: Array(chartDataPointsLimit).fill(0),
+      borderColor: 'rgba(255, 255, 255, 0.1)',
+      borderWidth: 1,
+      pointRadius: 0
+    });
+  }
+
+  return datasets;
+}
+
+// Switch client for device chart
+window.setTrafficSelectedClient = function(ip) {
+  selectedTrafficClientIp = ip || 'ALL';
+  const selectEl = document.getElementById('traffic-client-select');
+  if (selectEl && selectEl.value !== selectedTrafficClientIp) {
+    selectEl.value = selectedTrafficClientIp;
+  }
+  
+  const canvas = document.getElementById('traffic-chart-clients');
+  if (canvas && trafficChartClients) {
+    const ctx = canvas.getContext('2d');
+    trafficChartClients.data.datasets = buildClientChartDatasets(ctx);
+    trafficChartClients.update();
+  }
+  updateClientsTrafficUI();
+};
+
+// Helper for stable device sorting (by IP / name) so buttons NEVER jump or shuffle
+function sortClientsStably(a, b) {
+  if (!a || !b) return 0;
+  const aIpParts = (a.ip || '').split('.').map(p => parseInt(p, 10) || 0);
+  const bIpParts = (b.ip || '').split('.').map(p => parseInt(p, 10) || 0);
+  if (aIpParts.length === 4 && bIpParts.length === 4) {
+    for (let i = 0; i < 4; i++) {
+      if (aIpParts[i] !== bIpParts[i]) return aIpParts[i] - bIpParts[i];
+    }
+  }
+  return (a.name || a.ip || '').localeCompare(b.name || b.ip || '');
+}
+
+function updateClientsTrafficUI() {
+  // 1. Update live speed indicator in header
+  const speedLabel = document.getElementById('subchart-client-speed');
+  if (speedLabel) {
+    if (selectedTrafficClientIp !== 'ALL') {
+      const hist = clientTrafficHistories.get(selectedTrafficClientIp);
+      if (hist) {
+        speedLabel.innerHTML = `🛡️ VPN: <span style="color:#38bdf8">⬇️ ${formatSpeed(hist.curVpnDown)}</span> <span style="color:#c084fc">⬆️ ${formatSpeed(hist.curVpnUp)}</span> &nbsp;•&nbsp; 🔌 Direct: <span style="color:#34d399">⬇️ ${formatSpeed(hist.curDirectDown)}</span> <span style="color:#fbbf24">⬆️ ${formatSpeed(hist.curDirectUp)}</span>`;
+      } else {
+        speedLabel.textContent = '🛡️ VPN: 0 Кбит/с • 🔌 Direct: 0 Кбит/с';
+      }
+    } else {
+      let sumVpnDown = 0, sumVpnUp = 0, sumDirDown = 0, sumDirUp = 0;
+      for (const h of clientTrafficHistories.values()) {
+        sumVpnDown += h.curVpnDown;
+        sumVpnUp += h.curVpnUp;
+        sumDirDown += h.curDirectDown;
+        sumDirUp += h.curDirectUp;
+      }
+      speedLabel.innerHTML = `🛡️ VPN: <span style="color:#38bdf8">⬇️ ${formatSpeed(sumVpnDown)}</span> &nbsp;•&nbsp; 🔌 Direct: <span style="color:#34d399">⬇️ ${formatSpeed(sumDirDown)}</span>`;
+    }
+  }
+
+  // Filter out internal loopback
+  const clientEntries = Array.from(clientTrafficHistories.values())
+    .filter(h => h.ip !== '127.0.0.1' && h.ip !== '::1')
+    .sort(sortClientsStably);
+
+  // 2. Update Select Dropdown stably without resetting or jumping
+  const selectEl = document.getElementById('traffic-client-select');
+  if (selectEl) {
+    const currentVal = selectedTrafficClientIp;
+    const currentOptionsCount = selectEl.options.length;
+    const neededOptionsCount = 1 + clientEntries.length;
+
+    let shouldRebuild = currentOptionsCount !== neededOptionsCount;
+    if (!shouldRebuild) {
+      for (let i = 0; i < clientEntries.length; i++) {
+        if (!selectEl.options[i + 1] || selectEl.options[i + 1].value !== clientEntries[i].ip) {
+          shouldRebuild = true;
+          break;
+        }
+      }
+    }
+
+    if (shouldRebuild) {
+      selectEl.innerHTML = '<option value="ALL">📊 Все активные устройства (Сводный)</option>';
+      clientEntries.forEach(h => {
+        const opt = document.createElement('option');
+        opt.value = h.ip;
+        opt.textContent = `💻 ${h.name} (${h.ip})`;
+        selectEl.appendChild(opt);
+      });
+      selectEl.value = currentVal;
+    }
+  }
+
+  // 3. Update Device Chips in-place (Static width, zero layout shifts!)
+  const chipsContainer = document.getElementById('traffic-clients-chips-container');
+  if (chipsContainer) {
+    if (clientEntries.length === 0) {
+      chipsContainer.innerHTML = '<span style="font-size: 0.78rem; color: var(--text-muted); padding: 4px 0;">Ожидание активных сетевых соединений от устройств...</span>';
+    } else {
+      const existingChips = Array.from(chipsContainer.querySelectorAll('.traffic-client-chip[data-chip-ip]'));
+      const canUpdateInPlace = existingChips.length === clientEntries.length &&
+        existingChips.every((chip, idx) => chip.getAttribute('data-chip-ip') === clientEntries[idx].ip);
+
+      if (canUpdateInPlace) {
+        // In-place update: update dot status & active class only (ZERO width change!)
+        const allChip = chipsContainer.querySelector('.traffic-client-chip-all');
+        if (allChip) {
+          if (selectedTrafficClientIp === 'ALL') allChip.classList.add('active');
+          else allChip.classList.remove('active');
+        }
+
+        clientEntries.forEach((h, idx) => {
+          const chip = existingChips[idx];
+          if (!chip) return;
+          const isActive = selectedTrafficClientIp === h.ip;
+          if (isActive) chip.classList.add('active');
+          else chip.classList.remove('active');
+
+          const totVpn = h.curVpnDown + h.curVpnUp;
+          const totDirect = h.curDirectDown + h.curDirectUp;
+
+          const dot = chip.querySelector('.chip-dot');
+          if (dot) {
+            dot.className = 'chip-dot';
+            if (totVpn > 0 && totDirect > 0) dot.classList.add('active-both');
+            else if (totVpn > 0) dot.classList.add('active-vpn');
+            else if (totDirect > 0) dot.classList.add('active-direct');
+          }
+        });
+      } else {
+        // Initial build in stable fixed order with static width
+        let html = `<div class="traffic-client-chip traffic-client-chip-all ${selectedTrafficClientIp === 'ALL' ? 'active' : ''}" onclick="setTrafficSelectedClient('ALL')">
+          <span class="chip-dot active-both"></span>
+          <span class="chip-name">📊 Все устройства</span>
+        </div>`;
+
+        clientEntries.forEach(h => {
+          const isActive = selectedTrafficClientIp === h.ip;
+          const totVpn = h.curVpnDown + h.curVpnUp;
+          const totDirect = h.curDirectDown + h.curDirectUp;
+          let dotClass = 'chip-dot';
+          if (totVpn > 0 && totDirect > 0) dotClass += ' active-both';
+          else if (totVpn > 0) dotClass += ' active-vpn';
+          else if (totDirect > 0) dotClass += ' active-direct';
+
+          html += `<div class="traffic-client-chip ${isActive ? 'active' : ''}" data-chip-ip="${h.ip}" onclick="setTrafficSelectedClient('${h.ip}')">
+            <span class="${dotClass}"></span>
+            <span class="chip-name">💻 ${h.name}</span>
+          </div>`;
+        });
+
+        chipsContainer.innerHTML = html;
+      }
+    }
+  }
+}
+
+// --- 1. Real-time Traffic Graph Mode Switcher & Initializer ---
+window.setTrafficChartMode = function(mode) {
+  trafficChartMode = mode;
+  
+  // Update button classes
+  ['split', 'combined', 'vpn', 'direct'].forEach(m => {
+    const btn = document.getElementById(`tmt-${m}`);
+    if (btn) {
+      if (m === mode) btn.classList.add('active');
+      else btn.classList.remove('active');
+    }
+  });
+
+  const splitView = document.getElementById('traffic-split-view');
+  const singleView = document.getElementById('traffic-single-view');
+
+  if (mode === 'split') {
+    if (splitView) {
+      splitView.style.display = 'grid';
+      splitView.classList.remove('view-hidden');
+      splitView.classList.add('view-visible');
+    }
+    if (singleView) {
+      singleView.style.display = 'none';
+      singleView.classList.remove('view-visible');
+      singleView.classList.add('view-hidden');
+    }
+  } else {
+    if (splitView) {
+      splitView.style.display = 'none';
+      splitView.classList.remove('view-visible');
+      splitView.classList.add('view-hidden');
+    }
+    if (singleView) {
+      singleView.style.display = 'block';
+      singleView.classList.remove('view-hidden');
+      singleView.classList.add('view-visible');
+    }
+  }
+
+  // Destroy single chart if mode changed to re-init with right datasets
+  if (trafficChart) {
+    trafficChart.destroy();
+    trafficChart = null;
+  }
+  
+  initAllTrafficCharts();
+  updateAllTrafficCharts();
+};
+
+function initAllTrafficCharts() {
+  if (typeof Chart === 'undefined') return;
+
+  // 1. Dedicated VPN Chart (in Split View)
+  const vpnCanvas = document.getElementById('traffic-chart-vpn');
+  if (vpnCanvas && !trafficChartVPN) {
+    const ctx = vpnCanvas.getContext('2d');
+    const downGrad = ctx.createLinearGradient(0, 0, 0, 240);
+    downGrad.addColorStop(0, 'rgba(56, 189, 248, 0.38)');
+    downGrad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+    const upGrad = ctx.createLinearGradient(0, 0, 0, 240);
+    upGrad.addColorStop(0, 'rgba(192, 132, 252, 0.38)');
+    upGrad.addColorStop(1, 'rgba(192, 132, 252, 0.0)');
+
+    trafficChartVPN = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: trafficLabels,
+        datasets: [
+          {
+            label: 'VPN Скачивание (Down)',
+            data: vpnDownloadHistory,
+            borderColor: '#38bdf8',
+            backgroundColor: downGrad,
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHoverBorderWidth: 2,
+            pointHoverBackgroundColor: '#0f172a',
+            pointHoverBorderColor: '#38bdf8'
+          },
+          {
+            label: 'VPN Отдача (Up)',
+            data: vpnUploadHistory,
+            borderColor: '#c084fc',
+            backgroundColor: upGrad,
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHoverBorderWidth: 2,
+            pointHoverBackgroundColor: '#0f172a',
+            pointHoverBorderColor: '#c084fc'
+          }
+        ]
+      },
+      options: buildTrafficChartOptions('VPN Traffic')
+    });
+  }
+
+  // 2. Dedicated DIRECT Chart (in Split View)
+  const directCanvas = document.getElementById('traffic-chart-direct');
+  if (directCanvas && !trafficChartDirect) {
+    const ctx = directCanvas.getContext('2d');
+    const downGrad = ctx.createLinearGradient(0, 0, 0, 240);
+    downGrad.addColorStop(0, 'rgba(52, 211, 153, 0.38)');
+    downGrad.addColorStop(1, 'rgba(52, 211, 153, 0.0)');
+
+    const upGrad = ctx.createLinearGradient(0, 0, 0, 240);
+    upGrad.addColorStop(0, 'rgba(251, 191, 36, 0.38)');
+    upGrad.addColorStop(1, 'rgba(251, 191, 36, 0.0)');
+
+    trafficChartDirect = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: trafficLabels,
+        datasets: [
+          {
+            label: 'DIRECT Скачивание (Down)',
+            data: directDownloadHistory,
+            borderColor: '#34d399',
+            backgroundColor: downGrad,
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHoverBorderWidth: 2,
+            pointHoverBackgroundColor: '#0f172a',
+            pointHoverBorderColor: '#34d399'
+          },
+          {
+            label: 'DIRECT Отдача (Up)',
+            data: directUploadHistory,
+            borderColor: '#fbbf24',
+            backgroundColor: upGrad,
+            fill: true,
+            tension: 0.4,
+            borderWidth: 2.2,
+            pointRadius: 0,
+            pointHoverRadius: 5,
+            pointHoverBorderWidth: 2,
+            pointHoverBackgroundColor: '#0f172a',
+            pointHoverBorderColor: '#fbbf24'
+          }
+        ]
+      },
+      options: buildTrafficChartOptions('DIRECT Traffic')
+    });
+  }
+
+  // 3. Dedicated Per-Device Chart (in Split View)
+  const clientCanvas = document.getElementById('traffic-chart-clients');
+  if (clientCanvas && !trafficChartClients && trafficChartMode === 'split') {
+    const ctx = clientCanvas.getContext('2d');
+    trafficChartClients = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: trafficLabels,
+        datasets: buildClientChartDatasets(ctx)
+      },
+      options: buildTrafficChartOptions('Client Traffic')
+    });
+  }
+
+  // 4. Combined / Single Chart (in Single View)
+  const singleCanvas = document.getElementById('traffic-speed-chart');
+  if (singleCanvas && !trafficChart && trafficChartMode !== 'split') {
+    const ctx = singleCanvas.getContext('2d');
+    let datasets = [];
+
+    if (trafficChartMode === 'combined') {
+      const vpnDownGrad = ctx.createLinearGradient(0, 0, 0, 320);
+      vpnDownGrad.addColorStop(0, 'rgba(56, 189, 248, 0.3)');
+      vpnDownGrad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+      const directDownGrad = ctx.createLinearGradient(0, 0, 0, 320);
+      directDownGrad.addColorStop(0, 'rgba(52, 211, 153, 0.3)');
+      directDownGrad.addColorStop(1, 'rgba(52, 211, 153, 0.0)');
+
+      datasets = [
+        {
+          label: '🛡️ VPN Скачивание',
+          data: vpnDownloadHistory,
+          borderColor: '#38bdf8',
+          backgroundColor: vpnDownGrad,
+          fill: true,
+          tension: 0.4,
+          borderWidth: 2.4,
+          pointRadius: 0
+        },
+        {
+          label: '🛡️ VPN Отдача',
+          data: vpnUploadHistory,
+          borderColor: '#c084fc',
+          borderWidth: 2.2,
+          tension: 0.4,
+          pointRadius: 0
+        },
+        {
+          label: '🔌 DIRECT Скачивание',
+          data: directDownloadHistory,
+          borderColor: '#34d399',
+          backgroundColor: directDownGrad,
+          fill: true,
+          tension: 0.4,
+          borderWidth: 2.4,
+          pointRadius: 0
+        },
+        {
+          label: '🔌 DIRECT Отдача',
+          data: directUploadHistory,
+          borderColor: '#fbbf24',
+          borderWidth: 2.2,
+          tension: 0.4,
+          pointRadius: 0
+        }
+      ];
+    } else if (trafficChartMode === 'vpn') {
+      const vpnDownGrad = ctx.createLinearGradient(0, 0, 0, 320);
+      vpnDownGrad.addColorStop(0, 'rgba(56, 189, 248, 0.38)');
+      vpnDownGrad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+
+      datasets = [
+        {
+          label: '🛡️ VPN Скачивание',
+          data: vpnDownloadHistory,
+          borderColor: '#38bdf8',
+          backgroundColor: vpnDownGrad,
+          fill: true,
+          tension: 0.4,
+          borderWidth: 2.5,
+          pointRadius: 0
+        },
+        {
+          label: '🛡️ VPN Отдача',
+          data: vpnUploadHistory,
+          borderColor: '#c084fc',
+          borderWidth: 2.5,
+          tension: 0.4,
+          pointRadius: 0
+        }
+      ];
+    } else if (trafficChartMode === 'direct') {
+      const directDownGrad = ctx.createLinearGradient(0, 0, 0, 320);
+      directDownGrad.addColorStop(0, 'rgba(52, 211, 153, 0.38)');
+      directDownGrad.addColorStop(1, 'rgba(52, 211, 153, 0.0)');
+
+      datasets = [
+        {
+          label: '🔌 DIRECT Скачивание',
+          data: directDownloadHistory,
+          borderColor: '#34d399',
+          backgroundColor: directDownGrad,
+          fill: true,
+          tension: 0.4,
+          borderWidth: 2.5,
+          pointRadius: 0
+        },
+        {
+          label: '🔌 DIRECT Отдача',
+          data: directUploadHistory,
+          borderColor: '#fbbf24',
+          borderWidth: 2.5,
+          tension: 0.4,
+          pointRadius: 0
+        }
+      ];
+    }
+
+    trafficChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: trafficLabels,
+        datasets: datasets
+      },
+      options: buildTrafficChartOptions('Combined Traffic')
+    });
+  }
+}
+
+function updateAllTrafficCharts() {
+  if (currentTab !== 'traffic') return;
+  if (trafficChartVPN) trafficChartVPN.update('none');
+  if (trafficChartDirect) trafficChartDirect.update('none');
+  if (trafficChartClients) {
+    const clientCanvas = document.getElementById('traffic-chart-clients');
+    if (clientCanvas) {
+      const ctx = clientCanvas.getContext('2d');
+      trafficChartClients.data.datasets = buildClientChartDatasets(ctx);
+      trafficChartClients.update('none');
+    }
+  }
+  if (trafficChart) trafficChart.update('none');
 }
 
 function startTrafficStream() {
@@ -292,7 +837,7 @@ function startTrafficStream() {
   
   const statusEl = document.getElementById('traffic-status');
   
-  // We also poll connections in the background to calculate volume stats
+  // We also poll connections in the background to calculate volume stats & speed splits
   startConnectionsPolling(true); // silent background poll
   
   trafficAbortController = new AbortController();
@@ -304,11 +849,32 @@ function startTrafficStream() {
         await readHttpStream('/api/xkeen/traffic', (data) => {
           if (statusEl) statusEl.textContent = '● LIVE';
           
+          // Compute proportional split between VPN and DIRECT
+          const totInstDown = instVpnDown + instDirectDown;
+          const ratioDown = totInstDown > 0 ? (instVpnDown / totInstDown) : (directDownloadAccum > 0 && vpnDownloadAccum === 0 ? 0 : 0.85);
+          const curVpnDown = Math.min(data.down, Math.round(data.down * ratioDown));
+          const curDirectDown = Math.max(0, data.down - curVpnDown);
+
+          const totInstUp = instVpnUp + instDirectUp;
+          const ratioUp = totInstUp > 0 ? (instVpnUp / totInstUp) : (directUploadAccum > 0 && vpnUploadAccum === 0 ? 0 : 0.85);
+          const curVpnUp = Math.min(data.up, Math.round(data.up * ratioUp));
+          const curDirectUp = Math.max(0, data.up - curVpnUp);
+
           // Shift history values
           trafficDownloadHistory.shift();
           trafficDownloadHistory.push(data.down);
           trafficUploadHistory.shift();
           trafficUploadHistory.push(data.up);
+
+          vpnDownloadHistory.shift();
+          vpnDownloadHistory.push(curVpnDown);
+          vpnUploadHistory.shift();
+          vpnUploadHistory.push(curVpnUp);
+
+          directDownloadHistory.shift();
+          directDownloadHistory.push(curDirectDown);
+          directUploadHistory.shift();
+          directUploadHistory.push(curDirectUp);
 
           if (data.down > peakDownloadSpeed) {
             peakDownloadSpeed = data.down;
@@ -327,13 +893,19 @@ function startTrafficStream() {
             const speedUpEl = document.getElementById('speed-upload');
             if (speedDownEl) speedDownEl.textContent = formatSpeed(data.down);
             if (speedUpEl) speedUpEl.textContent = formatSpeed(data.up);
+
+            const vpnSpeedSub = document.getElementById('speed-vpn-current');
+            const directSpeedSub = document.getElementById('speed-direct-current');
+            if (vpnSpeedSub) vpnSpeedSub.textContent = `⬇️ ${formatSpeed(curVpnDown)}  ⬆️ ${formatSpeed(curVpnUp)}`;
+            if (directSpeedSub) directSpeedSub.textContent = `⬇️ ${formatSpeed(curDirectDown)}  ⬆️ ${formatSpeed(curDirectUp)}`;
+
+            const subchartVpnSpeed = document.getElementById('subchart-vpn-speed');
+            const subchartDirectSpeed = document.getElementById('subchart-direct-speed');
+            if (subchartVpnSpeed) subchartVpnSpeed.textContent = `⬇️ ${formatSpeed(curVpnDown)} • ⬆️ ${formatSpeed(curVpnUp)}`;
+            if (subchartDirectSpeed) subchartDirectSpeed.textContent = `⬇️ ${formatSpeed(curDirectDown)} • ⬆️ ${formatSpeed(curDirectUp)}`;
             
-            if (!trafficChart) {
-              initTrafficChart();
-            }
-            if (trafficChart) {
-              trafficChart.update('none'); // Update without transition animation
-            }
+            initAllTrafficCharts();
+            updateAllTrafficCharts();
           }
         }, trafficAbortController.signal);
       } catch (err) {
@@ -388,14 +960,17 @@ async function loadConnections() {
     const data = await res.json();
     const connections = data.connections || [];
     
-    // Aggregate VPN vs DIRECT traffic volumes
+    // Aggregate VPN vs DIRECT traffic volumes & calculate instant speed
     updateTrafficVolumes(connections);
     
     // Process packet log entries for Packet Monitor tab
     processPacketLogEntries(connections);
     
-    // If silent mode is active, do not render table rows or connection count to save CPU
-    if (connectionsSilentMode && currentTab !== 'packet-monitor') return;
+    const connectionsTabEl = document.getElementById('tab-content-connections');
+    const isConnectionsTabActive = connectionsTabEl && connectionsTabEl.classList.contains('active');
+    
+    // If not currently viewing connections or packet-monitor, and in silent mode, skip table rendering
+    if (!isConnectionsTabActive && connectionsSilentMode && currentTab !== 'packet-monitor' && currentTab !== 'connections') return;
     
     // Render connection count
     const countEl = document.getElementById('connections-count');
@@ -409,13 +984,37 @@ async function loadConnections() {
 }
 
 function updateTrafficVolumes(connectionsList) {
+  const now = Date.now();
+  const dt = Math.max(0.5, (now - lastVolumeCheckTime) / 1000);
+  lastVolumeCheckTime = now;
+
   const currentIds = new Set();
+  let stepVpnDown = 0;
+  let stepVpnUp = 0;
+  let stepDirectDown = 0;
+  let stepDirectUp = 0;
+
+  // Track per-client step bytes
+  const clientSteps = new Map(); // ip => { vpnDown: 0, vpnUp: 0, directDown: 0, directUp: 0 }
   
   for (const conn of connectionsList) {
+    if (!conn) continue;
     currentIds.add(conn.id);
     // Determine if connection goes direct
     const isDirect = conn.chains.includes('DIRECT') || (conn.chains.length > 0 && conn.chains[conn.chains.length - 1].toLowerCase() === 'direct');
     
+    // Extract source IP
+    let srcIp = '127.0.0.1';
+    if (conn.metadata && conn.metadata.sourceIP) {
+      srcIp = conn.metadata.sourceIP.replace(/^::ffff:/, '').split(':')[0];
+    }
+    if (!srcIp || srcIp === '::' || srcIp === '0.0.0.0') srcIp = '127.0.0.1';
+
+    if (!clientSteps.has(srcIp)) {
+      clientSteps.set(srcIp, { vpnDown: 0, vpnUp: 0, directDown: 0, directUp: 0 });
+    }
+    const cStep = clientSteps.get(srcIp);
+
     const lastState = activeConnectionsMap.get(conn.id);
     if (lastState) {
       const downDiff = Math.max(0, conn.download - lastState.download);
@@ -424,9 +1023,17 @@ function updateTrafficVolumes(connectionsList) {
       if (isDirect) {
         directDownloadAccum += downDiff;
         directUploadAccum += upDiff;
+        stepDirectDown += downDiff;
+        stepDirectUp += upDiff;
+        cStep.directDown += downDiff;
+        cStep.directUp += upDiff;
       } else {
         vpnDownloadAccum += downDiff;
         vpnUploadAccum += upDiff;
+        stepVpnDown += downDiff;
+        stepVpnUp += upDiff;
+        cStep.vpnDown += downDiff;
+        cStep.vpnUp += upDiff;
       }
     } else {
       // First time seeing this connection: count starting bytes
@@ -442,10 +1049,100 @@ function updateTrafficVolumes(connectionsList) {
     activeConnectionsMap.set(conn.id, {
       download: conn.download,
       upload: conn.upload,
-      isDirect
+      isDirect,
+      srcIp
     });
   }
   
+  // Compute instant rates (bytes/sec)
+  instVpnDown = Math.round(stepVpnDown / dt);
+  instVpnUp = Math.round(stepVpnUp / dt);
+  instDirectDown = Math.round(stepDirectDown / dt);
+  instDirectUp = Math.round(stepDirectUp / dt);
+
+  // Update client histories
+  const seenClientIps = new Set();
+  for (const [ip, step] of clientSteps.entries()) {
+    seenClientIps.add(ip);
+    const curVpnDown = Math.round(step.vpnDown / dt);
+    const curVpnUp = Math.round(step.vpnUp / dt);
+    const curDirectDown = Math.round(step.directDown / dt);
+    const curDirectUp = Math.round(step.directUp / dt);
+
+    let hist = clientTrafficHistories.get(ip);
+    if (!hist) {
+      hist = {
+        ip,
+        name: getClientDisplayName(ip),
+        vpnDown: Array(chartDataPointsLimit).fill(0),
+        vpnUp: Array(chartDataPointsLimit).fill(0),
+        directDown: Array(chartDataPointsLimit).fill(0),
+        directUp: Array(chartDataPointsLimit).fill(0),
+        curVpnDown: 0,
+        curVpnUp: 0,
+        curDirectDown: 0,
+        curDirectUp: 0,
+        lastSeen: now
+      };
+      clientTrafficHistories.set(ip, hist);
+    }
+
+    hist.name = getClientDisplayName(ip);
+    hist.curVpnDown = curVpnDown;
+    hist.curVpnUp = curVpnUp;
+    hist.curDirectDown = curDirectDown;
+    hist.curDirectUp = curDirectUp;
+    hist.lastSeen = now;
+
+    hist.vpnDown.shift();
+    hist.vpnDown.push(curVpnDown);
+    hist.vpnUp.shift();
+    hist.vpnUp.push(curVpnUp);
+    hist.directDown.shift();
+    hist.directDown.push(curDirectDown);
+    hist.directUp.shift();
+    hist.directUp.push(curDirectUp);
+  }
+
+  // Also include known clients from allClients if not in connections
+  if (typeof allClients !== 'undefined' && Array.isArray(allClients)) {
+    allClients.forEach(c => {
+      if (c && c.ip && !clientTrafficHistories.has(c.ip)) {
+        clientTrafficHistories.set(c.ip, {
+          ip: c.ip,
+          name: c.name || c.ip,
+          vpnDown: Array(chartDataPointsLimit).fill(0),
+          vpnUp: Array(chartDataPointsLimit).fill(0),
+          directDown: Array(chartDataPointsLimit).fill(0),
+          directUp: Array(chartDataPointsLimit).fill(0),
+          curVpnDown: 0,
+          curVpnUp: 0,
+          curDirectDown: 0,
+          curDirectUp: 0,
+          lastSeen: 0
+        });
+      }
+    });
+  }
+
+  // Shift 0 for clients without traffic in this tick
+  for (const [ip, hist] of clientTrafficHistories.entries()) {
+    if (!seenClientIps.has(ip)) {
+      hist.curVpnDown = 0;
+      hist.curVpnUp = 0;
+      hist.curDirectDown = 0;
+      hist.curDirectUp = 0;
+      hist.vpnDown.shift();
+      hist.vpnDown.push(0);
+      hist.vpnUp.shift();
+      hist.vpnUp.push(0);
+      hist.directDown.shift();
+      hist.directDown.push(0);
+      hist.directUp.shift();
+      hist.directUp.push(0);
+    }
+  }
+
   // Remove dead connections
   for (const id of activeConnectionsMap.keys()) {
     if (!currentIds.has(id)) {
@@ -459,6 +1156,17 @@ function updateTrafficVolumes(connectionsList) {
   
   if (vpnBytes) vpnBytes.textContent = formatBytes(vpnDownloadAccum + vpnUploadAccum);
   if (directBytes) directBytes.textContent = formatBytes(directDownloadAccum + directUploadAccum);
+
+  // Update client UI & chart
+  updateClientsTrafficUI();
+  if (trafficChartClients && currentTab === 'traffic' && trafficChartMode === 'split') {
+    const clientCanvas = document.getElementById('traffic-chart-clients');
+    if (clientCanvas) {
+      const ctx = clientCanvas.getContext('2d');
+      trafficChartClients.data.datasets = buildClientChartDatasets(ctx);
+      trafficChartClients.update('none');
+    }
+  }
 }
 
 function renderConnectionsTable(connections) {
@@ -466,85 +1174,98 @@ function renderConnectionsTable(connections) {
   if (!tbody) return;
   
   const searchInput = document.getElementById('conn-search-box');
-  const query = searchInput ? searchInput.value.toLowerCase() : '';
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
   
-  const filtered = connections.filter(c => {
-    const host = (c.metadata.host || c.metadata.destinationIP || '').toLowerCase();
-    const srcIp = (c.metadata.sourceIP || '').toLowerCase();
+  const filtered = (connections || []).filter(c => {
+    if (!c) return false;
+    const meta = c.metadata || {};
+    const host = (meta.host || meta.destinationIP || '').toLowerCase();
+    const srcIp = (meta.sourceIP || '').toLowerCase();
     const rule = (c.rule || '').toLowerCase();
-    const chain = c.chains.join(' ').toLowerCase();
+    const chain = (c.chains || []).join(' ').toLowerCase();
+    if (!query) return true;
     return host.includes(query) || srcIp.includes(query) || rule.includes(query) || chain.includes(query);
   });
   
   tbody.innerHTML = '';
   if (filtered.length === 0) {
-    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">Активные соединения отсутствуют</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 32px;">' +
+      (query ? 'Ничего не найдено по запросу "' + query + '"' : 'Активные сетевые соединения отсутствуют') +
+      '</td></tr>';
     return;
   }
   
   const now = Date.now();
   const newBytesMap = new Map();
+  const frag = document.createDocumentFragment();
   
   filtered.forEach(c => {
+    if (!c) return;
+    const meta = c.metadata || {};
     const tr = document.createElement('tr');
     
     // Source
     const tdSrc = document.createElement('td');
-    tdSrc.textContent = c.metadata.sourceIP + ':' + c.metadata.sourcePort;
+    tdSrc.textContent = (meta.sourceIP || '0.0.0.0') + ':' + (meta.sourcePort || '0');
     
     // Destination
     const tdDest = document.createElement('td');
-    tdDest.style.maxWidth = '280px';
+    tdDest.style.maxWidth = '260px';
     tdDest.style.overflow = 'hidden';
     tdDest.style.textOverflow = 'ellipsis';
     tdDest.style.whiteSpace = 'nowrap';
-    const destText = (c.metadata.host || c.metadata.destinationIP) + ':' + c.metadata.destinationPort;
-    tdDest.textContent = destText;
-    tdDest.title = destText;
+    const destHost = meta.host || meta.destinationIP || 'Неизвестно';
+    const destPort = meta.destinationPort ? ':' + meta.destinationPort : '';
+    tdDest.textContent = destHost + destPort;
+    tdDest.title = destHost + destPort;
     
     // Protocol
     const tdProto = document.createElement('td');
-    tdProto.innerHTML = `<span class="route-badge">${c.metadata.network.toUpperCase()}</span>`;
+    const netType = (meta.network || 'TCP').toUpperCase();
+    tdProto.innerHTML = `<span class="route-badge">${netType}</span>`;
     
     // Rule
     const tdRule = document.createElement('td');
-    tdRule.style.maxWidth = '280px';
+    tdRule.style.maxWidth = '240px';
     tdRule.style.overflow = 'hidden';
     tdRule.style.textOverflow = 'ellipsis';
     tdRule.style.whiteSpace = 'nowrap';
-    const ruleText = c.rule + (c.rulePayload ? ' (' + c.rulePayload + ')' : '');
+    const ruleText = (c.rule || 'DIRECT') + (c.rulePayload ? ' (' + c.rulePayload + ')' : '');
     tdRule.textContent = ruleText;
     tdRule.title = ruleText;
     
     // Chains
     const tdChains = document.createElement('td');
-    tdChains.style.maxWidth = '280px';
+    tdChains.style.maxWidth = '260px';
     tdChains.style.overflow = 'hidden';
     tdChains.style.textOverflow = 'ellipsis';
     tdChains.style.whiteSpace = 'nowrap';
-    tdChains.style.fontSize = '0.9rem';
-    const chainsText = c.chains.join(' ➔ ');
+    tdChains.style.fontSize = '0.88rem';
+    const chainsArr = Array.isArray(c.chains) ? c.chains : [];
+    const chainsText = chainsArr.length > 0 ? chainsArr.join(' ➔ ') : 'DIRECT';
     tdChains.textContent = chainsText;
     tdChains.title = chainsText;
     
-    // Traffic & Speed calculation
+    // Traffic & Speed
     const tdTraffic = document.createElement('td');
-    const totalBytes = c.download + c.upload;
+    const downBytes = c.download || 0;
+    const upBytes = c.upload || 0;
+    const totalBytes = downBytes + upBytes;
     let speedText = '';
     
     const prev = lastConnBytesMap.get(c.id);
     if (prev) {
       const timeDiff = (now - prev.time) / 1000;
       if (timeDiff > 0) {
-        const downDiff = c.download - prev.download;
-        const upDiff = c.upload - prev.upload;
+        const downDiff = Math.max(0, downBytes - prev.download);
+        const upDiff = Math.max(0, upBytes - prev.upload);
         const speed = (downDiff + upDiff) / timeDiff;
-        if (speed > 0) {
+        if (speed > 100) {
           speedText = ` (⚡ ${formatSpeed(speed)})`;
         }
       }
     }
-    newBytesMap.set(c.id, { download: c.download, upload: c.upload, time: now });
+    newBytesMap.set(c.id, { download: downBytes, upload: upBytes, time: now });
     tdTraffic.textContent = formatBytes(totalBytes) + speedText;
     
     // Action: Terminate connection
@@ -564,10 +1285,10 @@ function renderConnectionsTable(connections) {
       try {
         const res = await fetch('/api/xkeen/connections/' + encodeURIComponent(c.id), { method: 'DELETE' });
         if (res.ok) {
-          showToast('Соединение успешно закрыто!');
+          showToast('Соединение разорвано');
           loadConnections();
         } else {
-          showToast('Сбой удаления соединения', 'error');
+          showToast('Ошибка разрыва соединения', 'error');
           btnClose.disabled = false;
           btnClose.textContent = 'Разорвать';
         }
@@ -587,10 +1308,11 @@ function renderConnectionsTable(connections) {
     tr.appendChild(tdTraffic);
     tr.appendChild(tdAction);
     
-    tbody.appendChild(tr);
+    frag.appendChild(tr);
   });
   
-  prevConnBytesMap = newBytesMap;
+  tbody.appendChild(frag);
+  lastConnBytesMap = newBytesMap;
 }
 
 // ==========================================
@@ -1556,10 +2278,11 @@ function renderProxyGroups(proxiesData) {
     '⚙️Manual 1',
     '⚙️Manual 2',
     '⚙️Manual 3',
+    '⚡ goida-vpn-configs',
+    '⚡ Пробка 3 дня',
     '💎 StealthSurf',
     '💎 StealthSurf 2',
-    '🎱 GitHub',
-    '⚡ Пробка 3 дня'
+    '🎱 GitHub'
   ];
 
   groups.sort((a, b) => {
@@ -1606,9 +2329,19 @@ function renderProxyGroups(proxiesData) {
       }
     });
 
+    // Выделяем эмодзи из названия группы, если оно есть
+    let extractedEmoji = '';
+    let cleanGroupName = group.name;
+    const emojiRegex = /^([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s*/u;
+    const emojiMatch = group.name.match(emojiRegex);
+    if (emojiMatch) {
+      extractedEmoji = emojiMatch[1];
+      cleanGroupName = group.name.slice(emojiMatch[0].length).trim();
+    }
+
     const typeIcons = { selector: '🔀', urltest: '⚡', 'url-test': '⚡', fallback: '🛡️', loadbalance: '⚖️', 'load-balance': '⚖️', relay: '🔗' };
     const typeLabels = { selector: 'Selector', urltest: 'URLTest', 'url-test': 'URLTest', fallback: 'Fallback', loadbalance: 'LoadBalance', 'load-balance': 'LoadBalance', relay: 'Relay' };
-    const icon = typeIcons[group.type.toLowerCase()] || '📡';
+    const cardIcon = extractedEmoji || typeIcons[group.type.toLowerCase()] || '📡';
     const typeLabel = typeLabels[group.type.toLowerCase()] || group.type;
 
     let iconHtml = '';
@@ -1653,8 +2386,8 @@ function renderProxyGroups(proxiesData) {
     header.className = 'pgc-header';
     header.innerHTML = `
       <div class="pgc-header-left">
-        <span class="pgc-icon" style="display: flex; align-items: center;">${iconHtml}<span class="fallback-icon" style="${iconHtml ? 'display: none;' : 'display: inline-block;'}">${icon}</span></span>
-        <span class="pgc-name">${group.name}</span>
+        <span class="pgc-icon" style="display: flex; align-items: center;">${iconHtml}<span class="fallback-icon" style="${iconHtml ? 'display: none;' : 'display: inline-block;'}">${cardIcon}</span></span>
+        <span class="pgc-name" title="${group.name}">${cleanGroupName || group.name}</span>
         <span class="pgc-meta">·&nbsp;${typeLabel}&nbsp;·&nbsp;${aliveCount}/${totalNodes}</span>
       </div>
       <div class="pgc-header-right">
@@ -2200,15 +2933,18 @@ async function healthcheckAllGroups() {
     const providers = data.providers || {};
 
     const tasks = [];
-    tasks.push(
-      fetch('/api/proxies/ping', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: 'DIRECT' })
-      }).then(r => r.json()).then(d => {
-        if (d.success && d.delay > 0) directClientCachedDelay = d.delay;
-      }).catch(() => {})
-    );
+    const staticTargets = ['DIRECT', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
+    staticTargets.forEach(targetName => {
+      tasks.push(
+        fetch('/api/proxies/ping', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: targetName })
+        }).then(r => r.json()).then(d => {
+          if (d.success && d.delay > 0 && targetName === 'DIRECT') directClientCachedDelay = d.delay;
+        }).catch(() => {})
+      );
+    });
     for (const [name, prov] of Object.entries(providers)) {
       if (prov.vehicleType !== 'Compatible' && name !== 'default') {
         tasks.push(
@@ -2721,7 +3457,7 @@ function renderClientsTable() {
       tdDirectTraffic.textContent = '—';
     }
     
-    // VPN Toggle & Group dropdown select
+    // VPN Toggle & Group dropdown select & Zapret selector
     const tdToggle = document.createElement('td');
     tdToggle.style.textAlign = 'center';
     
@@ -2729,10 +3465,12 @@ function renderClientsTable() {
     container.style.display = 'flex';
     container.style.alignItems = 'center';
     container.style.justifyContent = 'center';
-    container.style.gap = '12px';
+    container.style.gap = '8px';
+    container.style.flexWrap = 'wrap';
     
     const label = document.createElement('label');
     label.className = 'switch';
+    label.title = 'Включить / выключить VPN для устройства';
     
     const realInput = document.createElement('input');
     realInput.type = 'checkbox';
@@ -2745,20 +3483,21 @@ function renderClientsTable() {
     label.appendChild(slider);
     container.appendChild(label);
     
+    // VPN Group Select
     const select = document.createElement('select');
     select.className = 'group-select';
+    select.title = 'Основная группа VPN для устройства';
     select.style.background = 'var(--bg-card)';
     select.style.color = 'var(--text-primary)';
     select.style.border = '1px solid var(--border-color)';
     select.style.borderRadius = '6px';
     select.style.padding = '4px 8px';
-    select.style.fontSize = '0.85rem';
+    select.style.fontSize = '0.82rem';
     select.style.outline = 'none';
     select.style.cursor = 'pointer';
     select.disabled = !c.vpnEnabled;
     
     const currentGroup = c.group || '🚀Auto-Best';
-
 
     allProxyGroups.forEach(g => {
       if (g === 'DIRECT' || g === 'REJECT') return;
@@ -2770,6 +3509,36 @@ function renderClientsTable() {
       }
       select.appendChild(opt);
     });
+
+    // Zapret Select
+    const selectZapret = document.createElement('select');
+    selectZapret.className = 'group-select zapret-select';
+    selectZapret.title = 'Стратегия Запрета YouTube для устройства';
+    selectZapret.style.background = 'rgba(245, 158, 11, 0.1)';
+    selectZapret.style.color = '#f59e0b';
+    selectZapret.style.border = '1px solid rgba(245, 158, 11, 0.3)';
+    selectZapret.style.borderRadius = '6px';
+    selectZapret.style.padding = '4px 8px';
+    selectZapret.style.fontSize = '0.82rem';
+    selectZapret.style.outline = 'none';
+    selectZapret.style.cursor = 'pointer';
+
+    const zapretOptions = [
+      { value: 'default', text: '⚡ Запрет: Авто' },
+      { value: 'nfqws1', text: '⚡ NFQWS 1 (ТВ)' },
+      { value: 'nfqws2', text: '⚡ NFQWS 2 (Смартфон/ПК)' }
+    ];
+
+    const currentZapret = c.zapretMode || 'default';
+    zapretOptions.forEach(opt => {
+      const el = document.createElement('option');
+      el.value = opt.value;
+      el.textContent = opt.text;
+      if (opt.value === currentZapret) {
+        el.selected = true;
+      }
+      selectZapret.appendChild(el);
+    });
     
     realInput.onchange = async () => {
       select.disabled = !realInput.checked;
@@ -2779,8 +3548,13 @@ function renderClientsTable() {
     select.onchange = async () => {
       await changeClientGroup(c.ip, select.value, select);
     };
+
+    selectZapret.onchange = async () => {
+      await changeClientZapret(c.ip, selectZapret.value, selectZapret);
+    };
     
     container.appendChild(select);
+    container.appendChild(selectZapret);
     tdToggle.appendChild(container);
     
     tr.appendChild(tdDevice);
@@ -2835,6 +3609,28 @@ async function changeClientGroup(ip, group, selectEl) {
     loadClients();
   } catch (err) {
     showToast(`Ошибка смены группы: ${err.message}`, 'error');
+    loadClients();
+  } finally {
+    selectEl.disabled = false;
+  }
+}
+
+async function changeClientZapret(ip, mode, selectEl) {
+  selectEl.disabled = true;
+  try {
+    const res = await fetch('/api/clients/zapret', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ip, mode })
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok || !data.success) throw new Error(data.message || data.error || 'HTTP ' + res.status);
+    
+    const modeLabel = mode === 'nfqws1' ? '⚡ NFQWS 1 (ТВ)' : (mode === 'nfqws2' ? '⚡ NFQWS 2 (Смартфон/ПК)' : '⚡ По умолчанию');
+    showToast(`Для устройства ${ip} установлен Запрет: ${modeLabel}`);
+    loadClients();
+  } catch (err) {
+    showToast(`Ошибка смены стратегии Запрета: ${err.message}`, 'error');
     loadClients();
   } finally {
     selectEl.disabled = false;

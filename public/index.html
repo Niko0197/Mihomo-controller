@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.6.12">
+  <link rel="stylesheet" href="/app.css?v=1.7.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.6.12" defer></script>
-  <script src="/app_monitoring.js?v=1.6.12" defer></script>
+  <script src="/app.js?v=1.7.0" defer></script>
+  <script src="/app_monitoring.js?v=1.7.0" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -121,6 +121,7 @@
         <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
 
         <div class="nav-section-title">НАСТРОЙКИ</div>
+        <button class="tab-btn" id="tab-btn-dpi" onclick="switchTab('dpi')">⚡ Тюнер DPI (ByeDPI)</button>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
 
@@ -155,11 +156,12 @@
         </div>
 
         <div class="top-bar-right">
-          <div class="mode-switcher-container" title="Переключение глобального режима маршрутизации ядра Mihomo">
-            <span class="mode-switcher-label">Режим ядра:</span>
+          <div class="mode-switcher-container">
+            <span class="mode-switcher-label">Режим:</span>
             <div class="mode-toggle-group">
-              <button class="mode-btn active" id="mode-btn-rule" onclick="setGlobalMihomoMode('rule')">🛡️ Rule<span class="mode-btn-full"> (Маршруты)</span></button>
-              <button class="mode-btn" id="mode-btn-direct" onclick="setGlobalMihomoMode('direct')">🔌 Direct<span class="mode-btn-full"> (Авар. выкл)</span></button>
+              <button class="mode-btn active" id="mode-btn-rule" onclick="setGlobalMihomoMode('rule')">🛡️ VPN<span class="mode-btn-full"> (Маршруты)</span></button>
+              <button class="mode-btn" id="mode-btn-zapret" onclick="setGlobalMihomoMode('zapret')">⚡ Запрет<span class="mode-btn-full"> (Без VPN)</span></button>
+              <button class="mode-btn" id="mode-btn-direct" onclick="setGlobalMihomoMode('direct')">🔌 Direct<span class="mode-btn-full"> (Выкл)</span></button>
             </div>
           </div>
         </div>
@@ -355,9 +357,17 @@
             <span class="traffic-title-icon">📊</span>
             <span class="traffic-title-text">Мониторинг трафика</span>
           </div>
-          <div class="traffic-live-badge" id="traffic-status-badge">
-            <span class="live-dot pulse"></span>
-            <span id="traffic-status">Подключение...</span>
+          <div class="traffic-header-controls">
+            <div class="traffic-mode-toggle">
+              <button class="tmt-btn active" id="tmt-split" onclick="setTrafficChartMode('split')">📈 Раздельные графики</button>
+              <button class="tmt-btn" id="tmt-combined" onclick="setTrafficChartMode('combined')">📊 Сводный (Все)</button>
+              <button class="tmt-btn" id="tmt-vpn" onclick="setTrafficChartMode('vpn')">🛡️ Только VPN</button>
+              <button class="tmt-btn" id="tmt-direct" onclick="setTrafficChartMode('direct')">🔌 Только Direct</button>
+            </div>
+            <div class="traffic-live-badge" id="traffic-status-badge">
+              <span class="live-dot pulse"></span>
+              <span id="traffic-status">Подключение...</span>
+            </div>
           </div>
         </div>
         
@@ -365,7 +375,7 @@
           <div class="traffic-stat-card speed-down">
             <div class="stat-header">
               <span class="stat-icon-wrapper down">⬇️</span>
-              <span class="stat-label">Скачивание</span>
+              <span class="stat-label">Скачивание (Всего)</span>
             </div>
             <div class="stat-value" id="speed-download">0 KB/s</div>
             <div class="stat-sub" id="speed-download-peak">Пик: 0 KB/s</div>
@@ -374,7 +384,7 @@
           <div class="traffic-stat-card speed-up">
             <div class="stat-header">
               <span class="stat-icon-wrapper up">⬆️</span>
-              <span class="stat-label">Отдача</span>
+              <span class="stat-label">Отдача (Всего)</span>
             </div>
             <div class="stat-value" id="speed-upload">0 KB/s</div>
             <div class="stat-sub" id="speed-upload-peak">Пик: 0 KB/s</div>
@@ -386,7 +396,7 @@
               <span class="stat-label">VPN Трафик</span>
             </div>
             <div class="stat-value" id="vol-vpn-bytes">0.00 MB</div>
-            <div class="stat-sub">За сессию</div>
+            <div class="stat-sub" id="speed-vpn-current">Скорость: 0 KB/s</div>
           </div>
 
           <div class="traffic-stat-card vol-direct">
@@ -395,11 +405,69 @@
               <span class="stat-label">DIRECT Трафик</span>
             </div>
             <div class="stat-value" id="vol-direct-bytes">0.00 MB</div>
-            <div class="stat-sub">Прямой поток</div>
+            <div class="stat-sub" id="speed-direct-current">Скорость: 0 KB/s</div>
           </div>
         </div>
 
-        <div class="chart-wrapper-box">
+        <!-- Раздельный вид: 2 отдельных графика (VPN и DIRECT) -->
+        <div id="traffic-split-view" class="traffic-split-grid traffic-view-container view-visible">
+          <div class="traffic-subchart-card">
+            <div class="subchart-header">
+              <div class="subchart-title"><span class="subchart-icon">🛡️</span> VPN Трафик (Защищенные туннели)</div>
+              <div class="subchart-live-speed" id="subchart-vpn-speed">⬇️ 0 KB/s &nbsp;•&nbsp; ⬆️ 0 KB/s</div>
+            </div>
+            <div class="chart-container" style="position: relative; height: 260px;">
+              <canvas id="traffic-chart-vpn"></canvas>
+            </div>
+          </div>
+
+          <div class="traffic-subchart-card">
+            <div class="subchart-header">
+              <div class="subchart-title"><span class="subchart-icon">🔌</span> DIRECT Трафик (Прямой интернет / Запрет)</div>
+              <div class="subchart-live-speed" id="subchart-direct-speed">⬇️ 0 KB/s &nbsp;•&nbsp; ⬆️ 0 KB/s</div>
+            </div>
+            <div class="chart-container" style="position: relative; height: 260px;">
+              <canvas id="traffic-chart-direct"></canvas>
+            </div>
+          </div>
+
+          <!-- Новый график: Потребление трафика по каждому подключенному устройству -->
+          <div class="traffic-subchart-card traffic-client-chart-card" style="grid-column: 1 / -1; margin-top: 6px;">
+            <div class="subchart-header" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+              <div class="subchart-title" style="display: flex; align-items: center; gap: 10px;">
+                <span class="subchart-icon">💻</span>
+                <div>
+                  <span style="font-weight: 700; font-size: 1rem; color: var(--text);">Трафик по устройствам в сети</span>
+                  <div style="font-size: 0.78rem; color: var(--text-muted); font-weight: normal;">Раздельный мониторинг прямого (DIRECT) и VPN трафика по каждому активному гаджету</div>
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                <div style="display: flex; align-items: center; gap: 6px;">
+                  <label for="traffic-client-select" style="font-size: 0.8rem; color: var(--text-muted);">Устройство:</label>
+                  <select id="traffic-client-select" class="form-select" onchange="setTrafficSelectedClient(this.value)" style="background: rgba(20, 24, 36, 0.9); border: 1px solid var(--border-color); color: var(--text); padding: 5px 12px; border-radius: 8px; font-size: 0.84rem; outline: none; cursor: pointer; min-width: 220px;">
+                    <option value="ALL">📊 Все активные устройства (Сводный)</option>
+                  </select>
+                </div>
+                <div class="subchart-live-speed" id="subchart-client-speed" style="font-size: 0.82rem; font-weight: 600;">
+                  🛡️ VPN: 0 Кбит/с • 🔌 Direct: 0 Кбит/с
+                </div>
+              </div>
+            </div>
+
+            <div class="chart-container" style="position: relative; height: 280px; margin-top: 10px;">
+              <canvas id="traffic-chart-clients"></canvas>
+            </div>
+
+            <!-- Чипы быстрого выбора устройств со скоростями в моменте -->
+            <div id="traffic-clients-chips-container" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.06);">
+              <span style="font-size: 0.78rem; color: var(--text-muted); padding: 4px 0;">Загрузка подключенных устройств...</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Единый / Одиночный вид: 1 большой график -->
+        <div id="traffic-single-view" class="chart-wrapper-box traffic-view-container view-hidden" style="display: none;">
           <div class="chart-container" style="position: relative; height: 360px;">
             <canvas id="traffic-speed-chart"></canvas>
           </div>
@@ -725,6 +793,194 @@
             <p>Вы еще не добавили ни одного быстрого правила. Используйте форму выше.</p>
           </div>
         </div>
+      </div>
+    </div>
+
+    <!-- Вкладка: Тюнер DPI (ByeDPI / Zapret) -->
+    <div id="tab-content-dpi" class="tab-content">
+      <div class="card">
+        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px; margin-bottom: 20px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 1.3rem;">⚡</span>
+            <div>
+              <div style="font-weight: 700; font-size: 1.15rem; color: var(--text);">Тюнер DPI и Бенчмарк (ByeDPI)</div>
+              <div style="font-size: 0.85rem; font-weight: normal; color: var(--text-muted);">
+                Безопасный подбор стратегий обхода блокировок на тестовом порту 10809 без разрыва связи
+              </div>
+            </div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="btn-run-dpi-benchmark" onclick="runDpiBenchmark()">
+              🚀 Запустить бенчмарк
+            </button>
+            <button class="btn" id="btn-run-dpi-autoheal" onclick="triggerDpiAutoHealNow()" title="Принудительно запустить фоновую авто-проверку">
+              ⚡ Авто-проверка сейчас
+            </button>
+            <button class="btn" onclick="toggleDpiSettingsDrawer()" title="Настройки расписания и порогов">
+              ⚙️ Настройки
+            </button>
+          </div>
+        </div>
+
+        <!-- Настройки авто-ротации (выдвижная панель) -->
+        <div id="dpi-settings-drawer" style="display: none; margin-bottom: 24px; padding: 18px 20px; background: rgba(255, 255, 255, 0.03); border: 1px solid var(--border-color); border-radius: 12px;">
+          <h4 style="font-family: var(--font-outfit); font-size: 1rem; margin-bottom: 12px; color: var(--text); display: flex; align-items: center; gap: 8px;">
+            ⚙️ Параметры фоновой авто-ротации (Auto-Heal)
+          </h4>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 16px; align-items: center;">
+            <label style="display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text);">
+              <input type="checkbox" id="dpi-autoheal-enabled" checked onchange="saveDpiAutoHealSettings()">
+              <span>Включить авто-проверку</span>
+            </label>
+            <div>
+              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Интервал проверки (часов):</label>
+              <input type="number" id="dpi-autoheal-interval" class="search-input" value="24" min="1" max="168" onchange="saveDpiAutoHealSettings()" style="height: 36px;">
+            </div>
+            <div>
+              <label style="font-size: 0.8rem; color: var(--text-muted); display: block; margin-bottom: 4px;">Минимальный порог скорости (Мбит/с):</label>
+              <input type="number" id="dpi-autoheal-threshold" class="search-input" value="8" min="1" max="100" onchange="saveDpiAutoHealSettings()" style="height: 36px;">
+            </div>
+          </div>
+          <div id="dpi-autoheal-last-log" style="margin-top: 12px; font-size: 0.8rem; color: var(--text-muted);">
+            Статус: Ожидание первого запуска
+          </div>
+        </div>
+
+        <!-- Сетка слотов (Слот 1 — ТВ, Слот 2 — Смартфоны/ПК) -->
+        <div class="dpi-slots-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 18px; margin-bottom: 28px;">
+          
+          <!-- Карточка Слот 1: ТВ -->
+          <div class="dpi-slot-card" id="dpi-card-slot1">
+            <div class="dpi-slot-header">
+              <div class="dpi-slot-title-box">
+                <span class="dpi-slot-icon">📺</span>
+                <div>
+                  <div class="dpi-slot-name">Слот 1: ⚡ NFQWS 1 (ТВ)</div>
+                  <div class="dpi-slot-sub">Порт 10805 • Служба S52ciadpi-1</div>
+                </div>
+              </div>
+              <button class="btn-lock-toggle" id="dpi-slot1-lock-btn" onclick="toggleSlotLockUI('slot1')">
+                <span class="lock-icon">🔓</span>
+                <span class="lock-text">Авто-ротация</span>
+              </button>
+            </div>
+            <div class="dpi-slot-body">
+              <div class="dpi-slot-args-label">Активные флаги:</div>
+              <div class="dpi-slot-args" id="dpi-slot1-args">--split 1+s --disorder 1+s</div>
+              <div class="dpi-slot-telemetry" id="dpi-slot1-telemetry">
+                <div class="dpi-telemetry-item">
+                  <span class="telemetry-label">YouTube 4K:</span>
+                  <strong class="telemetry-val" id="dpi-slot1-yt-val">-</strong>
+                </div>
+                <div class="dpi-telemetry-item">
+                  <span class="telemetry-label">Discord:</span>
+                  <strong class="telemetry-val" id="dpi-slot1-disc-val">-</strong>
+                </div>
+                <div class="dpi-telemetry-item">
+                  <span class="telemetry-label">Пинг:</span>
+                  <strong class="telemetry-val" id="dpi-slot1-ping-val">-</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Карточка Слот 2: Смартфон/ПК -->
+          <div class="dpi-slot-card" id="dpi-card-slot2">
+            <div class="dpi-slot-header">
+              <div class="dpi-slot-title-box">
+                <span class="dpi-slot-icon">📱</span>
+                <div>
+                  <div class="dpi-slot-name">Слот 2: ⚡ NFQWS 2 (Смартфон / ПК)</div>
+                  <div class="dpi-slot-sub">Порт 10806 • Служба S53ciadpi-2</div>
+                </div>
+              </div>
+              <button class="btn-lock-toggle locked" id="dpi-slot2-lock-btn" onclick="toggleSlotLockUI('slot2')">
+                <span class="lock-icon">🔒</span>
+                <span class="lock-text">Зафиксировано</span>
+              </button>
+            </div>
+            <div class="dpi-slot-body">
+              <div class="dpi-slot-args-label">Активные флаги:</div>
+              <div class="dpi-slot-args" id="dpi-slot2-args">--tlsrec 1</div>
+              <div class="dpi-slot-telemetry" id="dpi-slot2-telemetry">
+                <div class="dpi-telemetry-item">
+                  <span class="telemetry-label">YouTube 4K:</span>
+                  <strong class="telemetry-val" id="dpi-slot2-yt-val">-</strong>
+                </div>
+                <div class="dpi-telemetry-item">
+                  <span class="telemetry-label">Discord:</span>
+                  <strong class="telemetry-val" id="dpi-slot2-disc-val">-</strong>
+                </div>
+                <div class="dpi-telemetry-item">
+                  <span class="telemetry-label">Пинг:</span>
+                  <strong class="telemetry-val" id="dpi-slot2-ping-val">-</strong>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Блок тестирования произвольного пресета -->
+        <div class="dpi-custom-test-box" style="margin-bottom: 28px; padding: 18px 20px; background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px;">
+          <h4 style="font-family: var(--font-outfit); font-size: 1rem; margin-bottom: 8px; color: var(--text); display: flex; align-items: center; gap: 8px;">
+            🧪 Проверить пользовательский набор флагов
+          </h4>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 12px;">
+            Введите любые флаги ByeDPI для проверки на тестовом порту 10809 (например: <code>--split 1+s --disorder 2 --fake -1 --ttl 7</code>)
+          </p>
+          <div style="display: flex; gap: 12px; flex-wrap: wrap;">
+            <input type="text" id="dpi-custom-args-input" class="search-input" placeholder="--split 1+s --disorder 1+s" style="flex: 1; min-width: 260px;">
+            <button class="btn btn-primary" id="btn-test-custom-dpi" onclick="testCustomDpiArgs()">⚡ Проверить пресет</button>
+          </div>
+          <div id="dpi-custom-result" style="display: none; margin-top: 14px; padding: 12px 16px; border-radius: 8px; background: rgba(0,0,0,0.2); border: 1px dashed var(--border-color);">
+            <!-- Результат кастомного теста -->
+          </div>
+        </div>
+
+        <!-- Прогресс-бар бенчмарка -->
+        <div id="dpi-benchmark-progress-container" style="display: none; margin-bottom: 24px; padding: 18px 20px; border-radius: 12px; background: rgba(103, 80, 164, 0.1); border: 1px solid rgba(103, 80, 164, 0.3);">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+            <span style="font-weight: 600; color: var(--text); font-size: 0.95rem;" id="dpi-progress-title">Идёт бенчмарк стратегий...</span>
+            <span style="font-size: 0.85rem; color: var(--text-muted);" id="dpi-progress-counter">0 / 0</span>
+          </div>
+          <div class="sys-progress-bar" style="height: 6px; background: rgba(255, 255, 255, 0.08); border-radius: 3px; overflow: hidden;">
+            <div id="dpi-progress-bar" style="width: 0%; height: 100%; background: linear-gradient(90deg, #6750a4, #3ddc84); transition: width 0.3s ease;"></div>
+          </div>
+          <div style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);" id="dpi-progress-desc">
+            Изолированный порт 10809 активен • Основная сеть работает в штатном режиме
+          </div>
+        </div>
+
+        <!-- Таблица результатов бенчмарка -->
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px;">
+          <h3 style="font-family: var(--font-outfit); font-size: 1.1rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px;">
+            📊 Таблица стратегий и результатов
+          </h3>
+          <span style="font-size: 0.85rem; color: var(--text-muted);" id="dpi-last-benchmark-time"></span>
+        </div>
+
+        <div id="dpi-table-wrapper" style="overflow-x: auto; border: 1px solid var(--border-color); border-radius: 12px;">
+          <table class="dpi-benchmark-table" style="width: 100%; border-collapse: collapse; font-size: 0.88rem;">
+            <thead>
+              <tr style="background: rgba(255, 255, 255, 0.03); border-bottom: 2px solid var(--border-color);">
+                <th style="padding: 14px 16px; text-align: left;">Пресет / Описание</th>
+                <th style="padding: 14px 16px; text-align: left;">Аргументы ByeDPI</th>
+                <th style="padding: 14px 16px; text-align: center; width: 150px;">YouTube 4K</th>
+                <th style="padding: 14px 16px; text-align: center; width: 110px;">Discord</th>
+                <th style="padding: 14px 16px; text-align: center; width: 90px;">Пинг</th>
+                <th style="padding: 14px 16px; text-align: right; width: 250px;">Применить к слоту</th>
+              </tr>
+            </thead>
+            <tbody id="dpi-benchmark-tbody">
+              <tr>
+                <td colspan="6" style="text-align: center; color: var(--text-muted); padding: 40px 0;">
+                  Нажмите кнопку «🚀 Запустить бенчмарк», чтобы протестировать все стратегии
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
       </div>
     </div>
 

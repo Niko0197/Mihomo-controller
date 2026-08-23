@@ -6,6 +6,7 @@ const path = require('path');
 const yamlUtils = require('./yaml_utils');
 const systemStats = require('./system_stats');
 const clientsManager = require('./clients_manager');
+const dpiManager = require('./dpi_manager');
 
 const PORT = 4000;
 const API_PORT = 9090;
@@ -1404,9 +1405,13 @@ function getConfigFilesList() {
         try {
           if (fs.statSync(fullPath).isFile()) {
             const id = file.replace('.yaml', '');
+            let name = id;
+            if (id === 'config') name = 'config (Основной конфиг)';
+            else if (id === 'clients_rules') name = 'clients_rules (Правила устройств)';
+            
             files.push({
               id: id,
-              name: id,
+              name: name,
               path: fullPath
             });
           }
@@ -1415,40 +1420,12 @@ function getConfigFilesList() {
     }
   }
   
-  // 2. Файлы правил в /opt/etc/mihomo/rules/
-  const rulesDir = path.join(baseDir, 'rules');
-  if (fs.existsSync(rulesDir)) {
-    const ruleFiles = fs.readdirSync(rulesDir);
-    for (const file of ruleFiles) {
-      if (file.endsWith('.yaml')) {
-        const fullPath = path.join(rulesDir, file);
-        try {
-          if (fs.statSync(fullPath).isFile()) {
-            const id = 'rules_' + file.replace('.yaml', '');
-            files.push({
-              id: id,
-              name: 'rules/' + file.replace('.yaml', ''),
-              path: fullPath
-            });
-          }
-        } catch (e) {}
-      }
-    }
-  }
-  
-  // Добавляем виртуальный файл скомпилированного конфига для экспорта
-  files.push({
-    id: 'config_compiled',
-    name: 'config_compiled (экспорт)',
-    path: 'virtual'
-  });
-  
-  // Всегда возвращаем первым config
+  // Приоритетная сортировка: config -> clients_rules -> остальные
   files.sort((a, b) => {
-    if (a.id === 'config') return -1;
-    if (b.id === 'config') return 1;
-    if (a.id === 'config_compiled') return -1;
-    if (b.id === 'config_compiled') return 1;
+    const order = { 'config': 1, 'clients_rules': 2 };
+    const orderA = order[a.id] || 99;
+    const orderB = order[b.id] || 99;
+    if (orderA !== orderB) return orderA - orderB;
     return a.name.localeCompare(b.name);
   });
   
@@ -1456,9 +1433,6 @@ function getConfigFilesList() {
 }
 
 function getFilePathFromId(id) {
-  if (id === 'config_compiled') {
-    return 'virtual';
-  }
   if (!id || id === 'config') {
     return configPath;
   }
@@ -1632,46 +1606,6 @@ function handleGetConfig(req, res) {
   try {
     const urlObj = new URL(req.url, 'http://' + req.headers.host);
     const fileId = urlObj.searchParams.get('file') || 'config';
-    
-    if (fileId === 'config_compiled') {
-      if (fs.existsSync(configPath)) {
-        const configText = fs.readFileSync(configPath, 'utf8');
-        let compiled = compileConfigForExport(configText);
-        compiled = stripLocalRules(compiled);
-        
-        const routingParam = urlObj.searchParams.get('routing');
-        if (routingParam === 'false') {
-          compiled = stripRoutingRules(compiled);
-        }
-        
-        res.writeHead(200, { 
-          'Content-Type': 'text/yaml; charset=utf-8',
-          'Content-Disposition': 'inline; filename="mihomo_config.yaml"',
-          'Profile-Update-Interval': '24'
-        });
-        res.end(compiled);
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Главный конфигурационный файл не найден');
-      }
-      return;
-    }
-
-    if (fileId === 'outbound_rules' || fileId === 'rules') {
-      if (fs.existsSync(configPath)) {
-        const configText = fs.readFileSync(configPath, 'utf8');
-        const outboundRules = extractOutboundRules(configText);
-        res.writeHead(200, { 
-          'Content-Type': 'text/yaml; charset=utf-8',
-          'Content-Disposition': 'inline; filename="outbound_rules.yaml"'
-        });
-        res.end(outboundRules);
-      } else {
-        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
-        res.end('Главный конфигурационный файл не найден');
-      }
-      return;
-    }
 
     const filePath = getFilePathFromId(fileId);
     if (!filePath) {
@@ -1698,12 +1632,6 @@ function handleGetConfig(req, res) {
 function handleSaveConfig(req, res) {
   const urlObj = new URL(req.url, 'http://' + req.headers.host);
   const fileId = urlObj.searchParams.get('file') || 'config';
-  
-  if (fileId === 'config_compiled') {
-    res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: false, message: 'Скомпилированный файл предназначен только для чтения и экспорта' }));
-    return;
-  }
 
   const filePath = getFilePathFromId(fileId);
   if (!filePath) {
@@ -1724,6 +1652,12 @@ function handleSaveConfig(req, res) {
       }
       fs.writeFileSync(filePath, body, 'utf8');
       
+      if (fileId === 'clients_rules') {
+        if (clientsManager && typeof clientsManager.syncClientsRulesToConfig === 'function') {
+          clientsManager.syncClientsRulesToConfig();
+        }
+      }
+
       const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
       if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
         let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
@@ -1867,7 +1801,171 @@ async function handleGetProviders(req, res) {
   }
 }
 
-// POST /api/providers/add
+function normalizeSubscriptionUrl(url) {
+  if (!url) return url;
+  let cleanUrl = String(url).trim();
+  if (cleanUrl.includes('github.com') || cleanUrl.includes('raw.githubusercontent.com')) {
+    cleanUrl = cleanUrl
+      .replace('https://github.com/', 'https://raw.githubusercontent.com/')
+      .replace('/raw/refs/heads/', '/')
+      .replace('/raw/main/', '/main/')
+      .replace('/raw/master/', '/master/')
+      .replace('/refs/heads/', '/');
+  }
+  if (cleanUrl.endsWith('.txt') || cleanUrl.includes('/githubmirror/')) {
+    return `http://127.0.0.1:4000/api/sub_cleaner?url=${encodeURIComponent(cleanUrl)}`;
+  }
+  return cleanUrl;
+}
+
+function checkNodePing(host, port, timeoutMs = 800) {
+  return new Promise(resolve => {
+    const start = Date.now();
+    const socket = new (require('net')).Socket();
+    let isDone = false;
+
+    socket.setTimeout(timeoutMs);
+
+    socket.on('connect', () => {
+      if (!isDone) {
+        isDone = true;
+        const duration = Date.now() - start;
+        socket.destroy();
+        resolve(duration);
+      }
+    });
+
+    socket.on('error', () => {
+      if (!isDone) {
+        isDone = true;
+        socket.destroy();
+        resolve(null);
+      }
+    });
+
+    socket.on('timeout', () => {
+      if (!isDone) {
+        isDone = true;
+        socket.destroy();
+        resolve(null);
+      }
+    });
+
+    socket.connect(port, host);
+  });
+}
+
+async function filterAliveNodes(lines, targetCount = 60) {
+  const alive = [];
+  const stride = Math.max(1, Math.floor(lines.length / 300));
+  const candidateIndices = [];
+  for (let i = 0; i < lines.length; i += stride) {
+    candidateIndices.push(i);
+  }
+
+  const BATCH_SIZE = 25;
+  for (let i = 0; i < candidateIndices.length && alive.length < targetCount; i += BATCH_SIZE) {
+    const chunkIndices = candidateIndices.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(chunkIndices.map(async idx => {
+      const line = lines[idx];
+      try {
+        const u = new URL(line);
+        const host = u.hostname;
+        const port = parseInt(u.port || (u.protocol === 'https:' ? 443 : 80), 10);
+        if (!host || isNaN(port)) return null;
+        const ping = await checkNodePing(host, port, 400);
+        if (ping !== null && ping < 400) {
+          return line;
+        }
+      } catch(e) {}
+      return null;
+    }));
+
+    for (let r of results) {
+      if (r && !alive.includes(r) && alive.length < targetCount) {
+        alive.push(r);
+      }
+    }
+  }
+
+  if (alive.length === 0) {
+    return lines.slice(0, targetCount);
+  }
+  return alive.slice(0, targetCount);
+}
+
+// GET /api/sub_cleaner
+function handleSubCleaner(req, res, urlObj) {
+  let targetUrl = null;
+  if (urlObj && urlObj.searchParams) {
+    targetUrl = urlObj.searchParams.get('url');
+  }
+  if (!targetUrl) {
+    res.writeHead(400, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Missing url parameter');
+    return;
+  }
+
+  const https = require('https');
+  const http = require('http');
+  const client = targetUrl.startsWith('https') ? https : http;
+
+  client.get(targetUrl, {
+    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
+    rejectUnauthorized: false
+  }, (fetchRes) => {
+    if (fetchRes.statusCode >= 300 && fetchRes.statusCode < 400 && fetchRes.headers.location) {
+      const redirectUrl = new URL(fetchRes.headers.location, targetUrl).toString();
+      return handleSubCleaner(req, res, new URL('http://localhost/api/sub_cleaner?url=' + encodeURIComponent(redirectUrl)));
+    }
+
+    if (fetchRes.statusCode !== 200) {
+      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('HTTP ' + fetchRes.statusCode);
+      return;
+    }
+
+    let rawText = '';
+    fetchRes.setEncoding('utf8');
+    fetchRes.on('data', chunk => rawText += chunk);
+    fetchRes.on('end', async () => {
+      const lines = rawText.split(/\r?\n/);
+      const validLines = [];
+      const VALID_SS_CIPHERS = ['aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb', 'chacha20-ietf', 'rc4-md5', 'none'];
+
+      for (let line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('vless://') || trimmed.startsWith('trojan://') || trimmed.startsWith('vmess://')) {
+          validLines.push(trimmed);
+        } else if (trimmed.startsWith('ss://')) {
+          if (trimmed.includes('&amp;') || trimmed.includes('%FF') || trimmed.includes('\uFFFD') || trimmed.includes('{V') || trimmed.length > 500) {
+            continue;
+          }
+          const mainPart = trimmed.substring(5).split('#')[0].split('?')[0];
+          const userPart = mainPart.includes('@') ? mainPart.split('@')[0] : mainPart;
+          try {
+            const decoded = Buffer.from(userPart, 'base64').toString('utf8');
+            if (decoded.includes(':')) {
+              const cipher = decoded.split(':')[0].toLowerCase().trim();
+              if (VALID_SS_CIPHERS.includes(cipher)) {
+                validLines.push(trimmed);
+              }
+            }
+          } catch (e) {}
+        }
+      }
+
+      const aliveLines = await filterAliveNodes(validLines, 60);
+      const b64 = Buffer.from(aliveLines.join('\n')).toString('base64');
+      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end(b64);
+    });
+  }).on('error', (err) => {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Cleaner error: ' + err.message);
+  });
+}
 function handleAddProvider(req, res) {
   let body = '';
   req.on('data', chunk => body += chunk);
@@ -1885,18 +1983,15 @@ function handleAddProvider(req, res) {
         return;
       }
       
+      const normalizedUrl = normalizeSubscriptionUrl(url);
+      
       fs.copyFileSync(configPath, backupPath);
       
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.addProviderToConfig(yamlText, name, url, finalInterval);
+      yamlText = yamlUtils.addProviderToConfig(yamlText, name, normalizedUrl, finalInterval);
+      yamlText = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
       
       let lines = yamlText.split(/\r?\n/);
-      
-      // Автоматически создаем отдельную прокси-группу для новой подписки
-      yamlUtils.ensureProviderGroupInLines(lines, name);
-      
-      // Добавляем новую подписку в мульти-группу Auto-Best
-      yamlUtils.addUseToGroupInLines(lines, '🚀Auto-Best', name);
 
       if (groups && Array.isArray(groups)) {
         for (const groupName of groups) {
@@ -1952,6 +2047,7 @@ function handleReorderProviders(req, res) {
       
       let yamlText = fs.readFileSync(configPath, 'utf8');
       yamlText = yamlUtils.reorderProvidersInConfig(yamlText, order);
+      yamlText = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
       
       fs.writeFileSync(configPath, yamlText, 'utf8');
       
@@ -2240,19 +2336,55 @@ async function handleGetProxies(req, res) {
     const payload = JSON.parse(mRes.data);
     const proxiesObj = payload.proxies || {};
     
-    const excludeTypes = ['selector', 'urltest', 'fallback', 'loadbalance', 'select', 'url-test', 'direct', 'reject', 'compatible', 'pass'];
-    const list = Object.keys(proxiesObj)
-      .filter(name => {
-        const p = proxiesObj[name];
-        return p && !excludeTypes.includes(p.type.toLowerCase()) && name !== 'GLOBAL' && name !== 'DIRECT' && name !== 'REJECT';
-      })
-      .map(name => ({
-        name: name,
-        type: proxiesObj[name].type,
-        server: proxiesObj[name].server || 'Подписочный узел',
-        history: proxiesObj[name].history || []
-      }));
-      
+    // Получаем провайдеры для полного списка подписочных узлов
+    const provRes = await makeMihomoRequest('GET', '/providers/proxies');
+    const providers = (provRes.statusCode === 200) ? (JSON.parse(provRes.data).providers || {}) : {};
+
+    const list = [];
+
+    // 1. Добавляем DIRECT (Прямой интернет)
+    const directHistory = (proxiesObj['DIRECT'] && proxiesObj['DIRECT'].history) || [];
+    if (directHistory.length === 0 && directCachedDelay > 0) {
+      directHistory.push({ time: new Date().toISOString(), delay: directCachedDelay });
+    }
+    list.push({
+      name: 'DIRECT',
+      type: 'Direct',
+      server: 'Провайдер интернета (Direct)',
+      history: directHistory
+    });
+
+    // 2. Добавляем статические прокси (NFQWS)
+    const staticProxies = ['⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
+    for (const sName of staticProxies) {
+      if (proxiesObj[sName]) {
+        list.push({
+          name: sName,
+          type: proxiesObj[sName].type || 'Socks5',
+          server: proxiesObj[sName].port ? `127.0.0.1:${proxiesObj[sName].port}` : 'Локальный сервис (NFQWS)',
+          history: proxiesObj[sName].history || []
+        });
+      }
+    }
+
+    // 3. Добавляем ноды из proxy-providers
+    const seenNames = new Set(list.map(x => x.name));
+    for (const [provName, provObj] of Object.entries(providers)) {
+      if (provObj.proxies && Array.isArray(provObj.proxies)) {
+        for (const p of provObj.proxies) {
+          if (!seenNames.has(p.name)) {
+            seenNames.add(p.name);
+            list.push({
+              name: p.name,
+              type: p.type,
+              server: p.server || 'Подписочный узел',
+              history: p.history || []
+            });
+          }
+        }
+      }
+    }
+
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: true, list }));
   } catch (err) {
@@ -2260,6 +2392,24 @@ async function handleGetProxies(req, res) {
     res.end(JSON.stringify({ success: false, error: err.message }));
   }
 }
+
+// Фоновый периодический опрос задержки для DIRECT и NFQWS (каждые 30 секунд)
+async function autoPingDirectAndNfqws() {
+  const targets = ['DIRECT', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
+  for (const name of targets) {
+    try {
+      const url = encodeURIComponent('http://www.gstatic.com/generate_204');
+      const mRes = await makeMihomoRequest('GET', `/proxies/${encodeURIComponent(name)}/delay?url=${url}&timeout=3000`);
+      if (mRes.statusCode === 200 && name === 'DIRECT') {
+        const parsed = JSON.parse(mRes.data);
+        if (parsed.delay) directCachedDelay = parsed.delay;
+      }
+    } catch (e) {}
+  }
+}
+
+setTimeout(autoPingDirectAndNfqws, 3000);
+setInterval(autoPingDirectAndNfqws, 30 * 1000);
 
 function getLastDelayFromNode(nodeObj) {
   if (!nodeObj) return 0;
@@ -2497,18 +2647,31 @@ function handleRestartXkeen(req, res) {
   }
 }
 
+const appModePath = path.join(__dirname, 'app_mode.json');
+const savedProxiesPath = path.join(__dirname, 'saved_proxies.json');
+
+function getStoredAppMode() {
+  try {
+    if (fs.existsSync(appModePath)) {
+      const data = JSON.parse(fs.readFileSync(appModePath, 'utf8'));
+      if (data && data.mode) return data.mode;
+    }
+  } catch (e) {}
+  return 'rule';
+}
+
+function setStoredAppMode(mode) {
+  try {
+    fs.writeFileSync(appModePath, JSON.stringify({ mode, updatedAt: new Date().toISOString() }, null, 2), 'utf8');
+  } catch (e) {}
+}
+
 // GET /api/mihomo/mode
 async function handleGetMihomoMode(req, res) {
   try {
-    const mRes = await makeMihomoRequest('GET', '/configs');
-    if (mRes.statusCode === 200) {
-      const data = JSON.parse(mRes.data);
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, mode: data.mode || 'rule' }));
-    } else {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: 'Mihomo returned HTTP ' + mRes.statusCode }));
-    }
+    const stored = getStoredAppMode();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, mode: stored }));
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
@@ -2523,35 +2686,27 @@ function handleSetMihomoMode(req, res) {
     try {
       const payload = JSON.parse(body);
       const { mode } = payload;
-      if (!mode || (mode !== 'rule' && mode !== 'direct' && mode !== 'global')) {
+      if (!mode || (mode !== 'rule' && mode !== 'zapret' && mode !== 'direct')) {
         res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: false, message: 'Недопустимый режим (требуется rule, direct или global)' }));
+        res.end(JSON.stringify({ success: false, message: 'Недопустимый режим (требуется rule, zapret или direct)' }));
         return;
       }
 
-      const mRes = await makeMihomoRequest('PATCH', '/configs', { mode });
-      
-      // Сбрасываем все активные соединения, чтобы трафик мгновенно переключился на DIRECT без ожидания закрытия сокетов
+      setStoredAppMode(mode);
+
+      if (mode === 'direct' || mode === 'zapret') {
+        // Переключаем глобальный режим ядра в direct (трафик идет напрямую без VPN, Запрет работает на WAN)
+        await makeMihomoRequest('PATCH', '/configs', { mode: 'direct' });
+      } else if (mode === 'rule') {
+        // Режим VPN (правила и группы активны)
+        await makeMihomoRequest('PATCH', '/configs', { mode: 'rule' });
+      }
+
+      // Сбрасываем активные сокеты для мгновенного применения нового режима
       await makeMihomoRequest('DELETE', '/connections').catch(() => {});
 
-      // Сохраняем выбранный режим в config.yaml на диске
-      if (fs.existsSync(configPath)) {
-        try {
-          let content = fs.readFileSync(configPath, 'utf8');
-          content = content.replace(/^mode:\s*(rule|direct|global)/m, `mode: ${mode}`);
-          fs.writeFileSync(configPath, content, 'utf8');
-        } catch (err) {
-          console.error('Ошибка сохранения mode в config.yaml:', err.message);
-        }
-      }
-
-      if (mRes.statusCode === 200 || mRes.statusCode === 204) {
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, mode }));
-      } else {
-        res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: false, error: 'Mihomo returned HTTP ' + mRes.statusCode }));
-      }
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, mode }));
     } catch (err) {
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: false, error: err.message }));
@@ -2576,7 +2731,7 @@ function handleServerRestart(req, res) {
       }
       
       const { spawn } = require('child_process');
-      const child = spawn('sh', ['-c', 'sleep 1 && /opt/etc/init.d/S99vpn-updater-web restart'], {
+      const child = spawn('sh', ['-c', 'sleep 1 && (/opt/etc/init.d/S99mihomo-controller restart || /opt/etc/init.d/S99vpn-updater-web restart || true)'], {
         detached: true,
         stdio: 'ignore'
       });
@@ -3213,7 +3368,7 @@ function triggerSelfRestart() {
   
   setTimeout(() => {
     const { spawn } = require('child_process');
-    const child = spawn('sh', ['-c', 'sleep 1 && /opt/etc/init.d/S99vpn-updater-web restart'], {
+    const child = spawn('sh', ['-c', 'sleep 1 && (/opt/etc/init.d/S99mihomo-controller restart || /opt/etc/init.d/S99vpn-updater-web restart || true)'], {
       detached: true,
       stdio: 'ignore'
     });
@@ -3793,6 +3948,11 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === 'GET' && pathname === '/api/sub_cleaner') {
+    handleSubCleaner(req, res, urlObj);
+    return;
+  }
+
   if (req.method === 'GET' && pathname === '/api/clients') {
     handleGetClients(req, res);
     return;
@@ -3807,6 +3967,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && pathname === '/api/clients/group') {
     handleSetClientGroup(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/clients/zapret') {
+    handleSetClientZapret(req, res);
     return;
   }
 
@@ -3965,10 +4129,154 @@ const server = http.createServer(async (req, res) => {
     return;
   }
 
+  // Управление и авто-тюнинг DPI (ByeDPI / Zapret)
+  if (req.method === 'GET' && pathname === '/api/dpi/status') {
+    handleGetDpiStatus(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dpi/lock') {
+    handleToggleDpiLock(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dpi/benchmark') {
+    await handleRunDpiBenchmark(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dpi/test-custom') {
+    await handleTestCustomDpi(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dpi/apply') {
+    await handleApplyDpiStrategy(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dpi/auto-heal/run') {
+    await handleRunDpiAutoHeal(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dpi/auto-heal/settings') {
+    handleUpdateDpiAutoHealSettings(req, res);
+    return;
+  }
+
   // 404 по умолчанию
   res.writeHead(404, { 'Content-Type': 'text/plain' });
   res.end('404 Not Found');
 });
+
+// --- DPI Manager Handlers ---
+function handleGetDpiStatus(req, res) {
+  try {
+    const settings = dpiManager.getSettings();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, settings, presets: dpiManager.PRESETS }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+function handleToggleDpiLock(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    try {
+      const payload = JSON.parse(body || '{}');
+      const { slotId, locked } = payload;
+      if (!slotId) {
+        throw new Error('Параметр slotId обязателен');
+      }
+      const result = dpiManager.toggleSlotLock(slotId, locked);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, ...result }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+async function handleRunDpiBenchmark(req, res) {
+  try {
+    const results = await dpiManager.runFullBenchmark();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, results, testedAt: new Date().toISOString() }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+async function handleTestCustomDpi(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body || '{}');
+      const { args } = payload;
+      if (!args) {
+        throw new Error('Параметр args обязателен');
+      }
+      const result = await dpiManager.testSinglePreset(args);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, result }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+async function handleApplyDpiStrategy(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body || '{}');
+      const { slotId, args } = payload;
+      if (!slotId || !args) {
+        throw new Error('Параметры slotId и args обязательны');
+      }
+      const result = await dpiManager.applyStrategyToSlot(slotId, args);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, slot: result.slot }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
+async function handleRunDpiAutoHeal(req, res) {
+  try {
+    const results = await dpiManager.runDailyAutoHeal(true);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, results, settings: dpiManager.getSettings() }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+function handleUpdateDpiAutoHealSettings(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', () => {
+    try {
+      const payload = JSON.parse(body || '{}');
+      const settings = dpiManager.getSettings();
+      if (payload.enabled !== undefined) settings.autoHeal.enabled = Boolean(payload.enabled);
+      if (payload.intervalHours !== undefined) settings.autoHeal.intervalHours = parseInt(payload.intervalHours) || 24;
+      if (payload.minSpeedMbps !== undefined) settings.autoHeal.minSpeedMbps = parseFloat(payload.minSpeedMbps) || 8.0;
+      dpiManager.saveSettings();
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, autoHeal: settings.autoHeal }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
 
 // Системный мониторинг роутера
 function handleGetSystemStats(req, res) {
@@ -4058,265 +4366,25 @@ function handleSetClientGroup(req, res) {
   });
 }
 
-const groupToNameMap = {
-  'DIRECT': 'custom_direct',
-  'REJECT': 'custom_reject',
-  'GLOBAL': 'custom_global',
-  '🚀Auto-Best': 'custom_autobest',
-  '⚙️Manual 1': 'custom_manual_1',
-  '⚙️Manual 2': 'custom_manual_2',
-  '⚙️Manual 3': 'custom_manual_3',
-  '18+': 'custom_18_plus'
-};
-
-function getGroupNameKey(group) {
-  if (groupToNameMap[group]) return groupToNameMap[group];
-  const sanitized = group
-    .replace(/[^\w\u0400-\u04FF-]/g, '_')
-    .replace(/_+/g, '_')
-    .replace(/^_+|_+$/g, '')
-    .toLowerCase();
-  return `custom_${sanitized || 'rules'}`;
-}
-
-function readRuleProvider(filePath) {
-  if (!fs.existsSync(filePath)) {
-    return [];
-  }
-  const content = fs.readFileSync(filePath, 'utf8');
-  const lines = content.split(/\r?\n/);
-  const rules = [];
-  let inPayload = false;
-  for (let line of lines) {
-    const trimmed = line.trim();
-    if (trimmed.startsWith('payload:')) {
-      inPayload = true;
-      continue;
-    }
-    if (inPayload) {
-      if (trimmed.startsWith('-')) {
-        let rule = trimmed.substring(1).trim();
-        rule = rule.replace(/^['"]|['"]$/g, '');
-        if (rule) {
-          rules.push(rule);
-        }
-      } else if (trimmed && !trimmed.startsWith('#') && !trimmed.startsWith(' ')) {
-        inPayload = false;
-      }
-    }
-  }
-  return rules;
-}
-
-function writeRuleProvider(filePath, rules) {
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-  
-  const lines = [
-    '# Generated by VPN Updater',
-    'payload:'
-  ];
-  if (rules.length === 0) {
-    lines.push('  # No rules');
-  } else {
-    const uniqueRules = [...new Set(rules)];
-    for (const r of uniqueRules) {
-      lines.push(`  - '${r}'`);
-    }
-  }
-  fs.writeFileSync(filePath, lines.join('\n') + '\n', 'utf8');
-}
-
-function parseDomainOrIp(value) {
-  const clean = value.trim().toLowerCase();
-  const ipPattern = /^(\d{1,3}\.){3}\d{1,3}(\/\d{1,2})?$/;
-  const ipv6Pattern = /^([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}(\/\d{1,3})?$/;
-  
-  if (ipPattern.test(clean)) {
-    let rule = clean;
-    if (!clean.includes('/')) {
-      rule = clean + '/32';
-    }
-    return `IP-CIDR,${rule},no-resolve`;
-  } else if (clean.includes(':') && ipv6Pattern.test(clean)) {
-    let rule = clean;
-    if (!clean.includes('/')) {
-      rule = clean + '/128';
-    }
-    return `IP-CIDR6,${rule},no-resolve`;
-  } else {
-    return `DOMAIN-SUFFIX,${clean}`;
-  }
-}
-
-function ensureCustomRuleProvidersInConfig(yamlText, groupKeysAndNames) {
-  let lines = yamlText.split(/\r?\n/);
-  let changed = false;
-
-  // 1. Ensure custom rule-providers are defined
-  let ruleProvidersIndex = lines.findIndex(line => line.trim() === 'rule-providers:');
-  if (ruleProvidersIndex !== -1) {
-    for (const { key } of groupKeysAndNames) {
-      let providerExists = false;
-      for (let i = ruleProvidersIndex + 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.trim().startsWith('rules:')) break;
-        if (line.trim().startsWith(key + ':')) {
-          providerExists = true;
-          break;
-        }
-      }
-      if (!providerExists) {
-        const indent = '  ';
-        const providerLines = [
-          `${indent}${key}:`,
-          `${indent}${indent}type: file`,
-          `${indent}${indent}behavior: classical`,
-          `${indent}${indent}path: ./rules/${key}.yaml`
-        ];
-        lines.splice(ruleProvidersIndex + 1, 0, ...providerLines);
-        changed = true;
-        ruleProvidersIndex += providerLines.length;
-      }
-    }
-  }
-
-  // 2. Ensure references are in rules: section
-  let rulesIndex = lines.findIndex(line => line.trim() === 'rules:');
-  if (rulesIndex !== -1) {
-    let customHeaderIndex = lines.findIndex(line => line.includes('--- CUSTOM USER RULES ---'));
-    if (customHeaderIndex === -1) {
-      let bypassEndIndex = lines.findIndex(line => line.includes('--- END CLIENTS BYPASS RULES ---'));
-      if (bypassEndIndex !== -1) {
-        customHeaderIndex = bypassEndIndex + 1;
-      } else {
-        customHeaderIndex = rulesIndex + 1;
-      }
-      lines.splice(customHeaderIndex, 0, '  # --- CUSTOM USER RULES ---');
-      changed = true;
-      if (customHeaderIndex <= rulesIndex) {
-        rulesIndex++;
-      }
-    }
-
-    for (const { key, group } of groupKeysAndNames) {
-      let ruleExists = false;
-      for (let i = rulesIndex + 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (line.trim().startsWith('- RULE-SET,' + key + ',')) {
-          ruleExists = true;
-          break;
-        }
-      }
-      if (!ruleExists) {
-        const ruleLine = `  - RULE-SET,${key},${group},no-resolve`;
-        lines.splice(customHeaderIndex + 1, 0, ruleLine);
-        changed = true;
-      }
-    }
-  }
-
-  return { yamlText: lines.join('\n'), changed };
-}
-
-function runMigration() {
-  try {
-    if (!fs.existsSync(configPath)) {
-      console.log('[Migration] config.yaml не найден по пути ' + configPath);
-      return;
-    }
-
-    const yamlText = fs.readFileSync(configPath, 'utf8');
-    
-    if (yamlText.includes('# --- CUSTOM USER RULES ---') || yamlText.includes('custom_direct:')) {
-      console.log('[Migration] Миграция правил уже была выполнена ранее.');
-      return;
-    }
-
-    console.log('[Migration] Начинаем извлечение правил из config.yaml...');
-    
-    // Бэкап
-    const backupPath = configPath + '.migration_bak';
-    fs.copyFileSync(configPath, backupPath);
-    console.log('[Migration] Создан резервный бэкап ' + backupPath);
-
-    const lines = yamlText.split(/\r?\n/);
-    const startIndex = lines.findIndex(line => line.includes('--- END CLIENTS BYPASS RULES ---'));
-    const endIndex = lines.findIndex(line => line.includes('RULE-SET,smart_unblock'));
-
-    if (startIndex === -1 || endIndex === -1 || startIndex >= endIndex) {
-      console.log('[Migration] Границы блока правил не найдены, миграция пропущена.');
-      return;
-    }
-
-    const customRules = [];
-    const beforeLines = lines.slice(0, startIndex + 1);
-    const afterLines = lines.slice(endIndex);
-    const extractLines = lines.slice(startIndex + 1, endIndex);
-
-    for (const line of extractLines) {
-      const trimmed = line.trim();
-      if (!trimmed || trimmed.startsWith('#')) continue;
+// Установка стратегии Запрета для клиента
+function handleSetClientZapret(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body);
+      const { ip, mode } = payload;
       
-      if (trimmed.startsWith('- ')) {
-        const parts = trimmed.substring(2).split(',');
-        if (parts.length >= 3) {
-          const type = parts[0].trim();
-          const pattern = parts[1].trim();
-          const group = parts[2].trim();
-          const noResolve = parts[3] ? parts[3].trim() === 'no-resolve' : false;
-          customRules.push({ type, pattern, group, noResolve });
-        }
-      }
+      const promise = clientsManager.setClientZapretPreference(ip, mode);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true }));
+      await promise.catch(() => {});
+    } catch (err) {
+      console.error('[Clients Manager Zapret Error]', err.message);
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, message: err.message, error: err.message }));
     }
-
-    console.log(`[Migration] Извлечено правил: ${customRules.length}`);
-
-    const groupedRules = {};
-    const groupKeysAndNames = [];
-
-    for (const rule of customRules) {
-      if (!groupedRules[rule.group]) {
-        groupedRules[rule.group] = [];
-        groupKeysAndNames.push({
-          key: getGroupNameKey(rule.group),
-          group: rule.group
-        });
-      }
-      let ruleStr = `${rule.type},${rule.pattern}`;
-      if (rule.noResolve) {
-        ruleStr += `,no-resolve`;
-      }
-      groupedRules[rule.group].push(ruleStr);
-    }
-
-    const rulesDir = '/opt/etc/mihomo/rules';
-    if (!fs.existsSync(rulesDir)) {
-      fs.mkdirSync(rulesDir, { recursive: true });
-    }
-
-    for (const { key, group } of groupKeysAndNames) {
-      const filePath = path.join(rulesDir, `${key}.yaml`);
-      writeRuleProvider(filePath, groupedRules[group]);
-      console.log(`[Migration] Записано ${groupedRules[group].length} правил в ${filePath}`);
-    }
-
-    let newYamlText = [
-      ...beforeLines,
-      '  # --- CUSTOM USER RULES ---',
-      ...groupKeysAndNames.map(({ key, group }) => `  - RULE-SET,${key},${group},no-resolve`),
-      ...afterLines
-    ].join('\n');
-
-    const res = ensureCustomRuleProvidersInConfig(newYamlText, groupKeysAndNames);
-    
-    fs.writeFileSync(configPath, res.yamlText, 'utf8');
-    console.log('[Migration] Миграция успешно завершена! config.yaml обновлен.');
-  } catch (err) {
-    console.error('[Migration] Ошибка при выполнении миграции:', err);
-  }
+  });
 }
 
 function runMihomoMemoryOptimization() {
@@ -4406,8 +4474,7 @@ function runMihomoMemoryOptimization() {
   }
 }
 
-// Запуск миграции и оптимизации правил
-runMigration();
+// Оптимизация памяти правил
 runMihomoMemoryOptimization();
 
 // Очистка порта перед запуском (убиваем старый процесс если есть)
