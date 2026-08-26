@@ -333,7 +333,7 @@ function addProviderToConfig(yamlText, name, url, interval) {
     `    path: ./proxy_providers/${name.toLowerCase()}.yaml`,
     `    health-check:`,
     `      enable: true`,
-    `      url: http://cp.cloudflare.com/generate_204`,
+    `      url: http://www.gstatic.com/generate_204`,
     `      interval: 300`,
     `      tolerance: 50`
   ];
@@ -762,7 +762,7 @@ function ensureProviderGroupInLines(lines, providerName) {
         `    type: url-test`,
         `    use:`,
         `      - ${providerName}`,
-        `    url: http://cp.cloudflare.com/generate_204`,
+        `    url: http://www.gstatic.com/generate_204`,
         `    interval: 300`,
         `    tolerance: 50`,
         ``

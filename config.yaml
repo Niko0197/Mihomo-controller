@@ -62,7 +62,7 @@ proxy-providers:
     path: ./proxy_providers/igareck_black.yaml
     health-check:
       enable: true
-      url: http://cp.cloudflare.com/generate_204
+      url: http://www.gstatic.com/generate_204
       interval: 30
       timeout: 4000
       lazy: false
@@ -74,7 +74,7 @@ proxy-providers:
     path: ./proxy_providers/goida-vpn-configs.yaml
     health-check:
       enable: true
-      url: http://cp.cloudflare.com/generate_204
+      url: http://www.gstatic.com/generate_204
       interval: 300
       tolerance: 50
 
@@ -96,7 +96,7 @@ proxy-groups:
     type: url-test
     use:
       - goida-vpn-configs
-    url: http://cp.cloudflare.com/generate_204
+    url: http://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
 
@@ -104,7 +104,7 @@ proxy-groups:
     type: url-test
     use:
       - Пробка 3 дня
-    url: http://cp.cloudflare.com/generate_204
+    url: http://www.gstatic.com/generate_204
     interval: 300
     tolerance: 50
 
@@ -124,7 +124,7 @@ proxy-groups:
 
   - name: '🚀Auto-Best'
     type: fallback
-    url: http://cp.cloudflare.com/generate_204
+    url: http://www.gstatic.com/generate_204
     interval: 5
     proxies:
       - '💎 StealthSurf'
@@ -178,7 +178,7 @@ proxy-groups:
     type: url-test
     use:
       - Igareck_Black_VPN
-    url: http://cp.cloudflare.com/generate_204
+    url: http://www.gstatic.com/generate_204
     interval: 30
     tolerance: 50
 
