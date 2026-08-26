@@ -1818,7 +1818,65 @@ function normalizeSubscriptionUrl(url) {
   return cleanUrl;
 }
 
-function checkNodePing(host, port, timeoutMs = 800) {
+function cleanProxyUri(rawUri) {
+  try {
+    const hashParts = rawUri.split('#');
+    const uriPart = hashParts[0];
+    const rawTag = hashParts[1] || 'Node';
+    let tag = rawTag;
+    try { tag = decodeURIComponent(rawTag); } catch(e) {}
+
+    const atMatch = uriPart.match(/^(vless|trojan):\/\/([^@]+)@([^:?#]+):(\d+)(\?.*)?$/i);
+    if (!atMatch) return rawUri;
+
+    const proto = atMatch[1].toLowerCase();
+    const user = atMatch[2];
+    const host = atMatch[3];
+    const port = atMatch[4];
+    const queryStr = atMatch[5] || '';
+
+    const allowed = ['security', 'sni', 'pbk', 'sid', 'flow', 'fp', 'type', 'path', 'host', 'alpn', 'servicename', 'mode'];
+    const newParams = [];
+
+    if (queryStr && queryStr.startsWith('?')) {
+      const search = new URLSearchParams(queryStr.substring(1));
+      for (const [k, v] of search.entries()) {
+        const lowerK = k.toLowerCase();
+        if (allowed.includes(lowerK)) {
+          newParams.push(k + '=' + encodeURIComponent(v));
+        }
+      }
+    }
+
+    const cleanQuery = newParams.length > 0 ? '?' + newParams.join('&') : '';
+    return proto + '://' + user + '@' + host + ':' + port + cleanQuery + '#' + encodeURIComponent(tag);
+  } catch(e) {
+    return rawUri;
+  }
+}
+
+function extractEndpoint(line) {
+  try {
+    if (line.startsWith('vless://') || line.startsWith('trojan://')) {
+      const m = line.match(/@([^:?#]+):(\d+)/);
+      if (m) return { host: m[1], port: parseInt(m[2], 10) };
+    } else if (line.startsWith('ss://')) {
+      const mainPart = line.substring(5).split('#')[0].split('?')[0];
+      if (mainPart.includes('@')) {
+        const hp = mainPart.split('@')[1];
+        const m = hp.match(/([^:]+):(\d+)/);
+        if (m) return { host: m[1], port: parseInt(m[2], 10) };
+      } else {
+        const dec = Buffer.from(mainPart, 'base64').toString('utf8');
+        const m = dec.match(/@([^:]+):(\d+)/);
+        if (m) return { host: m[1], port: parseInt(m[2], 10) };
+      }
+    }
+  } catch(e) {}
+  return null;
+}
+
+function checkNodePing(host, port, timeoutMs = 1200) {
   return new Promise(resolve => {
     const start = Date.now();
     const socket = new (require('net')).Socket();
@@ -1855,30 +1913,43 @@ function checkNodePing(host, port, timeoutMs = 800) {
   });
 }
 
-async function filterAliveNodes(lines, targetCount = 60) {
-  const alive = [];
-  const stride = Math.max(1, Math.floor(lines.length / 300));
-  const candidateIndices = [];
-  for (let i = 0; i < lines.length; i += stride) {
-    candidateIndices.push(i);
+async function filterAliveNodes(rawLines, targetCount = 60) {
+  // Sort and prioritize working configurations in Russia (Reality > Trojan/SS > Direct VLESS)
+  const reality = [];
+  const trojanOrSs = [];
+  const directVless = [];
+  const other = [];
+
+  for (let l of rawLines) {
+    if (!l) continue;
+    // Skip Cloudflare free workers / pages domains blocked by Russian TSPU
+    if (l.includes('.workers.dev') || l.includes('.pages.dev')) continue;
+    
+    if (l.includes('security=reality')) {
+      reality.push(cleanProxyUri(l));
+    } else if (l.startsWith('trojan://') || l.startsWith('ss://')) {
+      trojanOrSs.push(cleanProxyUri(l));
+    } else if (l.startsWith('vless://')) {
+      directVless.push(cleanProxyUri(l));
+    } else {
+      other.push(l);
+    }
   }
 
-  const BATCH_SIZE = 25;
-  for (let i = 0; i < candidateIndices.length && alive.length < targetCount; i += BATCH_SIZE) {
-    const chunkIndices = candidateIndices.slice(i, i + BATCH_SIZE);
-    const results = await Promise.all(chunkIndices.map(async idx => {
-      const line = lines[idx];
-      try {
-        const u = new URL(line);
-        const host = u.hostname;
-        const port = parseInt(u.port || (u.protocol === 'https:' ? 443 : 80), 10);
-        if (!host || isNaN(port)) return null;
-        const ping = await checkNodePing(host, port, 400);
-        if (ping !== null && ping < 400) {
-          return line;
-        }
-      } catch(e) {}
-      return null;
+  const candidatePool = [...reality, ...trojanOrSs, ...directVless, ...other];
+  if (candidatePool.length === 0) {
+    return rawLines.slice(0, targetCount);
+  }
+
+  const alive = [];
+  const BATCH_SIZE = 35;
+  for (let i = 0; i < candidatePool.length && alive.length < targetCount; i += BATCH_SIZE) {
+    const chunk = candidatePool.slice(i, i + BATCH_SIZE);
+    const results = await Promise.all(chunk.map(async line => {
+      const ep = extractEndpoint(line);
+      if (!ep) return null;
+      const ok = await checkNodePing(ep.host, ep.port, 1200);
+      return ok ? line : null;
     }));
 
     for (let r of results) {
@@ -1889,7 +1960,7 @@ async function filterAliveNodes(lines, targetCount = 60) {
   }
 
   if (alive.length === 0) {
-    return lines.slice(0, targetCount);
+    return candidatePool.slice(0, targetCount);
   }
   return alive.slice(0, targetCount);
 }
@@ -1929,27 +2000,34 @@ function handleSubCleaner(req, res, urlObj) {
     fetchRes.setEncoding('utf8');
     fetchRes.on('data', chunk => rawText += chunk);
     fetchRes.on('end', async () => {
-      const lines = rawText.split(/\r?\n/);
+      let text = rawText.trim();
+      // Decode base64 if needed
+      if (!text.includes('://') && text.length > 50) {
+        try {
+          text = Buffer.from(text, 'base64').toString('utf8');
+        } catch(e) {}
+      }
+
+      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
       const validLines = [];
       const VALID_SS_CIPHERS = ['aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb', 'chacha20-ietf', 'rc4-md5', 'none'];
 
       for (let line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed) continue;
-        if (trimmed.startsWith('vless://') || trimmed.startsWith('trojan://') || trimmed.startsWith('vmess://')) {
-          validLines.push(trimmed);
-        } else if (trimmed.startsWith('ss://')) {
-          if (trimmed.includes('&amp;') || trimmed.includes('%FF') || trimmed.includes('\uFFFD') || trimmed.includes('{V') || trimmed.length > 500) {
+        if (!line) continue;
+        if (line.startsWith('vless://') || line.startsWith('trojan://') || line.startsWith('vmess://')) {
+          validLines.push(line);
+        } else if (line.startsWith('ss://')) {
+          if (line.includes('&amp;') || line.includes('%FF') || line.includes('\uFFFD') || line.includes('{V') || line.length > 500) {
             continue;
           }
-          const mainPart = trimmed.substring(5).split('#')[0].split('?')[0];
+          const mainPart = line.substring(5).split('#')[0].split('?')[0];
           const userPart = mainPart.includes('@') ? mainPart.split('@')[0] : mainPart;
           try {
             const decoded = Buffer.from(userPart, 'base64').toString('utf8');
             if (decoded.includes(':')) {
               const cipher = decoded.split(':')[0].toLowerCase().trim();
               if (VALID_SS_CIPHERS.includes(cipher)) {
-                validLines.push(trimmed);
+                validLines.push(line);
               }
             }
           } catch (e) {}
@@ -2538,8 +2616,8 @@ function handlePingProxy(req, res) {
         }
       }
 
-      // 4. Фолбэк на Cloudflare generate_204 для обычных групп
-      const fallbackUrl = encodeURIComponent('http://cp.cloudflare.com/generate_204');
+      // 4. Фолбэк на gstatic generate_204 для обычных групп
+      const fallbackUrl = encodeURIComponent('http://www.gstatic.com/generate_204');
       mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
