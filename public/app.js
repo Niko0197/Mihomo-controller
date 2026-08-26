@@ -600,7 +600,7 @@ async function loadSubscriptions() {
       
       const tdName = document.createElement('td');
       tdName.style.fontWeight = '600';
-      tdName.textContent = sub.name;
+      tdName.innerHTML = `<div>${sub.name}</div>${sub.deviceName ? `<div style="font-size: 0.76rem; color: #60a5fa; font-weight: normal; margin-top: 2px;">🏷️ ${sub.deviceName}</div>` : ''}`;
       
       const tdUrl = document.createElement('td');
       tdUrl.style.wordBreak = 'break-all';
@@ -643,17 +643,70 @@ async function loadSubscriptions() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ name: sub.name })
           });
-          const r = await resUpdate.json();
+          const text = await resUpdate.text();
+          let r = {};
+          try {
+            r = JSON.parse(text);
+          } catch(e) {
+            throw new Error(text.includes('<html') ? 'Сервер перезагружается, повторите через пару секунд' : (text.substring(0, 100) || ('HTTP ' + resUpdate.status)));
+          }
           if (!resUpdate.ok || !r.success) throw new Error(r.message || 'Ошибка сети');
-          showToast(`Подписка ${sub.name} успешно обновлена в памяти!`);
-          loadSubscriptions();
+          showToast(`Подписка ${sub.name} успешно обновлена!`, 'success');
+          await loadSubscriptions();
         } catch (err) {
           showToast(err.message, 'error');
+        } finally {
           btnUpdate.disabled = false;
           btnUpdate.textContent = '🔄 Обновить';
         }
       };
       
+function copyToClipboardFallback(text) {
+  if (navigator.clipboard && window.isSecureContext) {
+    return navigator.clipboard.writeText(text);
+  }
+  return new Promise((resolve, reject) => {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      const successful = document.execCommand('copy');
+      document.body.removeChild(textArea);
+      if (successful) resolve();
+      else reject(new Error('execCommand failed'));
+    } catch (err) {
+      document.body.removeChild(textArea);
+      reject(err);
+    }
+  });
+}
+
+      // Кнопка копирования готовой подписки (Clash / V2Ray)
+      const btnCopy = document.createElement('button');
+      btnCopy.className = 'btn';
+      btnCopy.style.padding = '6px 12px';
+      btnCopy.style.marginRight = '6px';
+      btnCopy.style.background = 'rgba(168, 85, 247, 0.1)';
+      btnCopy.style.borderColor = 'rgba(168, 85, 247, 0.2)';
+      btnCopy.style.color = '#c084fc';
+      btnCopy.textContent = '📋 Ссылка';
+      btnCopy.title = 'Скопировать ссылку на эту подписку для других устройств (ПК / Телефон)';
+      btnCopy.onclick = function() {
+        const host = window.location.host;
+        const proto = window.location.protocol;
+        const clashUrl = `${proto}//${host}/sub/${encodeURIComponent(sub.name)}.yaml`;
+        copyToClipboardFallback(clashUrl).then(() => {
+          showToast(`✅ Ссылка на подписку скопирована в буфер: ${clashUrl}`, 'success');
+        }).catch(() => {
+          prompt('Скопируйте ссылку для Clash/Mihomo:', clashUrl);
+        });
+      };
+
       // Кнопка редактирования
       const btnEdit = document.createElement('button');
       btnEdit.className = 'btn';
@@ -697,6 +750,7 @@ async function loadSubscriptions() {
       };
       
       tdActions.appendChild(btnUpdate);
+      tdActions.appendChild(btnCopy);
       tdActions.appendChild(btnEdit);
       tdActions.appendChild(btnDel);
       
@@ -721,6 +775,7 @@ function showAddSubModal(sub = null) {
   const title = document.getElementById('sub-modal-title');
   const nameInput = document.getElementById('sub-name');
   const urlInput = document.getElementById('sub-url');
+  const deviceNameInput = document.getElementById('sub-device-name');
   const intervalInput = document.getElementById('sub-interval');
   const oldNameInput = document.getElementById('edit-sub-old-name');
   const groupsSection = document.getElementById('sub-groups-section');
@@ -754,6 +809,7 @@ function showAddSubModal(sub = null) {
     nameInput.value = sub.name;
     nameInput.disabled = true;
     urlInput.value = sub.url;
+    if (deviceNameInput) deviceNameInput.value = sub.deviceName || '';
     intervalInput.value = sub.interval;
     oldNameInput.value = sub.name;
     groupsSection.style.display = 'none';
@@ -762,6 +818,7 @@ function showAddSubModal(sub = null) {
     nameInput.value = '';
     nameInput.disabled = false;
     urlInput.value = '';
+    if (deviceNameInput) deviceNameInput.value = '';
     intervalInput.value = '3600';
     oldNameInput.value = '';
     groupsSection.style.display = 'block';
@@ -775,6 +832,7 @@ function hideAddSubModal() {
 async function saveSubscription() {
   const name = document.getElementById('sub-name').value.trim();
   const url = document.getElementById('sub-url').value.trim();
+  const deviceName = document.getElementById('sub-device-name') ? document.getElementById('sub-device-name').value.trim() : '';
   const rawInterval = document.getElementById('sub-interval').value.trim();
   const interval = rawInterval ? (parseInt(rawInterval, 10) || 3600) : 3600;
   const oldName = document.getElementById('edit-sub-old-name').value;
@@ -791,7 +849,7 @@ async function saveSubscription() {
   const isEdit = oldName.length > 0;
   const apiEndpoint = isEdit ? '/api/providers/edit' : '/api/providers/add';
   
-  const payload = { name, url, interval };
+  const payload = { name, url, interval, deviceName };
   if (!isEdit) {
     const checkedGroups = [];
     document.querySelectorAll('.sub-group-select:checked').forEach(chk => {
