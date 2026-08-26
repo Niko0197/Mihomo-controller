@@ -2542,68 +2542,29 @@ function handlePingProxy(req, res) {
         return;
       }
 
-      // 1. Для REJECT всегда 0ms (timeout)
+      // 1. Для REJECT всегда 0ms
       if (name === 'REJECT') {
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: true, delay: 0 }));
         return;
       }
 
-      // 2. Для DIRECT / direct / custom_direct замеряем реальный физический пинг прямого интернет-провайдера
-      const lowerName = name.toLowerCase();
-      if (lowerName === 'direct' || lowerName.includes('direct') || lowerName.includes('прямой')) {
-        const start = Date.now();
-        const pingReq = http.get('http://www.gstatic.com/generate_204', { timeout: 3000 }, (pRes) => {
-          pRes.resume();
-          const elapsed = Date.now() - start;
-          directCachedDelay = elapsed;
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: elapsed }));
-        });
-        pingReq.on('error', () => {
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: directCachedDelay || 0 }));
-        });
-        pingReq.on('timeout', () => {
-          pingReq.destroy();
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, delay: directCachedDelay || 0 }));
-        });
-        return;
-      }
-      
-      const servicePingUrls = {
-        'Apple': 'http://www.apple.com/library/test/success.html',
-        'YouTube': 'https://www.youtube.com',
-        'Discord': 'https://discord.com',
-        'Telegram': 'https://telegram.org',
-        'Meta': 'https://www.instagram.com',
-        'Twitch': 'https://www.twitch.tv',
-        'Reddit': 'https://www.reddit.com',
-        'Spotify': 'https://www.spotify.com',
-        'Speedtest': 'https://www.speedtest.net',
-        '18+': 'https://www.pornhub.com',
-        'TikTok': 'https://www.tiktok.com',
-        'Steam': 'https://store.steampowered.com',
-        'GitHub': 'https://github.com',
-        'Google': 'http://www.gstatic.com/generate_204'
-      };
+      const timeout = 3500;
+      const url = encodeURIComponent('http://www.gstatic.com/generate_204');
 
-      const targetPingUrl = servicePingUrls[name] || 'http://www.gstatic.com/generate_204';
-      const timeout = 3000;
-      const url = encodeURIComponent(targetPingUrl);
-
-      // 3. Пробуем прямой замер если name — это группа или самостоятельный прокси
+      // 2. Прямой живой замер через ядро Mihomo (включая DIRECT, селекторы и прокси-группы)
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
-      
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
+        if (name === 'DIRECT' || name === 'direct') {
+          directCachedDelay = parsed.delay || 0;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
         res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
         return;
       }
 
-      // 3. Если 404 (нода принадлежит подписке из proxy-providers), запрашиваем список провайдеров
+      // 3. Если 404 (нода внутри провайдера подписки), запускаем healthcheck провайдера и ждем результат
       const providersRes = await makeMihomoRequest('GET', '/providers/proxies');
       if (providersRes.statusCode === 200) {
         const providers = JSON.parse(providersRes.data).providers || {};
@@ -2611,40 +2572,26 @@ function handlePingProxy(req, res) {
           if (provObj.proxies && Array.isArray(provObj.proxies)) {
             const node = provObj.proxies.find(p => p.name === name || p.name.trim() === name.trim());
             if (node) {
-              const currentDelay = getLastDelayFromNode(node);
-              if (currentDelay > 0) {
-                // Асинхронный запуск обновления в фоне без блокирования ответа!
-                makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck').catch(() => {});
-                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-                res.end(JSON.stringify({ success: true, delay: currentDelay }));
-                return;
-              }
+              await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck');
+              await new Promise(r => setTimeout(r, 1200));
 
-              // Если в истории еще не было пинга, проверяем легким одиночным запросом
-              const singleRes = await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/' + encodeURIComponent(node.name) + '/delay?url=' + url + '&timeout=' + timeout);
-              if (singleRes.statusCode === 200) {
-                const parsedSingle = JSON.parse(singleRes.data);
-                res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-                res.end(JSON.stringify({ success: true, delay: parsedSingle.delay || 0 }));
-                return;
+              const updatedProvRes = await makeMihomoRequest('GET', '/providers/proxies');
+              if (updatedProvRes.statusCode === 200) {
+                const upData = JSON.parse(updatedProvRes.data).providers || {};
+                const upProv = upData[provName];
+                if (upProv && Array.isArray(upProv.proxies)) {
+                  const upNode = upProv.proxies.find(p => p.name === name || p.name.trim() === name.trim());
+                  if (upNode) {
+                    const freshDelay = getLastDelayFromNode(upNode);
+                    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                    res.end(JSON.stringify({ success: true, delay: freshDelay }));
+                    return;
+                  }
+                }
               }
-
-              res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-              res.end(JSON.stringify({ success: true, delay: currentDelay || 0 }));
-              return;
             }
           }
         }
-      }
-
-      // 4. Фолбэк на gstatic generate_204 для обычных групп
-      const fallbackUrl = encodeURIComponent('http://www.gstatic.com/generate_204');
-      mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + fallbackUrl + '&timeout=' + timeout);
-      if (mRes.statusCode === 200) {
-        const parsed = JSON.parse(mRes.data);
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
-        return;
       }
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
