@@ -1196,9 +1196,11 @@ input[type="checkbox"]:checked::before {
 }
 
 .traffic-split-grid {
-  grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 16px;
   margin-top: 16px;
+  width: 100%;
 }
 
 @media (max-width: 900px) {
