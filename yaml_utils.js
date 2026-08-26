@@ -342,56 +342,208 @@ function addProviderToConfig(yamlText, name, url, interval) {
   return lines.join('\n');
 }
 
-// Удаление провайдера подписки из config.yaml
-function deleteProviderFromConfig(yamlText, name) {
-  const lines = yamlText.split(/\r?\n/);
-  let inProviders = false;
-  let currentProvider = null;
-  let startIndex = -1;
-  let endIndex = -1;
+// Полное удаление провайдера подписки и ВСЕХ его следов из config.yaml
+function purgeProviderFromConfig(yamlText, providerName) {
+  if (!yamlText || !providerName) return yamlText;
+  const cleanTargetName = String(providerName).trim().replace(/['"]/g, '');
+  const groupCardName = getGroupCardNameForProvider(cleanTargetName);
   
+  const allAliases = new Set([
+    cleanTargetName,
+    cleanTargetName.toLowerCase(),
+    groupCardName,
+    `⚡ ${cleanTargetName}`,
+    `⚡${cleanTargetName}`,
+    `💎 ${cleanTargetName}`,
+    `💎${cleanTargetName}`,
+    `🎱 ${cleanTargetName}`,
+    `🎱${cleanTargetName}`,
+    `🚀 ${cleanTargetName}`
+  ]);
+
+  let lines = yamlText.split(/\r?\n/);
+
+  // 1. Удаление из секции proxy-providers:
+  let inProviders = false;
+  let provStart = -1;
+  let provEnd = -1;
+
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
-    
+
     if (trimmed === 'proxy-providers:') {
       inProviders = true;
       continue;
     }
-    
+
     if (inProviders) {
       if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        if (provStart !== -1 && provEnd === -1) provEnd = i;
         break;
       }
-      
+
       if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
-        if (currentProvider === name) {
-          endIndex = i;
+        const pName = trimmed.slice(0, -1).trim().replace(/['"]/g, '');
+        if (provStart !== -1 && provEnd === -1) {
+          provEnd = i;
           break;
         }
-        currentProvider = trimmed.slice(0, -1).trim();
-        if (currentProvider === name) {
-          startIndex = i;
+        if (pName.toLowerCase() === cleanTargetName.toLowerCase()) {
+          provStart = i;
         }
+      }
+    }
+  }
+
+  if (provStart !== -1) {
+    if (provEnd === -1) {
+      provEnd = lines.length;
+      for (let i = provStart + 1; i < lines.length; i++) {
+        if (lines[i].length > 0 && !lines[i].startsWith(' ')) {
+          provEnd = i;
+          break;
+        }
+      }
+    }
+    lines.splice(provStart, provEnd - provStart);
+  }
+
+  // 2. Удаление связанных групп из proxy-groups:
+  let inGroups = false;
+  let groupStart = -1;
+  let groupName = null;
+  let groupLines = [];
+  const groupsToDelete = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inGroups = true;
+      continue;
+    }
+
+    if (inGroups) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        if (groupStart !== -1 && shouldDeleteGroup(groupName, groupLines, cleanTargetName, allAliases)) {
+          groupsToDelete.push({ start: groupStart, end: i, name: groupName });
+        }
+        break;
+      }
+
+      if (trimmed.startsWith('- name:')) {
+        if (groupStart !== -1 && shouldDeleteGroup(groupName, groupLines, cleanTargetName, allAliases)) {
+          groupsToDelete.push({ start: groupStart, end: i, name: groupName });
+        }
+        groupStart = i;
+        groupName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+        groupLines = [line];
+      } else if (groupStart !== -1) {
+        groupLines.push(line);
+      }
+    }
+  }
+
+  if (inGroups && groupStart !== -1 && shouldDeleteGroup(groupName, groupLines, cleanTargetName, allAliases)) {
+    groupsToDelete.push({ start: groupStart, end: lines.length, name: groupName });
+  }
+
+  for (let k = groupsToDelete.length - 1; k >= 0; k--) {
+    const g = groupsToDelete[k];
+    allAliases.add(g.name);
+    lines.splice(g.start, g.end - g.start);
+  }
+
+  // 3. Удаление упоминаний из всех use: и proxies:
+  let idx = 0;
+  let inAnyGroup = false;
+  while (idx < lines.length) {
+    const line = lines[idx];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inAnyGroup = true;
+      idx++;
+      continue;
+    }
+
+    if (inAnyGroup && line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+      inAnyGroup = false;
+    }
+
+    if (inAnyGroup && trimmed.startsWith('-')) {
+      const itemVal = trimmed.substring(1).trim().replace(/['"]/g, '');
+      let matchFound = false;
+      for (const alias of allAliases) {
+        if (itemVal.toLowerCase() === alias.toLowerCase()) {
+          matchFound = true;
+          break;
+        }
+      }
+      if (matchFound) {
+        lines.splice(idx, 1);
         continue;
       }
     }
+    idx++;
   }
+
+  lines = cleanupHangingSections(lines);
+  return lines.join('\n');
+}
+
+function shouldDeleteGroup(groupName, groupLines, providerName, allAliases) {
+  if (!groupName) return false;
+  if (SYSTEM_PROTECTED_GROUPS.includes(groupName)) return false;
   
-  if (startIndex !== -1) {
-    if (endIndex === -1) {
-      endIndex = lines.length;
-      for (let i = startIndex + 1; i < lines.length; i++) {
-        if (lines[i].length > 0 && !lines[i].startsWith(' ')) {
-          endIndex = i;
-          break;
-        }
+  for (const alias of allAliases) {
+    if (groupName.toLowerCase() === alias.toLowerCase()) return true;
+  }
+
+  let hasOtherUse = false;
+  let hasThisUse = false;
+  let inUse = false;
+  for (const gl of groupLines) {
+    const t = gl.trim();
+    if (t.startsWith('use:')) {
+      inUse = true;
+      continue;
+    }
+    if (inUse && (t.startsWith('proxies:') || t.startsWith('type:') || t.startsWith('url:') || t.startsWith('interval:'))) {
+      inUse = false;
+    }
+    if (inUse && t.startsWith('-')) {
+      const uItem = t.substring(1).trim().replace(/['"]/g, '');
+      if (uItem.toLowerCase() === providerName.toLowerCase()) {
+        hasThisUse = true;
+      } else {
+        hasOtherUse = true;
       }
     }
-    lines.splice(startIndex, endIndex - startIndex);
   }
-  
-  return lines.join('\n');
+
+  if (hasThisUse && !hasOtherUse) return true;
+  return false;
+}
+
+function cleanupHangingSections(lines) {
+  const result = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if ((trimmed === 'use:' || trimmed === 'proxies:') && (i + 1 >= lines.length || !lines[i + 1].trim().startsWith('-'))) {
+      continue;
+    }
+    result.push(line);
+  }
+  return result;
+}
+
+// Удаление провайдера подписки из config.yaml (алиас для purgeProviderFromConfig)
+function deleteProviderFromConfig(yamlText, name) {
+  return purgeProviderFromConfig(yamlText, name);
 }
 
 // Добавление провайдера в "use:" список прокси-группы
@@ -908,6 +1060,7 @@ module.exports = {
   updateProviderInConfig,
   addProviderToConfig,
   deleteProviderFromConfig,
+  purgeProviderFromConfig,
   addUseToGroupInLines,
   removeUseFromGroupsInLines,
   cleanupEmptyGroupsInLines,
