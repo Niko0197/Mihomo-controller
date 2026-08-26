@@ -12,7 +12,6 @@ traffic_db.json
 dpi_settings.json
 app_mode.json
 test_dpi.js
-config.yaml
 clients_rules.yaml
 
 # Системные папки

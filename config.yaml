@@ -1,0 +1,742 @@
+# --- ОСНОВНЫЕ ПОРТЫ ---
+port: 7890
+socks-port: 7891
+mixed-port: 1080
+redir-port: 1182
+tproxy-port: 1181
+allow-lan: true
+mode: rule
+log-level: silent
+ipv6: false
+tcp-concurrent: true
+unified-delay: true
+geo-auto-update: false
+geo-update-interval: 168
+external-controller: 0.0.0.0:9090
+external-ui: ./zash
+external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
+find-process-mode: off
+profile: { store-selected: true }
+sniffer: { enable: true, sniff: { HTTP: { ports: [80, 8080] }, TLS: { ports: [443, 8443] } }, skip-dst-address: [rule-set:telegram@ipcidr] }
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: redir-host
+  listen: 127.0.0.1:1053
+  nameserver:
+    - 192.168.1.1
+    - https://dns.google/dns-query
+
+anchors:
+  a1: &domain { type: http, format: mrs, behavior: domain, interval: 86400 }
+  a2: &ipcidr { type: http, format: mrs, behavior: ipcidr, interval: 86400 }
+  a3: &classical { type: http, format: text, behavior: classical, interval: 86400 }
+  a4: &inline { type: inline, behavior: classical }
+
+proxy-providers:
+  stealthsurf:
+    type: http
+    url: "https://connect.stealthsurf.space/to/c316f1f5e54abbd3680fc445e048a3e1"
+    interval: 300
+    path: ./proxy_providers/stealthsurf.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 30
+      lazy: false
+
+  Пробка 3 дня:
+    type: http
+    url: "https://shkvalvpn.ru:4443/sub/1087786041_949b8f87333c34ff"
+    interval: 3600
+    path: ./proxy_providers/пробка 3 дня.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 300
+  Igareck_Black_VPN:
+    type: http
+    url: "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt"
+    interval: 3600
+    path: ./proxy_providers/igareck_black.yaml
+    health-check:
+      enable: true
+      url: http://cp.cloudflare.com/generate_204
+      interval: 30
+      timeout: 4000
+      lazy: false
+
+  goida-vpn-configs:
+    type: http
+    url: "http://127.0.0.1:4000/api/sub_cleaner?url=https%3A%2F%2Fraw.githubusercontent.com%2FAvenCores%2Fgoida-vpn-configs%2Fmain%2Fgithubmirror%2F1.txt"
+    interval: 3600
+    path: ./proxy_providers/goida-vpn-configs.yaml
+    health-check:
+      enable: true
+      url: http://cp.cloudflare.com/generate_204
+      interval: 300
+      tolerance: 50
+
+proxies:
+  - name: "⚡ NFQWS 1 (ТВ)"
+    type: socks5
+    server: 127.0.0.1
+    port: 10805
+    udp: true
+
+  - name: "⚡ NFQWS 2 (Смартфон/ПК)"
+    type: socks5
+    server: 127.0.0.1
+    port: 10806
+    udp: true
+
+proxy-groups:
+  - name: '⚡ goida-vpn-configs'
+    type: url-test
+    use:
+      - goida-vpn-configs
+    url: http://cp.cloudflare.com/generate_204
+    interval: 300
+    tolerance: 50
+
+  - name: '⚡ Пробка 3 дня'
+    type: url-test
+    use:
+      - Пробка 3 дня
+    url: http://cp.cloudflare.com/generate_204
+    interval: 300
+    tolerance: 50
+
+  - name: GLOBAL
+    type: select
+    proxies:
+      - '⚡ goida-vpn-configs'
+      - '🚀Auto-Best'
+      - '⚙️Manual 1'
+      - '⚙️Manual 2'
+      - '⚙️Manual 3'
+      - '💎 StealthSurf'
+      - '🎱 GitHub'
+      - '⚡ Пробка 3 дня'
+      - DIRECT
+      - REJECT
+
+  - name: '🚀Auto-Best'
+    type: fallback
+    url: http://cp.cloudflare.com/generate_204
+    interval: 5
+    proxies:
+      - '💎 StealthSurf'
+      - '⚡ Пробка 3 дня'
+      - '🎱 GitHub'
+      - '⚡ goida-vpn-configs'
+
+  - name: '⚙️Manual 1'
+    type: select
+    use:
+      - stealthsurf
+      - Пробка 3 дня
+      - Igareck_Black_VPN
+      - goida-vpn-configs
+    proxies:
+      - DIRECT
+
+  - name: '⚙️Manual 2'
+    type: select
+    use:
+      - stealthsurf
+      - Пробка 3 дня
+      - Igareck_Black_VPN
+      - goida-vpn-configs
+    proxies:
+      - DIRECT
+
+  - name: '⚙️Manual 3'
+    type: select
+    use:
+      - stealthsurf
+      - Пробка 3 дня
+      - Igareck_Black_VPN
+      - goida-vpn-configs
+    proxies:
+      - DIRECT
+
+  - name: '18+'
+    type: select
+    icon: https://www.svgrepo.com/show/330452/eighteen-plus.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: '💎 StealthSurf'
+    type: fallback
+    use:
+      - stealthsurf
+    url: http://www.gstatic.com/generate_204
+    interval: 5
+
+  - name: '🎱 GitHub'
+    type: url-test
+    use:
+      - Igareck_Black_VPN
+    url: http://cp.cloudflare.com/generate_204
+    interval: 30
+    tolerance: 50
+
+  - name: YouTube
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+    proxies: ['⚡ NFQWS 2 (Смартфон/ПК)', '⚡ NFQWS 1 (ТВ)', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Discord
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Twitch
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Reddit
+    type: select
+    icon: https://www.redditstatic.com/shreddit/assets/favicon/192x192.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Meta
+    type: select
+    icon: https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Spotify
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Spotify.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Speedtest
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Speedtest.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Telegram
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+    
+  - name: Viber
+    type: select
+    icon: https://www.svgrepo.com/show/382714/viber-chat-app.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Steam
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Steam.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: CDN
+    type: select
+    icon: https://www.svgrepo.com/show/396567/globe-with-meridians.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Google
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: GitHub
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitHub.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: AI
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Roblox
+    type: select
+    icon: https://www.svgrepo.com/show/443377/brand-roblox.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Twitter
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitter.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: OpenAI
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/ChatGPT.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Anthropic
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Bot.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: TikTok
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/TikTok.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Apple
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Apple.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Microsoft
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Microsoft.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Netflix
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Netflix.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Pinterest
+    type: select
+    icon: https://www.svgrepo.com/show/354194/pinterest.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: PlayStation
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/PlayStation.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Zoom
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Zoom.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Docker
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Docker.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Epic Games
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Epic.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Riot Games
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Game.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: LinkedIn
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/LinkedIn.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Notion
+    type: select
+    icon: https://www.svgrepo.com/show/354125/notion.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Patreon
+    type: select
+    icon: https://www.svgrepo.com/show/354170/patreon.svg
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: SoundCloud
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/SoundCloud.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Xbox
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Xbox.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Blizzard
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Game.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Nintendo
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Nintendo.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: GitLab
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/GitLab.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Hardware drivers
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Server.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+# --- НАСТРОЙКИ GEO-ДАННЫХ ---
+geox-url:
+  geosite: "https://github.com/v2fly/domain-list-community/releases/latest/download/dlc.dat"
+  geoip: "https://github.com/MetaCubeX/meta-rules-dat/releases/latest/download/geoip.dat"
+
+# --- Провайдеры правил ---
+rule-providers:
+  geoip-ru:
+    type: http
+    behavior: ipcidr
+    format: mrs
+    url: "https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geoip/ru.mrs"
+    path: ./rules/geoip-ru.mrs
+    interval: 86400
+  torrent@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/torrent.mrs }
+  adlist@domain: { <<: *domain, url: https://github.com/zxc-rv/ad-filter/releases/latest/download/adlist.mrs }
+  openai@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/openai.mrs }
+  anthropic@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/anthropic.mrs }
+  tiktok@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/tiktok.mrs }
+  apple@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/apple.mrs }
+  microsoft@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/microsoft.mrs }
+  netflix@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/netflix.mrs }
+  pinterest@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/pinterest.mrs }
+  sony@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/sony.mrs }
+  yandex@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/yandex.mrs }
+  vk@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/vk.mrs }
+  zoom@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/zoom.mrs }
+  docker@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/docker.mrs }
+  epicgames@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/epicgames.mrs }
+  riot@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/riot.mrs }
+  akamai@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/akamai.mrs }
+  akamai@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/akamai@ipcidr.mrs }
+  amazon@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amazon.mrs }
+  amazon@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/amazon@ipcidr.mrs }
+  category-ai@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ai-!cn.mrs }
+  cdn77@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cdn77@ipcidr.mrs }
+  category-ru@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/category-ru.mrs }
+  cloudflare@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/cloudflare.mrs }
+  cloudflare@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/cloudflare@ipcidr.mrs }
+  digitalocean@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/digitalocean.mrs }
+  digitalocean@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/digitalocean@ipcidr.mrs }
+  discord@classical: { <<: *classical, url: https://github.com/zxc-rv/assets/raw/main/rules/discord.list }
+  fastly@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/fastly.mrs }
+  fastly@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/fastly@ipcidr.mrs }
+  gcore@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/gcore@ipcidr.mrs }
+  github@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/github.mrs }
+  google@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/google.mrs }
+  google@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/google@ipcidr.mrs }
+  hetzner@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/hetzner.mrs }
+  hetzner@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/hetzner@ipcidr.mrs }
+  meta@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/meta.mrs }
+  meta@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/meta@ipcidr.mrs }
+  oracle@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/oracle.mrs }
+  oracle@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/oracle@ipcidr.mrs }
+  ovh@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/ovh@ipcidr.mrs }
+  reddit@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/reddit.mrs }
+  refilter@domain: { <<: *domain, url: https://github.com/legiz-ru/mihomo-rule-sets/raw/main/re-filter/domain-rule.mrs }
+  scaleway@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/scaleway@ipcidr.mrs }
+  spotify@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/spotify.mrs }
+  steam@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/steam.mrs }
+  speedtest@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/speedtest.mrs }
+  telegram@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/telegram.mrs }
+  telegram@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/telegram@ipcidr.mrs }
+  twitch@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitch.mrs }
+  twitter@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/twitter.mrs }
+  vodafone@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vodafone@ipcidr.mrs }
+  vultr@ipcidr: { <<: *ipcidr, url: https://github.com/zxc-rv/zkeenip-rulesets/releases/latest/download/vultr@ipcidr.mrs }
+  youtube@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/youtube.mrs }
+  viber@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/viber.mrs }
+  viber@classical: { <<: *classical, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/classical/viber.list }
+  linkedin@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/linkedin.mrs }
+  notion@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/notion.mrs }
+  patreon@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/patreon.mrs }
+  soundcloud@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/soundcloud.mrs }
+  xbox@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/xbox.mrs }
+  blizzard@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/blizzard.mrs }
+  nintendo@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/nintendo.mrs }
+  gitlab@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/gitlab.mrs }
+  intel@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/intel.mrs }
+  nvidia@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/nvidia.mrs }
+  amd@domain: { <<: *domain, url: https://raw.githubusercontent.com/MetaCubeX/meta-rules-dat/meta/geo/geosite/amd.mrs }
+  user@classical:
+    type: inline
+    behavior: classical
+    payload:
+      - DOMAIN-SUFFIX,2ip.io
+# --- Правила ---
+rules:
+  - GEOSITE,category-ru,DIRECT
+  - RULE-SET,geoip-ru,DIRECT,no-resolve
+  - DOMAIN-SUFFIX,accounts.google.ru,⚙️Manual 1
+  # === SECURITY / BLOCKLISTS (TOP PRIORITY) ===
+  - RULE-SET,adlist@domain,REJECT
+  - AND,((DST-PORT,443),(NETWORK,UDP)),REJECT # Блокировка QUIC
+  - AND,((NETWORK,UDP),(OR,((DST-PORT,135),(DST-PORT,137),(DST-PORT,138),(DST-PORT,139)))),REJECT # Блокировка NetBIOS
+# === TORRENT DIRECT BYPASS ===
+  - PROCESS-NAME,qbittorrent.exe,DIRECT
+  - PROCESS-NAME,uTorrent.exe,DIRECT
+  - PROCESS-NAME,Transmission.exe,DIRECT
+  - PROCESS-NAME,BiglyBT.exe,DIRECT
+  - PROCESS-NAME,µTorrent.exe,DIRECT
+  - PROCESS-NAME,WebTorrent.exe,DIRECT
+  - RULE-SET,torrent@domain,DIRECT
+  - DOMAIN-KEYWORD,torrent,DIRECT
+  - DOMAIN-KEYWORD,tracker,DIRECT
+  - DOMAIN-KEYWORD,announce,DIRECT
+
+  # === LAN / LOCAL BYPASS ===
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,100.64.0.0/10,DIRECT,no-resolve
+  - IP-CIDR,224.0.0.0/4,DIRECT,no-resolve
+  - IP-CIDR,240.0.0.0/4,DIRECT,no-resolve
+  - IP-CIDR6,::1/128,DIRECT,no-resolve
+  - IP-CIDR6,fc00::/7,DIRECT,no-resolve
+  - IP-CIDR6,fe80::/10,DIRECT,no-resolve
+
+  # === RU-ДОМЕНЫ И IP - НАПРЯМУЮ ===
+  - GEOSITE,category-ru,DIRECT
+  - GEOIP,ru,DIRECT
+  - DOMAIN-SUFFIX,ru,DIRECT
+  - DOMAIN-SUFFIX,su,DIRECT
+  - DOMAIN-SUFFIX,xn--p1ai,DIRECT # .рф
+  - DOMAIN-SUFFIX,xn--p1acf,DIRECT # .рус
+  - DOMAIN-SUFFIX,xn--80asehdb,DIRECT # .онлайн
+  - DOMAIN-SUFFIX,xn--c1avg,DIRECT # .орг
+  - DOMAIN-SUFFIX,xn--80aswg,DIRECT # .сайт
+  - DOMAIN-SUFFIX,xn--80adxhks,DIRECT # .москва
+  - DOMAIN-SUFFIX,moscow,DIRECT
+  - DOMAIN-SUFFIX,xn--d1acj3b,DIRECT # .дети
+  # === КОНЕЦ RU-СЕГМЕНТА ===
+
+  # --- CLIENTS BYPASS RULES ---
+  - SRC-IP-CIDR,192.168.1.64/32,DIRECT
+  - SRC-IP-CIDR,192.168.1.46/32,DIRECT
+  - SRC-IP-CIDR,192.168.1.143/32,DIRECT
+  - SRC-IP-CIDR,192.168.1.116/32,DIRECT
+  - SRC-IP-CIDR,192.168.1.144/32,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:46e4:eeff:fed7:69bf/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d818:2a76:9e7b:76e1/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:d818:2a76:9e7b:76e1/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:64c5:90ff:fe9e:2c15/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:7416:8bd:636a:7dc4/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:6a9a:a40:931e:3db/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:f1ad:9c94:ac28:1766/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:f1ad:9c94:ac28:1766/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:1423:662b:584d:56bf/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:1423:662b:584d:56bf/128,DIRECT
+  - SRC-IP-CIDR,fe80::1872:3a02:5333:fa91/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:144f:43ce:fe2e:9e82/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:c40e:1aa:7691:23d/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:417a:2701:f563:4cfb/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d87c:de4d:4491:869/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:d87c:de4d:4491:869/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:e4c2:fd29:bd59:101/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:e4c2:fd29:bd59:101/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:3f:417a:2701:f563:4cfb/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:423e:c0f9:2642:2da:bb9a/128,DIRECT
+  - SRC-IP-CIDR,fe80::43c:5bac:57ae:f946/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:423e:cd7:b98:fd77:8a24/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:10be:da98:d864:11b0/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:7bee:8e6b:ec65:40be/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:cb0e:4478:9474:4a6a/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:b4e1:57d5:819c:3e8e/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:80ff:4b6f:c7e7:9a00/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:e56c:91c8:2805:c4a7/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:a979:2e0a:673a:4cb6/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:f1b4:abe:6c2e:aa68/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:423e:f1b4:abe:6c2e:aa68/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:423e:9341:a968:7b37:2ba1/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:7dab:8a7e:784b:9bd4/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:2960:1aa9:e3c0:24cf/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:11df:a031:a70d:f278/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:fd06:7fbf:cb2b:42e4/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:715c:fbbe:61e0:3f0e/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:75be:d584:a449:83c8/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:26cb:2ab0:a5be:8fcc/128,DIRECT
+  - SRC-IP-CIDR,192.168.1.152/32,DIRECT
+  - SRC-IP-CIDR,192.168.1.102/32,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:1f03:f885:d5ce:3667/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:8d34:900c:7221:4fb2/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:423e:8d34:900c:7221:4fb2/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:55ae:423d:9b38:d022/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:fd78:cc9:8c87:5ee/128,DIRECT
+  - SRC-IP-CIDR,2a00:1370:817c:423e:c631:8063:7ff3:bd95/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:c02:4f54:ee1:8f86/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:b05e:e9bf:2298:d175/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:acc0:30b1:ee0e:97e5/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:a1de:890e:5532:225f/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:3d49:9296:29ec:e561/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:addb:277:edac:9925/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:b129:480f:7a7d:178d/128,DIRECT
+  - SRC-IP-CIDR,192.168.1.50/32,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:561c:3e14:493a:903c/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:a4fd:a387:54f2:4d29/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:7585:71b2:ac1:4707/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:a8b1:4a08:9ff4:7eb6/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:f571:4a74:9743:54ca/128,DIRECT
+  - SRC-IP-CIDR,fe80::905f:e352:24c2:2099/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:1874:917c:7ae1:e89b/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:596e:f9ba:7633:a876/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:f992:d84e:89af:cc62/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:f843:5df9:54fd:65b3/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:7906:42ed:2ec4:5063/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d10:bf1:15ba:183d/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:65c4:6556:a7f3:f07d/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:34a3:66be:22ef:d41/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:ec1e:aa11:89f0:6a92/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:4c8f:8c92:f7dd:145e/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:e596:3e6b:ba9b:6562/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:85c5:ae08:79c0:1853/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:ad33:6dc3:aa9f:5795/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:7cd9:48d2:b343:81ed/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:248f:f69c:a5df:124d/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:3815:603f:10e7:d941/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:e048:fb5f:c3e1:98cb/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:3960:1a64:62d5:e58c/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:3737:b239:a70f:2ae1/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:3dcc:bfaa:e7fc:4147/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:fb6:d20a:1471:77cb/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:7ceb:c25e:f241:229/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d1fe:5e76:68d2:9fcd/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:5415:1ea5:6002:4f5/128,DIRECT
+  - SRC-IP-CIDR,192.168.1.3/32,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:e00e:f625:a2c2:3247/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:54ba:3ec4:7ac5:d532/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:9c2:d9b5:65a0:aca2/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:acec:5738:ddf5:a816/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:597d:8fa4:b509:20db/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:88eb:3759:b0ac:5100/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:216d:aabf:df83:8c74/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:75d3:484c:5049:4866/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:20ea:4d08:97c4:6d06/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:dcf2:81d:fd71:5490/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:cdfe:fdc2:4ec9:64eb/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:5519:4680:de08:3824/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:8d96:fa8d:7a59:948a/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:245e:3a57:f8da:45ef/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:4ff5:8c9a:a95b:1903/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:e379:99a7:823a:4494/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:b7ff:367b:4c02:c89b/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:6c41:de32:4fd0:dd41/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:6c31:48a3:2c0f:7a9d/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:c4cc:bb0d:4916:6939/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:9e9:7cc7:c9fc:cecb/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d4f0:91dc:f33d:570/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d556:fd5b:47f0:ffdd/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:b45c:4a16:9831:80eb/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:bde8:86f4:a279:47ed/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:d984:ca29:f2af:5f4c/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:bdac:ee07:eff:8cdc/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:4f5c:4fac:99e1:b14a/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:73f:e5a6:a85a:4128/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:54b2:dbb3:1a56:a154/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:c51f:679c:57a1:4621/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:bc04:52ba:acab:a60/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:bfb0:cfd4:d7a2:f6f9/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:235a:db44:b57e:b6ac/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:5238:bee4:53f2:e266/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:f311:122a:8424:903c/128,DIRECT
+  - SRC-IP-CIDR,fd26:c756:1a7b:0:958b:d4c9:da3c:f765/128,DIRECT
+  - SRC-IP-CIDR,192.168.1.90/32,DIRECT
+  # --- END CLIENTS BYPASS RULES ---
+  # --- DYNAMIC RULES ---
+  - DOMAIN-SUFFIX,sfunpay.com,DIRECT
+  - DOMAIN-KEYWORD,stealthsurf,DIRECT
+  - IP-CIDR,91.108.56.0/22,Telegram,no-resolve
+  - IP-CIDR,149.154.164.0/22,Telegram,no-resolve
+  - IP-CIDR,149.154.167.0/24,Telegram,no-resolve
+  - IP-CIDR,149.154.167.0/20,Telegram,no-resolve
+  - IP-CIDR,5.28.128.0/17,Telegram,no-resolve
+  - IP-CIDR,91.108.4.0/22,Telegram,no-resolve
+  - IP-CIDR,91.108.8.0/22,Telegram,no-resolve
+  - IP-CIDR,91.108.16.0/22,Telegram,no-resolve
+  - IP-CIDR,91.108.12.0/22,Telegram,no-resolve
+  - IP-CIDR,149.154.160.0/20,Telegram,no-resolve
+  - IP-CIDR,91.105.192.0/23,Telegram,no-resolve
+  - IP-CIDR,91.108.20.0/22,Telegram,no-resolve
+  - IP-CIDR,185.76.151.0/24,Telegram,no-resolve
+  - IP-CIDR,95.161.64.0/20,Telegram,no-resolve
+  - IP-CIDR,109.239.140.0/24,Telegram,no-resolve
+  - IP-CIDR6,2001:b28:f23d::/48,Telegram,no-resolve
+  - IP-CIDR6,2001:b28:f23f::/48,Telegram,no-resolve
+  - IP-CIDR6,2001:67c:4e8::/48,Telegram,no-resolve
+  - IP-CIDR6,2001:b28:f23c::/48,Telegram,no-resolve
+  - IP-CIDR6,2a0a:f280::/32,Telegram,no-resolve
+  - DOMAIN-SUFFIX,2fa.cn,DIRECT
+  - DOMAIN-SUFFIX,funpay.com,DIRECT
+  - DOMAIN,spyware.netcraze.link,DIRECT
+  - DOMAIN,keen1000.spyware.netcraze.link,DIRECT
+  # --- END DYNAMIC RULES ---
+  - RULE-SET,tiktok@domain,🚀Auto-Best
+  # 4. База GEOIP РФ
+  - RULE-SET,geoip-ru,DIRECT,no-resolve
+  # ==========================
+  # --- Остальные правила из твоего Mihomo конфига ---
+  - RULE-SET,openai@domain,OpenAI
+  - RULE-SET,anthropic@domain,Anthropic
+  - RULE-SET,category-ai@domain,AI
+  - RULE-SET,steam@domain,Steam
+  - RULE-SET,spotify@domain,Spotify
+  - RULE-SET,reddit@domain,Reddit
+  - AND,((NETWORK,udp),(DST-PORT,443)),REJECT
+  # --- CLIENTS ZAPRET RULES ---
+  - AND,((SRC-IP-CIDR,192.168.1.101/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)
+  # --- END CLIENTS ZAPRET RULES ---
+  - RULE-SET,youtube@domain,YouTube
+  - RULE-SET,twitch@domain,Twitch
+  - RULE-SET,twitter@domain,Twitter
+  - RULE-SET,apple@domain,Apple
+  - RULE-SET,microsoft@domain,Microsoft
+  - RULE-SET,netflix@domain,Netflix
+  - RULE-SET,pinterest@domain,Pinterest
+  - RULE-SET,sony@domain,PlayStation
+  - RULE-SET,docker@domain,Docker
+  - RULE-SET,yandex@domain,DIRECT
+  - RULE-SET,vk@domain,DIRECT
+  - RULE-SET,zoom@domain,Zoom
+  - RULE-SET,epicgames@domain,Epic Games
+  - RULE-SET,riot@domain,Riot Games
+  - OR,((RULE-SET,viber@domain),(RULE-SET,viber@classical)),Viber
+  - RULE-SET,discord@classical,Discord
+  - RULE-SET,speedtest@domain,Speedtest
+  - OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta
+  - OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram
+  - OR,((RULE-SET,refilter@domain),(RULE-SET,user@classical)),⚙️Manual 1
+  - RULE-SET,github@domain,GitHub
+  - RULE-SET,linkedin@domain,LinkedIn
+  - RULE-SET,notion@domain,Notion
+  - RULE-SET,patreon@domain,Patreon
+  - RULE-SET,soundcloud@domain,SoundCloud
+  - RULE-SET,xbox@domain,Xbox
+  - RULE-SET,blizzard@domain,Blizzard
+  - RULE-SET,nintendo@domain,Nintendo
+  - RULE-SET,gitlab@domain,GitLab
+  - RULE-SET,intel@domain,Hardware drivers
+  - RULE-SET,nvidia@domain,Hardware drivers
+  - RULE-SET,amd@domain,Hardware drivers
+  - OR,((RULE-SET,google@domain),(RULE-SET,google@ipcidr)),Google
+  - RULE-SET,category-ru@domain,DIRECT
+  - OR,((RULE-SET,amazon@domain),(RULE-SET,amazon@ipcidr)),CDN
+  - OR,((RULE-SET,akamai@domain),(RULE-SET,akamai@ipcidr)),CDN
+  - OR,((RULE-SET,cloudflare@domain),(RULE-SET,cloudflare@ipcidr)),CDN
+  - OR,((RULE-SET,digitalocean@domain),(RULE-SET,digitalocean@ipcidr)),CDN
+  - OR,((RULE-SET,fastly@domain),(RULE-SET,fastly@ipcidr)),CDN
+  - OR,((RULE-SET,oracle@domain),(RULE-SET,oracle@ipcidr)),CDN
+  - OR,((RULE-SET,hetzner@domain),(RULE-SET,hetzner@ipcidr)),CDN
+  - RULE-SET,scaleway@ipcidr,CDN
+  - RULE-SET,ovh@ipcidr,CDN
+  - RULE-SET,vultr@ipcidr,CDN
+  - RULE-SET,vodafone@ipcidr,CDN
+  - RULE-SET,gcore@ipcidr,CDN
+  - RULE-SET,cdn77@ipcidr,CDN
+  
+  # --- CLIENTS VPN RULES ---
+  - SRC-IP-CIDR,192.168.1.10/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.100/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.5/32,⚙️Manual 2
+  - SRC-IP-CIDR,192.168.1.4/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.20/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.97/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.101/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.7/32,🚀Auto-Best
+  - SRC-IP-CIDR,192.168.1.2/32,⚙️Manual 2
+  # --- END CLIENTS VPN RULES ---
+
+  # --- ФИНАЛЬНЫЙ МАРШРУТ ---
+  # В xray у тебя весь остальной трафик шел в VPN. 
+  # Чтобы сохранить это, я изменил DIRECT на твою автоматическую группу. 
+  # Если хочешь, чтобы неизвестные сайты шли напрямую, верни MATCH,DIRECT.
+  - MATCH,🚀Auto-Best
