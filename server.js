@@ -2227,14 +2227,31 @@ function handleDeleteProvider(req, res) {
       fs.copyFileSync(configPath, backupPath);
       
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.deleteProviderFromConfig(yamlText, name);
+      // Глубокое удаление провайдера, его карточек, групп и упоминаний из всех списков
+      yamlText = yamlUtils.purgeProviderFromConfig(yamlText, name);
+      yamlText = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
       
-      let lines = yamlText.split(/\r?\n/);
-      yamlUtils.removeUseFromGroupsInLines(lines, name);
-      yamlUtils.cleanupEmptyGroupsInLines(lines);
+      fs.writeFileSync(configPath, yamlText, 'utf8');
       
-      fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
-      
+      // 1. Физическое удаление кэшированных файлов подписки с диска
+      try {
+        const provDir = path.join(path.dirname(configPath), 'proxy_providers');
+        if (fs.existsSync(provDir)) {
+          const files = fs.readdirSync(provDir);
+          const safeName = name.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '');
+          for (const file of files) {
+            const safeFile = file.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '');
+            if (safeFile.includes(safeName) || file.startsWith(name) || file.toLowerCase().startsWith(name.toLowerCase())) {
+              try {
+                fs.unlinkSync(path.join(provDir, file));
+                console.log(`[Provider Delete] Удален локальный кэш-файл: ${file}`);
+              } catch (e) {}
+            }
+          }
+        }
+      } catch (e) {}
+
+      // 2. Перезагрузка конфигурации в ядре Mihomo
       const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
       if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
         let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;

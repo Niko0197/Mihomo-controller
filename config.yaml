@@ -46,15 +46,6 @@ proxy-providers:
       interval: 30
       lazy: false
 
-  Пробка 3 дня:
-    type: http
-    url: "https://shkvalvpn.ru:4443/sub/1087786041_949b8f87333c34ff"
-    interval: 3600
-    path: ./proxy_providers/пробка 3 дня.yaml
-    health-check:
-      enable: true
-      url: http://www.gstatic.com/generate_204
-      interval: 300
   Igareck_Black_VPN:
     type: http
     url: "https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/main/BLACK_VLESS_RUS.txt"
@@ -66,17 +57,6 @@ proxy-providers:
       interval: 30
       timeout: 4000
       lazy: false
-
-  goida-vpn-configs:
-    type: http
-    url: "http://127.0.0.1:4000/api/sub_cleaner?url=https%3A%2F%2Fraw.githubusercontent.com%2FAvenCores%2Fgoida-vpn-configs%2Fmain%2Fgithubmirror%2F1.txt"
-    interval: 3600
-    path: ./proxy_providers/goida-vpn-configs.yaml
-    health-check:
-      enable: true
-      url: http://www.gstatic.com/generate_204
-      interval: 300
-      tolerance: 50
 
 proxies:
   - name: "⚡ NFQWS 1 (ТВ)"
@@ -92,33 +72,15 @@ proxies:
     udp: true
 
 proxy-groups:
-  - name: '⚡ goida-vpn-configs'
-    type: url-test
-    use:
-      - goida-vpn-configs
-    url: http://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 50
-
-  - name: '⚡ Пробка 3 дня'
-    type: url-test
-    use:
-      - Пробка 3 дня
-    url: http://www.gstatic.com/generate_204
-    interval: 300
-    tolerance: 50
-
   - name: GLOBAL
     type: select
     proxies:
-      - '⚡ goida-vpn-configs'
       - '🚀Auto-Best'
       - '⚙️Manual 1'
       - '⚙️Manual 2'
       - '⚙️Manual 3'
       - '💎 StealthSurf'
       - '🎱 GitHub'
-      - '⚡ Пробка 3 дня'
       - DIRECT
       - REJECT
 
@@ -128,17 +90,13 @@ proxy-groups:
     interval: 5
     proxies:
       - '💎 StealthSurf'
-      - '⚡ Пробка 3 дня'
       - '🎱 GitHub'
-      - '⚡ goida-vpn-configs'
 
   - name: '⚙️Manual 1'
     type: select
     use:
       - stealthsurf
-      - Пробка 3 дня
       - Igareck_Black_VPN
-      - goida-vpn-configs
     proxies:
       - DIRECT
 
@@ -146,9 +104,7 @@ proxy-groups:
     type: select
     use:
       - stealthsurf
-      - Пробка 3 дня
       - Igareck_Black_VPN
-      - goida-vpn-configs
     proxies:
       - DIRECT
 
@@ -156,9 +112,7 @@ proxy-groups:
     type: select
     use:
       - stealthsurf
-      - Пробка 3 дня
       - Igareck_Black_VPN
-      - goida-vpn-configs
     proxies:
       - DIRECT
 
