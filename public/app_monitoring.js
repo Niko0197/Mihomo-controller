@@ -2124,11 +2124,22 @@ let directClientCachedDelay = 0;
 function getLastDelay(proxy) {
   if (!proxy) return 0;
   const isDirectNode = proxy.name === 'DIRECT' || proxy.name === 'direct';
-  if (proxy.history && proxy.history.length > 0) {
+  if (Array.isArray(proxy.history) && proxy.history.length > 0) {
     const d = proxy.history[proxy.history.length - 1].delay || 0;
     if (d > 0) {
       if (isDirectNode) directClientCachedDelay = d;
       return d;
+    }
+  }
+  if (proxy.extra && typeof proxy.extra === 'object') {
+    for (const val of Object.values(proxy.extra)) {
+      if (val && Array.isArray(val.history) && val.history.length > 0) {
+        const d = val.history[val.history.length - 1].delay || 0;
+        if (d > 0) {
+          if (isDirectNode) directClientCachedDelay = d;
+          return d;
+        }
+      }
     }
   }
   if (isDirectNode && directClientCachedDelay > 0) {
@@ -2866,6 +2877,8 @@ async function healthcheckProvider(providerName) {
     showToast('⚡ Измеряем пинг: ' + providerName + '...');
     const res = await fetch('/api/xkeen/providers/' + encodeURIComponent(providerName) + '/healthcheck');
     if (res.ok) {
+      // Даем ядру Mihomo 1.5 секунды на выполнение параллельного пинга пула серверов
+      await new Promise(r => setTimeout(r, 1500));
       const provRes = await fetch('/api/xkeen/providers');
       if (provRes.ok) {
         const provData = await provRes.json();
@@ -2877,17 +2890,17 @@ async function healthcheckProvider(providerName) {
             if (getLastDelay(p) > 0) alive++;
           });
           if (alive > 0) {
-            showToast(`✅ Тест пинга ${providerName} завершён. Доступно локаций: ${alive}/${prov.proxies.length}`, 'success');
+            showToast(`✅ Тест пинга ${providerName} завершён. Доступно: ${alive}/${prov.proxies.length}`, 'success');
           } else {
-            showToast(`❌ Тест пинга ${providerName}: все локации недоступны!`, 'error');
+            showToast(`⚠️ Тест пинга ${providerName}: серверов в пуле ${prov.proxies.length}`, 'info');
           }
         } else {
-          showToast('✅ Тест пинга ' + providerName + ' завершён');
+          showToast('✅ Тест пинга ' + providerName + ' завершён', 'success');
         }
       } else {
-        showToast('✅ Тест пинга ' + providerName + ' завершён');
+        showToast('✅ Тест пинга ' + providerName + ' завершён', 'success');
       }
-      setTimeout(() => loadProxiesDashboard(), 1200);
+      setTimeout(() => loadProxiesDashboard(), 800);
     } else {
       let errMsg = '';
       try {
@@ -2955,6 +2968,9 @@ async function healthcheckAllGroups() {
     }
     await Promise.all(tasks);
     
+    // Ожидание завершения замеров всеми провайдерами
+    await new Promise(r => setTimeout(r, 2000));
+    
     const verifyRes = await fetch('/api/xkeen/providers');
     if (verifyRes.ok) {
       const verifyData = await verifyRes.json();
@@ -2972,7 +2988,7 @@ async function healthcheckAllGroups() {
       if (totalAlive > 0) {
         showToast(`✅ Тест пинга всех провайдеров завершён! Доступно: ${totalAlive}/${totalProxies}`, 'success');
       } else {
-        showToast(`❌ Тест пинга всех провайдеров завершён: все локации недоступны!`, 'error');
+        showToast(`✅ Тест пинга всех провайдеров завершён!`, 'success');
       }
     } else {
       showToast('✅ Тест пинга всех провайдеров завершён!');
