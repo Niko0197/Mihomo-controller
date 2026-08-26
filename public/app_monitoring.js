@@ -2190,9 +2190,9 @@ async function pingProxyNode(nodeName) {
         directClientCachedDelay = data.delay;
       }
     } else {
-      showToast(`❌ Пинг ${nodeName}: таймаут или ошибка`, 'error');
+      showToast(`❌ Пинг ${nodeName}: таймаут или недоступен`, 'error');
     }
-    setTimeout(() => loadProxiesDashboard(), 1000);
+    await loadProxiesDashboard();
   } catch (err) {
     showToast('Ошибка пинга: ' + err.message, 'error');
   }
@@ -2475,7 +2475,7 @@ function renderProxyGroups(proxiesData) {
         return;
       }
       e.preventDefault();
-      const targetName = group.now || '—';
+      const targetName = group.name || group.now || '—';
       if (targetName && targetName !== '—') {
         pingProxyNode(targetName);
       }
