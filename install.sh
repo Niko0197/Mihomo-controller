@@ -6,7 +6,7 @@
 
 GITHUB_USER="Niko0197"
 REPO_NAME="Mihomo-controller"
-BRANCH="Dev"
+BRANCH="${BRANCH:-main}"
 
 INSTALL_DIR="/opt/root/mihomo-controller"
 INIT_SCRIPT="/opt/etc/init.d/S99mihomo-controller"
@@ -153,8 +153,10 @@ if [ ! -f "/opt/bin/ciadpi" ]; then
     curl -sL "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-${DPI_ARCH}.tar.gz" | tar -xz -C /tmp/ 2>/dev/null
     if [ -f "/tmp/ciadpi-${DPI_ARCH}" ]; then
         mv "/tmp/ciadpi-${DPI_ARCH}" /opt/bin/ciadpi
-        chmod +x /opt/bin/ciadpi
+    elif [ -f "/tmp/ciadpi" ]; then
+        mv "/tmp/ciadpi" /opt/bin/ciadpi
     fi
+    chmod +x /opt/bin/ciadpi 2>/dev/null
 fi
 
 # Создаем симлинки для независимого управления процессами
