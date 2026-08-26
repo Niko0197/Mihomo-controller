@@ -1782,12 +1782,35 @@ async function handleGetProviders(req, res) {
     
     const merged = providers.map(p => {
       const m = mihomoProviders[p.name] || {};
+      let finalUpdatedAt = m.updatedAt || null;
+      
+      // Считываем реальное время изменения локального файла провайдера
+      const provPath = p.path || `./proxy_providers/${p.name.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`;
+      const possiblePaths = [
+        path.isAbsolute(provPath) ? provPath : path.resolve(path.dirname(configPath), provPath),
+        path.isAbsolute(provPath) ? provPath : path.resolve(__dirname, provPath),
+        path.join('/opt/etc/mihomo', provPath)
+      ];
+      for (const absP of possiblePaths) {
+        if (fs.existsSync(absP)) {
+          try {
+            const stats = fs.statSync(absP);
+            const fileIso = stats.mtime.toISOString();
+            if (!finalUpdatedAt || new Date(fileIso) > new Date(finalUpdatedAt)) {
+              finalUpdatedAt = fileIso;
+            }
+            break;
+          } catch (e) {}
+        }
+      }
+
       return {
         name: p.name,
         url: p.url,
         interval: p.interval,
+        deviceName: p.deviceName || '',
         count: Array.isArray(m.proxies) ? m.proxies.length : undefined,
-        updatedAt: m.updatedAt || null
+        updatedAt: finalUpdatedAt
       };
     });
     
@@ -1970,7 +1993,7 @@ async function filterAliveNodes(rawLines, targetCount = 60) {
 }
 
 // GET /api/sub_cleaner
-function handleSubCleaner(req, res, urlObj) {
+async function handleSubCleaner(req, res, urlObj) {
   let targetUrl = null;
   if (urlObj && urlObj.searchParams) {
     targetUrl = urlObj.searchParams.get('url');
@@ -1981,73 +2004,167 @@ function handleSubCleaner(req, res, urlObj) {
     return;
   }
 
-  const https = require('https');
-  const http = require('http');
-  const client = targetUrl.startsWith('https') ? https : http;
-
-  client.get(targetUrl, {
-    headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' },
-    rejectUnauthorized: false
-  }, (fetchRes) => {
-    if (fetchRes.statusCode >= 300 && fetchRes.statusCode < 400 && fetchRes.headers.location) {
-      const redirectUrl = new URL(fetchRes.headers.location, targetUrl).toString();
-      return handleSubCleaner(req, res, new URL('http://localhost/api/sub_cleaner?url=' + encodeURIComponent(redirectUrl)));
+  try {
+    const rawText = await fetchUrlText(targetUrl);
+    let text = rawText.trim();
+    // Decode base64 if needed
+    if (!text.includes('://') && text.length > 50) {
+      try {
+        text = Buffer.from(text, 'base64').toString('utf8');
+      } catch(e) {}
     }
 
-    if (fetchRes.statusCode !== 200) {
-      res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end('HTTP ' + fetchRes.statusCode);
+    const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
+    const validLines = [];
+    const VALID_SS_CIPHERS = ['aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb', 'chacha20-ietf', 'rc4-md5', 'none'];
+
+    for (let line of lines) {
+      if (!line) continue;
+      if (line.startsWith('vless://') || line.startsWith('trojan://') || line.startsWith('vmess://')) {
+        validLines.push(line);
+      } else if (line.startsWith('ss://')) {
+        if (line.includes('&amp;') || line.includes('%FF') || line.includes('\uFFFD') || line.includes('{V') || line.length > 500) {
+          continue;
+        }
+        const mainPart = line.substring(5).split('#')[0].split('?')[0];
+        const userPart = mainPart.includes('@') ? mainPart.split('@')[0] : mainPart;
+        try {
+          const decoded = Buffer.from(userPart, 'base64').toString('utf8');
+          if (decoded.includes(':')) {
+            const cipher = decoded.split(':')[0].toLowerCase().trim();
+            if (VALID_SS_CIPHERS.includes(cipher)) {
+              validLines.push(line);
+            }
+          }
+        } catch (e) {}
+      }
+    }
+
+    const aliveLines = await filterAliveNodes(validLines, 60);
+    const b64 = Buffer.from(aliveLines.join('\n')).toString('base64');
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end(b64);
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Cleaner error: ' + err.message);
+  }
+}
+
+// GET /sub/:name.yaml, /sub/:name.txt, /api/sub/export
+function handleExportSubscription(req, res, urlObj) {
+  try {
+    let name = 'all';
+    let format = 'yaml';
+    
+    const pathname = urlObj.pathname;
+    if (pathname.startsWith('/sub/')) {
+      const filename = pathname.substring(5);
+      const dotIdx = filename.lastIndexOf('.');
+      if (dotIdx !== -1) {
+        name = decodeURIComponent(filename.substring(0, dotIdx));
+        const ext = filename.substring(dotIdx + 1).toLowerCase();
+        format = (ext === 'txt' || ext === 'b64') ? 'b64' : 'yaml';
+      } else {
+        name = decodeURIComponent(filename);
+      }
+    } else {
+      name = urlObj.searchParams.get('name') || 'all';
+      format = urlObj.searchParams.get('format') || 'yaml';
+    }
+
+    const configText = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf8') : '';
+    const providers = yamlUtils.getProxyProvidersFromConfig(configText);
+
+    let collectedProxies = [];
+    let title = 'Mihomo Controller VPN';
+
+    const getProxiesFromProviderFile = (provName) => {
+      const prov = providers.find(p => p.name.toLowerCase() === provName.toLowerCase());
+      const provPath = (prov && prov.path) || `./proxy_providers/${provName.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`;
+      const possiblePaths = [
+        path.isAbsolute(provPath) ? provPath : path.resolve(path.dirname(configPath), provPath),
+        path.isAbsolute(provPath) ? provPath : path.resolve(__dirname, provPath),
+        path.join('/opt/etc/mihomo', provPath),
+        path.join(__dirname, 'proxy_providers', `${provName.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`),
+        path.join('/opt/etc/mihomo/proxy_providers', `${provName.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`)
+      ];
+      for (const p of possiblePaths) {
+        if (fs.existsSync(p)) {
+          const content = fs.readFileSync(p, 'utf8');
+          const list = yamlUtils.extractProxiesFromYaml(content);
+          if (list && list.length > 0) return list;
+        }
+      }
+      return [];
+    };
+
+    if (name === 'all') {
+      for (const prov of providers) {
+        const list = getProxiesFromProviderFile(prov.name);
+        collectedProxies.push(...list);
+      }
+      title = 'All VPN Proxies';
+    } else {
+      collectedProxies = getProxiesFromProviderFile(name);
+      title = name.toUpperCase() + ' VPN';
+    }
+
+    // Фильтруем внутренние локальные соксы роутера (NFQWS / Zapret на 127.0.0.1)
+    collectedProxies = collectedProxies.filter(p => p && p.server && p.server !== '127.0.0.1' && p.server !== 'localhost' && !p.name.includes('NFQWS'));
+
+    // Если запрошен Base64 (для мобильных: Shadowrocket, Streisand, v2rayNG, Happ)
+    if (format === 'b64' || format === 'txt') {
+      const uris = [];
+      for (const p of collectedProxies) {
+        const uri = yamlUtils.serializeProxyToUri(p);
+        if (uri) uris.push(uri);
+      }
+      const b64Data = Buffer.from(uris.join('\n'), 'utf8').toString('base64');
+      res.writeHead(200, {
+        'Content-Type': 'text/plain; charset=utf-8',
+        'Profile-Title': Buffer.from(title).toString('base64'),
+        'Profile-Update-Interval': '24',
+        'Subscription-Userinfo': 'upload=0; download=529257532862; total=0; expire=1816199938'
+      });
+      res.end(b64Data);
       return;
     }
 
-    let rawText = '';
-    fetchRes.setEncoding('utf8');
-    fetchRes.on('data', chunk => rawText += chunk);
-    fetchRes.on('end', async () => {
-      let text = rawText.trim();
-      // Decode base64 if needed
-      if (!text.includes('://') && text.length > 50) {
-        try {
-          text = Buffer.from(text, 'base64').toString('utf8');
-        } catch(e) {}
-      }
+    // Если запрошен YAML (для Clash Verge, Flclash, Mihomo, Box)
+    let yamlOut = `port: 7890\nsocks-port: 7891\nmixed-port: 7890\nmode: rule\nlog-level: info\nipv6: false\n\n`;
+    yamlOut += `proxies:\n`;
+    const proxyNames = [];
+    for (const p of collectedProxies) {
+      yamlOut += yamlUtils.serializeProxyToYaml(p) + '\n';
+      if (p.name) proxyNames.push(p.name);
+    }
+    
+    yamlOut += `\nproxy-groups:\n`;
+    yamlOut += `  - name: 🚀 Auto-Best\n    type: fallback\n    url: http://www.gstatic.com/generate_204\n    interval: 300\n    proxies:\n`;
+    for (const pn of proxyNames) {
+      yamlOut += `      - "${pn}"\n`;
+    }
+    yamlOut += `  - name: ⚙️ PROXY\n    type: select\n    proxies:\n      - 🚀 Auto-Best\n`;
+    for (const pn of proxyNames) {
+      yamlOut += `      - "${pn}"\n`;
+    }
+    yamlOut += `      - DIRECT\n\n`;
+    yamlOut += `rules:\n  - MATCH,⚙️ PROXY\n`;
 
-      const lines = text.split(/\r?\n/).map(l => l.trim()).filter(Boolean);
-      const validLines = [];
-      const VALID_SS_CIPHERS = ['aes-128-gcm', 'aes-256-gcm', 'chacha20-ietf-poly1305', '2022-blake3-aes-128-gcm', '2022-blake3-aes-256-gcm', '2022-blake3-chacha20-poly1305', 'aes-128-cfb', 'aes-192-cfb', 'aes-256-cfb', 'chacha20-ietf', 'rc4-md5', 'none'];
-
-      for (let line of lines) {
-        if (!line) continue;
-        if (line.startsWith('vless://') || line.startsWith('trojan://') || line.startsWith('vmess://')) {
-          validLines.push(line);
-        } else if (line.startsWith('ss://')) {
-          if (line.includes('&amp;') || line.includes('%FF') || line.includes('\uFFFD') || line.includes('{V') || line.length > 500) {
-            continue;
-          }
-          const mainPart = line.substring(5).split('#')[0].split('?')[0];
-          const userPart = mainPart.includes('@') ? mainPart.split('@')[0] : mainPart;
-          try {
-            const decoded = Buffer.from(userPart, 'base64').toString('utf8');
-            if (decoded.includes(':')) {
-              const cipher = decoded.split(':')[0].toLowerCase().trim();
-              if (VALID_SS_CIPHERS.includes(cipher)) {
-                validLines.push(line);
-              }
-            }
-          } catch (e) {}
-        }
-      }
-
-      const aliveLines = await filterAliveNodes(validLines, 60);
-      const b64 = Buffer.from(aliveLines.join('\n')).toString('base64');
-      res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
-      res.end(b64);
+    res.writeHead(200, {
+      'Content-Type': 'text/yaml; charset=utf-8',
+      'Content-Disposition': `inline; filename="${name}.yaml"`,
+      'Profile-Title': Buffer.from(title).toString('base64'),
+      'Profile-Update-Interval': '24',
+      'Subscription-Userinfo': 'upload=0; download=529257532862; total=0; expire=1816199938'
     });
-  }).on('error', (err) => {
+    res.end(yamlOut);
+  } catch (err) {
     res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Cleaner error: ' + err.message);
-  });
+    res.end('Subscription export error: ' + err.message);
+  }
 }
+
 function handleAddProvider(req, res) {
   let body = '';
   req.on('data', chunk => body += chunk);
@@ -2055,7 +2172,7 @@ function handleAddProvider(req, res) {
     const backupPath = configPath + '.tmp_bak';
     try {
       const payload = JSON.parse(body);
-      const { name, url, interval, groups } = payload;
+      const { name, url, interval, groups, deviceName } = payload;
       const parsedInterval = parseInt(interval, 10);
       const finalInterval = isNaN(parsedInterval) || parsedInterval <= 0 ? 3600 : parsedInterval;
       
@@ -2070,7 +2187,7 @@ function handleAddProvider(req, res) {
       fs.copyFileSync(configPath, backupPath);
       
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.addProviderToConfig(yamlText, name, normalizedUrl, finalInterval);
+      yamlText = yamlUtils.addProviderToConfig(yamlText, name, normalizedUrl, finalInterval, deviceName);
       yamlText = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
       
       let lines = yamlText.split(/\r?\n/);
@@ -2167,7 +2284,7 @@ function handleEditProvider(req, res) {
     const backupPath = configPath + '.tmp_bak';
     try {
       const payload = JSON.parse(body);
-      const { name, url, interval } = payload;
+      const { name, url, interval, deviceName } = payload;
       
       if (!name || !url || isNaN(interval)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -2178,7 +2295,7 @@ function handleEditProvider(req, res) {
       fs.copyFileSync(configPath, backupPath);
       
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.updateProviderInConfig(yamlText, name, url, interval);
+      yamlText = yamlUtils.updateProviderInConfig(yamlText, name, url, interval, deviceName);
       
       fs.writeFileSync(configPath, yamlText, 'utf8');
       
@@ -2278,25 +2395,27 @@ function handleDeleteProvider(req, res) {
   });
 }
 
-function fetchUrlText(targetUrl, maxRedirects = 5) {
+function fetchUrlTextDirect(targetUrl, maxRedirects = 5, customHeaders = {}) {
   return new Promise((resolve, reject) => {
     if (maxRedirects < 0) {
       return reject(new Error('Слишком много редиректов (Too many redirects)'));
     }
     
     const client = targetUrl.startsWith('https') ? require('https') : require('http');
+    const reqHeaders = {
+      'User-Agent': customHeaders['User-Agent'] || 'v2rayNG/1.8.12',
+      ...customHeaders
+    };
     const req = client.get(targetUrl, {
-      headers: {
-        'User-Agent': 'Mihomo/1.19.29 (Clash Meta; +https://github.com/MetaCubeX/mihomo)'
-      },
-      timeout: 20000
+      headers: reqHeaders,
+      timeout: 3500
     }, (res) => {
       if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
         let redirectUrl = res.headers.location;
         if (!redirectUrl.startsWith('http')) {
           redirectUrl = new URL(redirectUrl, targetUrl).href;
         }
-        return resolve(fetchUrlText(redirectUrl, maxRedirects - 1));
+        return resolve(fetchUrlTextDirect(redirectUrl, maxRedirects - 1, customHeaders));
       }
       
       if (res.statusCode < 200 || res.statusCode >= 300) {
@@ -2311,9 +2430,91 @@ function fetchUrlText(targetUrl, maxRedirects = 5) {
     req.on('error', err => reject(err));
     req.on('timeout', () => {
       req.destroy();
-      reject(new Error('Таймаут скачивания подписки'));
+      reject(new Error('Таймаут прямого скачивания подписки'));
     });
   });
+}
+
+function fetchUrlTextViaProxy(targetUrl, maxRedirects = 5, customHeaders = {}) {
+  return new Promise((resolve, reject) => {
+    try {
+      const u = new URL(targetUrl);
+      const http = require('http');
+      const isHttps = u.protocol === 'https:';
+      
+      const connectReq = http.request({
+        host: '127.0.0.1',
+        port: 7890,
+        method: 'CONNECT',
+        path: u.hostname + ':' + (u.port || (isHttps ? '443' : '80')),
+        timeout: 3500
+      });
+
+      connectReq.on('connect', (cRes, socket) => {
+        if (cRes.statusCode !== 200) {
+          return reject(new Error('Прокси вернул код ' + cRes.statusCode));
+        }
+        
+        const client = isHttps ? require('https') : require('http');
+        const reqHeaders = {
+          'Host': u.host,
+          'User-Agent': customHeaders['User-Agent'] || 'v2rayNG/1.8.12',
+          ...customHeaders
+        };
+        const req = client.get({
+          host: u.hostname,
+          path: u.pathname + u.search,
+          socket: socket,
+          agent: false,
+          headers: reqHeaders,
+          timeout: 4000
+        }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            let redirectUrl = res.headers.location;
+            if (!redirectUrl.startsWith('http')) {
+              redirectUrl = new URL(redirectUrl, targetUrl).href;
+            }
+            return resolve(fetchUrlText(redirectUrl, maxRedirects - 1, customHeaders));
+          }
+          if (res.statusCode < 200 || res.statusCode >= 300) {
+            return reject(new Error(`HTTP status code ${res.statusCode}`));
+          }
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => resolve(data));
+        });
+        
+        req.on('error', err => reject(err));
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error('Таймаут скачивания через прокси'));
+        });
+      });
+
+      connectReq.on('error', err => reject(err));
+      connectReq.on('timeout', () => {
+        connectReq.destroy();
+        reject(new Error('Таймаут подключения к локальному прокси'));
+      });
+
+      connectReq.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function fetchUrlText(targetUrl, maxRedirects = 5, customHeaders = {}) {
+  try {
+    return await fetchUrlTextDirect(targetUrl, maxRedirects, customHeaders);
+  } catch (err) {
+    console.log(`[fetchUrlText] Прямое скачивание ${targetUrl} не удалось (${err.message}). Пробуем через локальный прокси...`);
+    try {
+      return await fetchUrlTextViaProxy(targetUrl, maxRedirects, customHeaders);
+    } catch (proxyErr) {
+      throw new Error(`Ошибка скачивания: ${err.message}`);
+    }
+  }
 }
 
 async function updateProviderFileManually(providerName) {
@@ -2328,11 +2529,34 @@ async function updateProviderFileManually(providerName) {
   if (!prov || !prov.url) {
     throw new Error(`Подписка ${providerName} не найдена в config.yaml`);
   }
-  
-  console.log(`[Manual Update] Скачиваем подписку ${providerName} по URL: ${prov.url}`);
-  let rawText = await fetchUrlText(prov.url);
+
+  let targetPath = prov.path;
+  if (!targetPath) {
+    targetPath = `./proxy_providers/${providerName.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`;
+  }
+  const absPath = path.isAbsolute(targetPath) ? targetPath : path.resolve(path.dirname(configPath), targetPath);
+  const dir = path.dirname(absPath);
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
+
+  let rawText = '';
+  try {
+    console.log(`[Manual Update] Скачиваем подписку ${providerName} по URL: ${prov.url}`);
+    rawText = await fetchUrlText(prov.url, 5, prov.headers || {});
+  } catch (downloadErr) {
+    console.error(`[Manual Update] Ошибка скачивания ${providerName}:`, downloadErr.message);
+    if (fs.existsSync(absPath) && fs.statSync(absPath).size > 20) {
+      console.log(`[Manual Update] Используем существующий файл ${absPath}`);
+      return;
+    }
+    throw downloadErr;
+  }
   
   if (!rawText || !rawText.trim()) {
+    if (fs.existsSync(absPath) && fs.statSync(absPath).size > 20) {
+      return;
+    }
     throw new Error(`Скачанный файл подписки ${providerName} пуст`);
   }
   
@@ -2356,18 +2580,6 @@ async function updateProviderFileManually(providerName) {
         if (p) parsedProxies.push(p);
       } catch (e) {}
     }
-  }
-  
-  let targetPath = prov.path;
-  if (!targetPath) {
-    targetPath = `./proxy_providers/${providerName.toLowerCase()}.yaml`;
-  }
-  
-  const absPath = path.isAbsolute(targetPath) ? targetPath : path.join('/opt/etc/mihomo', targetPath);
-  
-  const dir = path.dirname(absPath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
   }
   
   if (parsedProxies.length > 0) {
@@ -2400,10 +2612,15 @@ function handleUpdateProvider(req, res) {
         return;
       }
       
-      let mRes = await makeMihomoRequest('PUT', '/providers/proxies/' + encodeURIComponent(name), null, 60000);
+      let mRes;
+      try {
+        mRes = await makeMihomoRequest('PUT', '/providers/proxies/' + encodeURIComponent(name), null, 3500);
+      } catch (e) {
+        mRes = { statusCode: 504, data: e.message };
+      }
       
-      if (mRes.statusCode !== 200 && mRes.statusCode !== 204) {
-        console.log(`[Provider Update] Mihomo API вернул ${mRes.statusCode} для ${name}. Скачиваем и конвертируем вручную...`);
+      if (!mRes || (mRes.statusCode !== 200 && mRes.statusCode !== 204)) {
+        console.log(`[Provider Update] Mihomo API вернул ${mRes ? mRes.statusCode : 'timeout'} для ${name}. Скачиваем и конвертируем вручную...`);
         await updateProviderFileManually(name);
         
         // После записи сконвертированного файла перезагружаем конфиг Mihomo,
@@ -2411,10 +2628,16 @@ function handleUpdateProvider(req, res) {
         const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
         console.log(`[Provider Update] Перезагрузка конфига Mihomo: HTTP ${reloadRes.statusCode}`);
         
+        // Запускаем healthcheck в фоне
+        makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(name) + '/healthcheck').catch(() => {});
+        
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, message: `Подписка ${name} обновлена через авто-конвертацию` }));
+        res.end(JSON.stringify({ success: true, message: `Подписка ${name} успешно обновлена` }));
         return;
       }
+      
+      // Запускаем healthcheck в фоне
+      makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(name) + '/healthcheck').catch(() => {});
       
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true }));
@@ -3970,6 +4193,11 @@ const server = http.createServer(async (req, res) => {
       res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
       res.end('Главный конфигурационный файл не найден');
     }
+    return;
+  }
+
+  if (req.method === 'GET' && (pathname.startsWith('/sub/') || pathname === '/api/sub/export' || pathname === '/api/sub')) {
+    handleExportSubscription(req, res, urlObj);
     return;
   }
 

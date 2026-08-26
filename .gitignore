@@ -16,6 +16,7 @@ clients_rules.yaml
 
 # Системные папки
 node_modules/
+proxy_providers/
 .idea/
 .vscode/
 .DS_Store

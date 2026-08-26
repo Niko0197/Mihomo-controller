@@ -37,7 +37,7 @@ anchors:
 proxy-providers:
   stealthsurf:
     type: http
-    url: "https://connect.stealthsurf.space/to/c316f1f5e54abbd3680fc445e048a3e1"
+    url: "https://subscriptions.production.stealthsurfconnectivity.net/to/c316f1f5e54abbd3680fc445e048a3e1"
     interval: 300
     path: ./proxy_providers/stealthsurf.yaml
     health-check:
@@ -45,6 +45,12 @@ proxy-providers:
       url: http://www.gstatic.com/generate_204
       interval: 30
       lazy: false
+    header:
+      User-Agent: ["Mozilla/5.0 (Linux; Android 14; Keenetic-Ultra-home) AppleWebKit/537.36 (KHTML, like Gecko) v2rayNG/1.8.12"]
+      Device-Name: ["Keenetic Ultra home"]
+      X-Device-Name: ["Keenetic Ultra home"]
+      X-Device-Model: ["Keenetic-Ultra-home"]
+      X-HWID: ["9D4B2C81E70FA356"]
 
   Igareck_Black_VPN:
     type: http
@@ -456,77 +462,9 @@ rules:
   # === КОНЕЦ RU-СЕГМЕНТА ===
 
   # --- CLIENTS BYPASS RULES ---
-  - SRC-IP-CIDR,192.168.1.64/32,DIRECT
-  - SRC-IP-CIDR,192.168.1.46/32,DIRECT
-  - SRC-IP-CIDR,192.168.1.143/32,DIRECT
-  - SRC-IP-CIDR,192.168.1.116/32,DIRECT
-  - SRC-IP-CIDR,192.168.1.144/32,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:46e4:eeff:fed7:69bf/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:d818:2a76:9e7b:76e1/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:d818:2a76:9e7b:76e1/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:64c5:90ff:fe9e:2c15/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:7416:8bd:636a:7dc4/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:6a9a:a40:931e:3db/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:f1ad:9c94:ac28:1766/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:f1ad:9c94:ac28:1766/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:1423:662b:584d:56bf/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:1423:662b:584d:56bf/128,DIRECT
-  - SRC-IP-CIDR,fe80::1872:3a02:5333:fa91/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:144f:43ce:fe2e:9e82/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:c40e:1aa:7691:23d/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:417a:2701:f563:4cfb/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:d87c:de4d:4491:869/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:d87c:de4d:4491:869/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:e4c2:fd29:bd59:101/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:e4c2:fd29:bd59:101/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:3f:417a:2701:f563:4cfb/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:423e:c0f9:2642:2da:bb9a/128,DIRECT
-  - SRC-IP-CIDR,fe80::43c:5bac:57ae:f946/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:423e:cd7:b98:fd77:8a24/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:10be:da98:d864:11b0/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:7bee:8e6b:ec65:40be/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:cb0e:4478:9474:4a6a/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:b4e1:57d5:819c:3e8e/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:80ff:4b6f:c7e7:9a00/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:e56c:91c8:2805:c4a7/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:a979:2e0a:673a:4cb6/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:f1b4:abe:6c2e:aa68/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:423e:f1b4:abe:6c2e:aa68/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:423e:9341:a968:7b37:2ba1/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:7dab:8a7e:784b:9bd4/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:2960:1aa9:e3c0:24cf/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:11df:a031:a70d:f278/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:fd06:7fbf:cb2b:42e4/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:715c:fbbe:61e0:3f0e/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:75be:d584:a449:83c8/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:26cb:2ab0:a5be:8fcc/128,DIRECT
-  - SRC-IP-CIDR,192.168.1.152/32,DIRECT
-  - SRC-IP-CIDR,192.168.1.102/32,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:1f03:f885:d5ce:3667/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:8d34:900c:7221:4fb2/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:423e:8d34:900c:7221:4fb2/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:55ae:423d:9b38:d022/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:fd78:cc9:8c87:5ee/128,DIRECT
-  - SRC-IP-CIDR,2a00:1370:817c:423e:c631:8063:7ff3:bd95/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:c02:4f54:ee1:8f86/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:b05e:e9bf:2298:d175/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:acc0:30b1:ee0e:97e5/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:a1de:890e:5532:225f/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:3d49:9296:29ec:e561/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:addb:277:edac:9925/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:b129:480f:7a7d:178d/128,DIRECT
-  - SRC-IP-CIDR,192.168.1.50/32,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:561c:3e14:493a:903c/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:a4fd:a387:54f2:4d29/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:7585:71b2:ac1:4707/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:a8b1:4a08:9ff4:7eb6/128,DIRECT
-  - SRC-IP-CIDR,fd26:c756:1a7b:0:f571:4a74:9743:54ca/128,DIRECT
-  - SRC-IP-CIDR,fe80::905f:e352:24c2:2099/128,DIRECT
-  # --- CLIENTS BYPASS RULES ---
   # --- END CLIENTS BYPASS RULES ---
   # --- DYNAMIC RULES ---
   - DOMAIN-SUFFIX,sfunpay.com,DIRECT
-  - DOMAIN-KEYWORD,stealthsurf,DIRECT
   - IP-CIDR,91.108.56.0/22,Telegram,no-resolve
   - IP-CIDR,149.154.164.0/22,Telegram,no-resolve
   - IP-CIDR,149.154.167.0/24,Telegram,no-resolve

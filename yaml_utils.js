@@ -229,6 +229,7 @@ function injectProxyIntoGroup(lines, groupName, proxyName) {
 function getProxyProvidersFromConfig(yamlText) {
   const lines = yamlText.split(/\r?\n/);
   let inProviders = false;
+  let inHeaderBlock = false;
   const providers = [];
   let currentProvider = null;
   
@@ -238,23 +239,33 @@ function getProxyProvidersFromConfig(yamlText) {
     
     if (trimmed === 'proxy-providers:') {
       inProviders = true;
+      inHeaderBlock = false;
       continue;
     }
     
     if (inProviders) {
       if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
         inProviders = false;
+        inHeaderBlock = false;
         break;
       }
       
       if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
-        const nameVal = trimmed.slice(0, -1).trim();
-        currentProvider = { name: nameVal };
+        const nameVal = trimmed.slice(0, -1).trim().replace(/['"]/g, '');
+        currentProvider = { name: nameVal, deviceName: '', headers: {} };
         providers.push(currentProvider);
+        inHeaderBlock = false;
         continue;
       }
       
       if (currentProvider && line.startsWith('    ') && !line.startsWith('      ')) {
+        if (trimmed === 'header:') {
+          inHeaderBlock = true;
+          continue;
+        } else {
+          inHeaderBlock = false;
+        }
+
         const colonIndex = trimmed.indexOf(':');
         if (colonIndex !== -1) {
           const key = trimmed.substring(0, colonIndex).trim();
@@ -264,18 +275,38 @@ function getProxyProvidersFromConfig(yamlText) {
           if (key === 'path') currentProvider.path = val;
         }
       }
+
+      // Парсинг имени устройства/HWID и заголовков СТРОГО из блока header
+      if (currentProvider && inHeaderBlock && line.startsWith('      ')) {
+        if (!currentProvider.headers) currentProvider.headers = {};
+        const colonIndex = trimmed.indexOf(':');
+        if (colonIndex !== -1) {
+          const k = trimmed.substring(0, colonIndex).trim();
+          const v = trimmed.substring(colonIndex + 1).trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
+          currentProvider.headers[k] = v;
+        }
+
+        if (trimmed.startsWith('Device-Name:') || trimmed.startsWith('X-HWID:')) {
+          const v = trimmed.split(':')[1].trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
+          if (v) currentProvider.deviceName = v;
+        } else if (trimmed.startsWith('User-Agent:') && !currentProvider.deviceName) {
+          const v = trimmed.split(':')[1].trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
+          const m = v.match(/\(([^)]+)\)/);
+          if (m) currentProvider.deviceName = m[1];
+        }
+      }
     }
   }
   return providers;
 }
 
 // Редактирование существующего провайдера в config.yaml
-function updateProviderInConfig(yamlText, name, url, interval) {
+function updateProviderInConfig(yamlText, name, url, interval, deviceName) {
   const lines = yamlText.split(/\r?\n/);
   let inProviders = false;
-  let currentProvider = null;
-  let urlIndex = -1;
-  let intervalIndex = -1;
+  let provStart = -1;
+  let provEnd = -1;
+  let existingPath = `./proxy_providers/${name.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`;
   
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
@@ -288,56 +319,108 @@ function updateProviderInConfig(yamlText, name, url, interval) {
     
     if (inProviders) {
       if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        if (provStart !== -1 && provEnd === -1) provEnd = i;
         break;
       }
       
       if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
-        currentProvider = trimmed.slice(0, -1).trim();
+        const pName = trimmed.slice(0, -1).trim().replace(/['"]/g, '');
+        if (provStart !== -1 && provEnd === -1) {
+          provEnd = i;
+          break;
+        }
+        if (pName.toLowerCase() === name.toLowerCase()) {
+          provStart = i;
+        }
         continue;
       }
-      
-      if (currentProvider === name && line.startsWith('    ') && !line.startsWith('      ')) {
-        const colonIndex = trimmed.indexOf(':');
-        if (colonIndex !== -1) {
-          const key = trimmed.substring(0, colonIndex).trim();
-          if (key === 'url') urlIndex = i;
-          if (key === 'interval') intervalIndex = i;
+
+      if (provStart !== -1 && line.startsWith('    ') && trimmed.startsWith('path:')) {
+        const colonIdx = trimmed.indexOf(':');
+        if (colonIdx !== -1) {
+          existingPath = trimmed.substring(colonIdx + 1).trim().replace(/^['"]|['"]$/g, '');
         }
       }
     }
   }
   
-  if (urlIndex !== -1) {
-    lines[urlIndex] = `    url: "${url}"`;
-  }
-  if (intervalIndex !== -1) {
-    lines[intervalIndex] = `    interval: ${interval}`;
+  if (provStart !== -1) {
+    if (provEnd === -1) {
+      provEnd = lines.length;
+      for (let i = provStart + 1; i < lines.length; i++) {
+        if (lines[i].length > 0 && !lines[i].startsWith(' ')) {
+          provEnd = i;
+          break;
+        }
+      }
+    }
+
+    const cleanDevice = deviceName ? String(deviceName).trim() : '';
+    const newProviderLines = [
+      `  ${name}:`,
+      `    type: http`,
+      `    url: "${url}"`,
+      `    interval: ${interval || 3600}`,
+      `    path: ${existingPath}`,
+      `    header:`,
+      ...(cleanDevice ? [
+        `      User-Agent: ["v2rayNG/1.8.12 (${cleanDevice}; Linux; KeeneticOS)"]`,
+        `      Device-Name: ["${cleanDevice}"]`,
+        `      X-Device-Name: ["${cleanDevice}"]`,
+        `      X-Device-Model: ["${cleanDevice}"]`,
+        `      X-Device-OS: ["KeeneticOS"]`,
+        `      X-HWID: ["9D4B2C81E70FA356"]`
+      ] : [
+        `      User-Agent: ["v2rayNG/1.8.12"]`,
+        `      X-HWID: ["9D4B2C81E70FA356"]`
+      ]),
+      `    health-check:`,
+      `      enable: true`,
+      `      url: http://www.gstatic.com/generate_204`,
+      `      interval: 300`,
+      `      tolerance: 50`
+    ];
+
+    lines.splice(provStart, provEnd - provStart, ...newProviderLines);
   }
   
   return lines.join('\n');
 }
 
 // Добавление нового провайдера подписки в config.yaml
-function addProviderToConfig(yamlText, name, url, interval) {
+function addProviderToConfig(yamlText, name, url, interval, deviceName) {
   const lines = yamlText.split(/\r?\n/);
   const providersIndex = lines.findIndex(line => line.trim() === 'proxy-providers:');
   if (providersIndex === -1) {
     throw new Error('Секция proxy-providers: не найдена в файле конфигурации');
   }
   
+  const cleanDevice = deviceName ? String(deviceName).trim() : '';
   const providerYaml = [
     `  ${name}:`,
     `    type: http`,
     `    url: "${url}"`,
     `    interval: ${interval || 3600}`,
-    `    path: ./proxy_providers/${name.toLowerCase()}.yaml`,
+    `    path: ./proxy_providers/${name.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`,
+    `    header:`,
+    ...(cleanDevice ? [
+      `      User-Agent: ["v2rayNG/1.8.12 (${cleanDevice}; Linux; KeeneticOS)"]`,
+      `      Device-Name: ["${cleanDevice}"]`,
+      `      X-Device-Name: ["${cleanDevice}"]`,
+      `      X-Device-Model: ["${cleanDevice}"]`,
+      `      X-Device-OS: ["KeeneticOS"]`,
+      `      X-HWID: ["9D4B2C81E70FA356"]`
+    ] : [
+      `      User-Agent: ["v2rayNG/1.8.12"]`,
+      `      X-HWID: ["9D4B2C81E70FA356"]`
+    ]),
     `    health-check:`,
     `      enable: true`,
     `      url: http://www.gstatic.com/generate_204`,
     `      interval: 300`,
     `      tolerance: 50`
   ];
-  
+
   lines.splice(providersIndex + 1, 0, ...providerYaml);
   return lines.join('\n');
 }
@@ -1051,9 +1134,130 @@ function reorderProvidersInConfig(yamlText, orderNames) {
   return lines.join('\n');
 }
 
+function extractProxiesFromYaml(yamlText) {
+  if (!yamlText) return [];
+  const lines = yamlText.split(/\r?\n/);
+  let inProxies = false;
+  let inRealityOpts = false;
+  let inGrpcOpts = false;
+  let inWsOpts = false;
+  const proxies = [];
+  let currentProxy = null;
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === 'proxies:') {
+      inProxies = true;
+      continue;
+    }
+    if (inProxies) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        break;
+      }
+      if (trimmed.startsWith('- name:') || (line.startsWith('  -') && line.includes('name:'))) {
+        if (currentProxy && currentProxy.name) proxies.push(currentProxy);
+        currentProxy = {};
+        inRealityOpts = false;
+        inGrpcOpts = false;
+        inWsOpts = false;
+        const colon = trimmed.indexOf(':');
+        const key = trimmed.substring(trimmed.startsWith('-') ? 1 : 0, colon).replace(/^-/, '').trim();
+        const val = trimmed.substring(colon + 1).trim().replace(/^['"]|['"]$/g, '');
+        currentProxy[key] = val;
+        continue;
+      }
+      if (currentProxy && line.startsWith('    ') && !line.startsWith('      ')) {
+        const colon = trimmed.indexOf(':');
+        if (colon !== -1) {
+          const key = trimmed.substring(0, colon).trim();
+          const rawVal = trimmed.substring(colon + 1).trim();
+          if (key === 'reality-opts') {
+            inRealityOpts = true;
+            inGrpcOpts = false;
+            inWsOpts = false;
+            currentProxy['reality-opts'] = {};
+            continue;
+          } else if (key === 'grpc-opts') {
+            inGrpcOpts = true;
+            inRealityOpts = false;
+            inWsOpts = false;
+            currentProxy['grpc-opts'] = {};
+            continue;
+          } else if (key === 'ws-opts') {
+            inWsOpts = true;
+            inRealityOpts = false;
+            inGrpcOpts = false;
+            currentProxy['ws-opts'] = {};
+            continue;
+          } else {
+            inRealityOpts = false;
+            inGrpcOpts = false;
+            inWsOpts = false;
+            let val = rawVal.replace(/^['"]|['"]$/g, '');
+            if (val === 'true') val = true;
+            else if (val === 'false') val = false;
+            else if (/^\d+$/.test(val)) val = parseInt(val, 10);
+            currentProxy[key] = val;
+          }
+        }
+      }
+      if (currentProxy && line.startsWith('      ')) {
+        const colon = trimmed.indexOf(':');
+        if (colon !== -1) {
+          const key = trimmed.substring(0, colon).trim();
+          let val = trimmed.substring(colon + 1).trim().replace(/^['"]|['"]$/g, '');
+          if (val === 'true') val = true;
+          else if (val === 'false') val = false;
+          else if (/^\d+$/.test(val)) val = parseInt(val, 10);
+
+          if (inRealityOpts && currentProxy['reality-opts']) {
+            currentProxy['reality-opts'][key] = val;
+          } else if (inGrpcOpts && currentProxy['grpc-opts']) {
+            currentProxy['grpc-opts'][key] = val;
+          } else if (inWsOpts && currentProxy['ws-opts']) {
+            currentProxy['ws-opts'][key] = val;
+          }
+        }
+      }
+    }
+  }
+  if (currentProxy && currentProxy.name) proxies.push(currentProxy);
+  return proxies;
+}
+
+function serializeProxyToUri(p) {
+  if (!p || !p.type) return '';
+  if (p.type === 'vless') {
+    let uri = `vless://${p.uuid}@${p.server}:${p.port}?type=${p.network || 'tcp'}`;
+    if (p.tls) {
+      if (p['reality-opts']) {
+        uri += `&security=reality&pbk=${p['reality-opts']['public-key'] || ''}&sid=${p['reality-opts']['short-id'] || ''}`;
+      } else {
+        uri += `&security=tls`;
+      }
+    }
+    if (p.flow) uri += `&flow=${p.flow}`;
+    if (p.servername) uri += `&sni=${p.servername}`;
+    if (p['client-fingerprint']) uri += `&fp=${p['client-fingerprint']}`;
+    uri += `#${encodeURIComponent(p.name || 'Proxy')}`;
+    return uri;
+  }
+  if (p.type === 'ss') {
+    const userinfo = Buffer.from(`${p.cipher}:${p.password}`).toString('base64');
+    return `ss://${userinfo}@${p.server}:${p.port}#${encodeURIComponent(p.name || 'Proxy')}`;
+  }
+  if (p.type === 'trojan') {
+    return `trojan://${p.password}@${p.server}:${p.port}?security=${p.tls ? 'tls' : 'none'}#${encodeURIComponent(p.name || 'Proxy')}`;
+  }
+  return '';
+}
+
 module.exports = {
   parseProxyUri,
   serializeProxyToYaml,
+  serializeProxyToUri,
+  extractProxiesFromYaml,
   injectProxyIntoConfig,
   injectProxyIntoGroup,
   getProxyProvidersFromConfig,
