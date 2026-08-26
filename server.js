@@ -53,7 +53,7 @@ setInterval(() => {
 }, 10 * 60 * 1000);
 
 // Вспомогательная функция для выполнения HTTP-запросов к API Mihomo
-function makeMihomoRequest(method, endpoint, body = null, timeoutMs = 5000) {
+function makeMihomoRequest(method, endpoint, body = null, timeoutMs = 15000) {
   return new Promise((resolve, reject) => {
     const options = {
       hostname: API_HOST,
@@ -1876,7 +1876,7 @@ function extractEndpoint(line) {
   return null;
 }
 
-function checkNodePing(host, port, timeoutMs = 1200) {
+function checkNodePing(host, port, timeoutMs = 800) {
   return new Promise(resolve => {
     const start = Date.now();
     const socket = new (require('net')).Socket();
@@ -1942,13 +1942,13 @@ async function filterAliveNodes(rawLines, targetCount = 60) {
   }
 
   const alive = [];
-  const BATCH_SIZE = 35;
+  const BATCH_SIZE = 70;
   for (let i = 0; i < candidatePool.length && alive.length < targetCount; i += BATCH_SIZE) {
     const chunk = candidatePool.slice(i, i + BATCH_SIZE);
     const results = await Promise.all(chunk.map(async line => {
       const ep = extractEndpoint(line);
       if (!ep) return null;
-      const ok = await checkNodePing(ep.host, ep.port, 1200);
+      const ok = await checkNodePing(ep.host, ep.port, 800);
       return ok ? line : null;
     }));
 
@@ -1956,6 +1956,10 @@ async function filterAliveNodes(rawLines, targetCount = 60) {
       if (r && !alive.includes(r) && alive.length < targetCount) {
         alive.push(r);
       }
+    }
+
+    if (alive.length >= 25) {
+      break;
     }
   }
 
@@ -2379,7 +2383,7 @@ function handleUpdateProvider(req, res) {
         return;
       }
       
-      let mRes = await makeMihomoRequest('PUT', '/providers/proxies/' + encodeURIComponent(name));
+      let mRes = await makeMihomoRequest('PUT', '/providers/proxies/' + encodeURIComponent(name), null, 60000);
       
       if (mRes.statusCode !== 200 && mRes.statusCode !== 204) {
         console.log(`[Provider Update] Mihomo API вернул ${mRes.statusCode} для ${name}. Скачиваем и конвертируем вручную...`);
