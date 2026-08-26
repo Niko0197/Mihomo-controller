@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.7.0-orange?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.7.1-orange?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/platform-Keenetic%20%2B%20Entware-blue?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/runtime-Node.js%20(Zero--deps)-green?style=for-the-badge&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/UI-Material%203%20Dark-purple?style=for-the-badge" alt="Material 3">
@@ -245,13 +245,24 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller
 
 ## 🔄 Обновление панели
 
-Чтобы обновить установленную панель до версии **v1.7.0**, выполните в SSH:
+Чтобы обновить установленную панель до версии **v1.7.1**, выполните в SSH:
 
 ```bash
 sh -c "$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/install.sh)"
 ```
 
 *Все ваши пользовательские правила, настройки слотов DPI, замочки и базы данных трафика сохраняются автоматически.*
+
+---
+
+## 📝 История изменений (Changelog)
+
+### Версия 1.7.1
+- ⚡ **Мгновенный замер пинга в реальном времени**: При клике правой кнопкой мыши (ПКМ) по карточке группы или точке сервера выполняется честный живой сетевой замер «здесь и сейчас», а не возврат старого значения из кэша.
+- 🎯 **Устранение расхождения пинга DIRECT**: Прямой интернет (`DIRECT`) теперь замеряется через единый движок ядра Mihomo, что устранило паразитную задержку локального DNS-резолва (~20 мс). Теперь пинг `DIRECT` и селектора `Manual 3` абсолютно одинаков (~20 мс).
+- 🔍 **Поддержка `proxy.extra` в healthcheck**: Корректное считывание истории задержек из объекта `proxy.extra` для любых кастомных тестовых URL.
+- 🧹 **Глубокая очистка подписок**: Механизм удаления подписок теперь каскадно вычищает провайдера, его карточки, `use:` / `proxies:` ссылки во всех 30+ группах и физически удаляет кэш-файлы `.yaml` с диска.
+- 📊 **Адаптивная ширина графиков**: Раздельный вид мониторинга трафика переведён на двухколоночную сетку с заполнением 100% ширины экрана без пустых полей.
 
 ---
 
