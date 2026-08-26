@@ -46,10 +46,7 @@ proxy-providers:
       interval: 30
       lazy: false
     header:
-      User-Agent: ["Mozilla/5.0 (Linux; Android 14; Keenetic-Ultra-home) AppleWebKit/537.36 (KHTML, like Gecko) v2rayNG/1.8.12"]
-      Device-Name: ["Keenetic Ultra home"]
-      X-Device-Name: ["Keenetic Ultra home"]
-      X-Device-Model: ["Keenetic-Ultra-home"]
+      User-Agent: ["v2rayNG/1.8.12"]
       X-HWID: ["9D4B2C81E70FA356"]
 
   Igareck_Black_VPN:
