@@ -1,0 +1,757 @@
+{
+  "192.168.1.4": {
+    "name": "Pixel 7",
+    "group": "🚀Auto-Best"
+  },
+  "9E:3E:22:41:61:0C": {
+    "name": "Pixel 7",
+    "group": "⚙️Manual 1"
+  },
+  "192.168.1.2": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws1"
+  },
+  "B4:2E:99:F6:61:52": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws1"
+  },
+  "192.168.1.116": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "AC:3E:B1:28:DA:9B": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "192.168.1.101": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "F8:4E:17:4F:76:37": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fe80::fa4e:17ff:fe4f:7637": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "2a00:1370:817c:3f:6a9a:a40:931e:3db": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:f1ad:9c94:ac28:1766": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "2a00:1370:817c:3f:f1ad:9c94:ac28:1766": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fe80::1f46:b:2ef5:9d94": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:9cbf:316b:cd62:6501": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:1423:662b:584d:56bf": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "2a00:1370:817c:3f:1423:662b:584d:56bf": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:417a:2701:f563:4cfb": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:d87c:de4d:4491:869": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "2a00:1370:817c:3f:d87c:de4d:4491:869": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:e4c2:fd29:bd59:101": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "2a00:1370:817c:3f:e4c2:fd29:bd59:101": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "2a00:1370:817c:3f:417a:2701:f563:4cfb": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "192.168.1.8": {
+    "name": "Часы Galaxy watch 6",
+    "group": ""
+  },
+  "24:24:B7:DF:7D:F0": {
+    "name": "Часы Galaxy watch 6",
+    "group": ""
+  },
+  "192.168.1.100": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "44:E4:EE:D7:69:BF": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:80ff:4b6f:c7e7:9a00": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:46e4:eeff:fed7:69bf": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fe80::46e4:eeff:fed7:69bf": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "192.168.1.5": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws2"
+  },
+  "AE:F8:79:66:31:D3": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:8d34:900c:7221:4fb2": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "2a00:1370:817c:423e:8d34:900c:7221:4fb2": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:55ae:423d:9b38:d022": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:fd78:cc9:8c87:5ee": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fe80::a67:8c6c:9a57:5daa": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws1"
+  },
+  "2a00:1370:817c:423e:c631:8063:7ff3:bd95": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:c02:4f54:ee1:8f86": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:b05e:e9bf:2298:d175": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:acc0:30b1:ee0e:97e5": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:5c41:4306:4bc3:eb63": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:a1de:890e:5532:225f": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fe80::e655:77f9:9d7:f07": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:2960:1aa9:e3c0:24cf": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:b4e1:57d5:819c:3e8e": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:e56c:91c8:2805:c4a7": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:a979:2e0a:673a:4cb6": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:26cb:2ab0:a5be:8fcc": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:83ba:9af6:5f38:fcba": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:f1b4:abe:6c2e:aa68": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "2a00:1370:817c:423e:f1b4:abe:6c2e:aa68": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "2a00:1370:817c:423e:9341:a968:7b37:2ba1": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:7dab:8a7e:784b:9bd4": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:b129:480f:7a7d:178d": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "192.168.1.102": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "38:B8:00:27:6B:33": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "192.168.1.10": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "66:C5:90:9E:2C:15": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:a4fd:a387:54f2:4d29": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:64c5:90ff:fe9e:2c15": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fe80::64c5:90ff:fe9e:2c15": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:561c:3e14:493a:903c": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:7585:71b2:ac1:4707": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:4c8f:8c92:f7dd:145e": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:85c5:ae08:79c0:1853": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:7cd9:48d2:b343:81ed": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:248f:f69c:a5df:124d": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:3815:603f:10e7:d941": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:e048:fb5f:c3e1:98cb": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:3737:b239:a70f:2ae1": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:3960:1a64:62d5:e58c": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:3dcc:bfaa:e7fc:4147": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:5415:1ea5:6002:4f5": {
+    "name": "",
+    "group": "⚙️Manual 1"
+  },
+  "fd26:c756:1a7b:0:e00e:f625:a2c2:3247": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:597d:8fa4:b509:20db": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:75d3:484c:5049:4866": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:20ea:4d08:97c4:6d06": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:dcf2:81d:fd71:5490": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:cdfe:fdc2:4ec9:64eb": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:5519:4680:de08:3824": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:8d96:fa8d:7a59:948a": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:e379:99a7:823a:4494": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:d984:ca29:f2af:5f4c": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:b45c:4a16:9831:80eb": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:bdac:ee07:eff:8cdc": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:d556:fd5b:47f0:ffdd": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:bde8:86f4:a279:47ed": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:58e:4ee2:d04a:621": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:89f8:ba96:59b5:75e6": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:51e2:3835:f606:aadb": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:bfb0:cfd4:d7a2:f6f9": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:235a:db44:b57e:b6ac": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:5238:bee4:53f2:e266": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:f311:122a:8424:903c": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:958b:d4c9:da3c:f765": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:d41b:f27b:a551:dbff": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:7ab9:c2c4:8879:137f": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:177b:c43e:bad3:6e03": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:c43d:7bc2:7ee:693e": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:4c2c:6d6f:dc75:9158": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:4539:a36:ee12:c8e7": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:286c:b75f:91d4:f7a5": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fe80::6ff6:ceb7:ff4f:f016": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:44c4:e39c:fe6b:6c10": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:8cd8:2e8e:a041:4af4": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:454b:f870:84a:af29": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:d04b:f3a8:6f12:6a79": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:e52f:5c7e:8d7c:e4ba": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:22ef:5081:6449:5c06": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:59d7:11e6:6d02:31c1": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:ade4:3cd7:ac34:aaab": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws2"
+  },
+  "192.168.1.90": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "16:C4:0A:20:07:99": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:49a3:60f8:f970:844": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:30f:3471:35dc:7d90": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:14c4:aff:fe20:799": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:ce3b:d079:a35d:27dd": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fe80::14c4:aff:fe20:799": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "192.168.1.7": {
+    "name": "Pixel-10-Pro-XL - Home network",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:452a:105a:7c06:9755": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "30:E0:44:67:E0:78": {
+    "name": "Pixel-10-Pro-XL - Home network",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:6b83:adb1:142a:ed4c": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fe80::64eb:fc7f:bc53:1161": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:eb84:13b9:9827:3fbd": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:c899:f05c:2faf:11c6": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:5d89:89ca:4837:99c9": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "192.168.1.97": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:f9d6:b67f:e00d:cfab": {
+    "name": "",
+    "group": "🚀Auto-Best"
+  },
+  "fd26:c756:1a7b:0:96e8:9889:c66:7984": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:160d:6512:491c:6e56": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:b78a:c0c8:c93f:66b": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:f736:9a3e:31d1:6dc1": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:92bf:6aeb:77b5:9c62": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:268a:e578:533c:a290": {
+    "name": "",
+    "group": "⚙️Manual 2"
+  },
+  "fd26:c756:1a7b:0:a8b2:911e:a50b:167": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:5851:cbd5:821d:43f": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:fdd5:b2c5:b22b:ddc3": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:4196:3d2d:9270:fffb": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:c4d9:38bb:cfcd:be7e": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:7b7d:a390:8113:db24": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:f13d:3981:6460:a264": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:8af:2944:6fa5:444": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:289a:9725:6c69:110a": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:7158:bb45:9038:b197": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:13b9:cd6:82ba:5734": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:df55:9982:8341:d450": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:fca7:6bb6:df09:96d3": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:3e33:bff:4a71:7772": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:a0b2:d47d:467e:df97": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:f04d:1735:dd5f:3415": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:b98a:1bc7:a660:4c2e": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:d050:1985:ff07:45b0": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:c901:eb0a:98:e02b": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:1873:bfaf:d1:7f55": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:f0b4:d3ca:3fec:a211": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "192.168.1.20": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "FC:D9:08:0D:7C:3E": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "fe80::bd46:abe8:6b35:acfe": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:3cff:15e8:c8b2:740": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:c54:ad0c:9690:75f": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:d461:c75d:51b1:22be": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  },
+  "fd26:c756:1a7b:0:ac4d:1740:c5cb:8a3": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws2"
+  },
+  "fd26:c756:1a7b:0:1e01:8b62:dc4b:87c8": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:46a5:2ce6:67d9:f56e": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:adb9:c3ec:4559:e0ec": {
+    "name": "",
+    "group": "⚙️Manual 2",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:22c8:6cac:2070:3536": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:4376:e564:8b65:9bac": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:6bfd:3afd:50a9:8f50": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:cf31:a766:423e:f2aa": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:5e1d:d104:c72:275d": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:8a32:dd2d:f76d:5dbf": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:bdfd:11e7:22d8:ddd6": {
+    "name": "",
+    "group": "🚀Auto-Best",
+    "zapretMode": "default"
+  },
+  "fd26:c756:1a7b:0:9b8b:f60:4446:44c3": {
+    "name": "",
+    "group": "",
+    "zapretMode": "nfqws1"
+  }
+}

@@ -1,0 +1,6 @@
+--- PATHS & COMMAND CHECK ---
+Checking ndmq help details:
+ndmq no args:
+
+ndmq -h:
+
