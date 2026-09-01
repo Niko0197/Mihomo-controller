@@ -3166,7 +3166,7 @@ window.testCustomDpiArgs = testCustomDpiArgs;
 
 // Применение пресета к слоту
 async function applyDpiPreset(slotId, args, presetName) {
-  const slotName = slotId === 'slot1' ? '⚡ NFQWS 1 (ТВ)' : '⚡ NFQWS 2 (Смартфон/ПК)';
+  const slotName = slotId === 'slot1' ? '⚡ ByeDPI 1 (ТВ)' : '⚡ ByeDPI 2 (Смартфон/ПК)';
   try {
     showToast(`Применяем стратегию к ${slotName}...`, 'info');
     const res = await fetch('/api/dpi/apply', {

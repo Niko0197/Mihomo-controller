@@ -42,23 +42,17 @@ fi
 
 # 2. Установка зависимостей (только при install)
 if [ "$MODE" = "install" ]; then
-    echo "→ Шаг 1: Проверка и установка зависимостей (Node.js, curl, tar)..."
+    echo "→ Шаг 1: Проверка и установка зависимостей (Node.js, curl, tar, gzip, ca-certificates)..."
     opkg update
 
-    if ! command -v node >/dev/null 2>&1; then
-        echo "  Устанавливаем Node.js..."
-        opkg install node
-    fi
-
-    if ! command -v curl >/dev/null 2>&1; then
-        echo "  Устанавливаем curl..."
-        opkg install curl
-    fi
-
-    if ! command -v tar >/dev/null 2>&1; then
-        echo "  Устанавливаем tar..."
-        opkg install tar
-    fi
+    for PKG in node curl tar gzip ca-certificates; do
+        if [ "$PKG" = "ca-certificates" ]; then
+            opkg install ca-certificates 2>/dev/null || true
+        elif ! command -v "$PKG" >/dev/null 2>&1; then
+            echo "  Устанавливаем $PKG..."
+            opkg install "$PKG"
+        fi
+    done
 else
     echo "→ Шаг 1: Зависимости уже установлены, пропускаем."
 fi
@@ -139,26 +133,83 @@ fi
 
 rm -rf "$TEMP_DIR"
 
-# 5. Установка и настройка встроенного DPI-Bypass (YouTube SOCKS5)
+# 5. Установка и настройка встроенного DPI-Bypass (ByeDPI SOCKS5)
 echo "→ Шаг 4: Настройка встроенного DPI-Bypass для YouTube (2 независимых службы SOCKS5)..."
-ARCH=$(uname -m)
-case "$ARCH" in
-    aarch64|arm64) DPI_ARCH="aarch64" ;;
-    mips) DPI_ARCH="mips" ;;
-    mipsel) DPI_ARCH="mipsel" ;;
-    armv7*|armhf) DPI_ARCH="armv7l" ;;
-    *) DPI_ARCH="aarch64" ;;
+
+# Точное определение архитектуры через opkg и uname
+OPKG_ARCH=$(opkg print-architecture 2>/dev/null | grep -v 'arch all' | sort -k3 -n | tail -n1 | awk '{print $2}')
+UNAME_M=$(uname -m 2>/dev/null)
+
+DPI_ARCH=""
+case "$OPKG_ARCH" in
+    aarch64*|arm64*) DPI_ARCH="aarch64" ;;
+    armv7*|armhf*|cortex*) DPI_ARCH="armv7l" ;;
+    armv6*) DPI_ARCH="armv6" ;;
+    mipsel*|mipsle*) DPI_ARCH="mipsel" ;;
+    mips*) DPI_ARCH="mips" ;;
+    x86_64*|amd64*) DPI_ARCH="x86_64" ;;
+    i*86) DPI_ARCH="i686" ;;
 esac
 
-if [ ! -f "/opt/bin/ciadpi" ]; then
-    echo "  Скачиваем DPI-демон для архитектуры $DPI_ARCH..."
-    curl -sL "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-${DPI_ARCH}.tar.gz" | tar -xz -C /tmp/ 2>/dev/null
+if [ -z "$DPI_ARCH" ]; then
+    case "$UNAME_M" in
+        aarch64|arm64) DPI_ARCH="aarch64" ;;
+        armv7*|armhf) DPI_ARCH="armv7l" ;;
+        armv6*) DPI_ARCH="armv6" ;;
+        mipsel|mipsle) DPI_ARCH="mipsel" ;;
+        mips*) DPI_ARCH="mipsel" ;; # Для роутеров Keenetic MIPS дефолт - mipsel (MT7621/MT7628)
+        x86_64|amd64) DPI_ARCH="x86_64" ;;
+        i*86) DPI_ARCH="i686" ;;
+        *) DPI_ARCH="aarch64" ;;
+    esac
+fi
+
+echo "  Определена целевая архитектура: $DPI_ARCH"
+mkdir -p /opt/bin /opt/var/run
+
+NEED_DOWNLOAD=1
+if [ -f "/opt/bin/ciadpi" ]; then
+    if /opt/bin/ciadpi -h >/dev/null 2>&1 || /opt/bin/ciadpi --help >/dev/null 2>&1; then
+        echo "  ✓ Установленный бинарник ByeDPI (/opt/bin/ciadpi) проверен и готов к работе."
+        NEED_DOWNLOAD=0
+    else
+        echo "  ⚠️ Текущий бинарник ciadpi поврежден или не соответствует архитектуре, перескачиваем..."
+        rm -f /opt/bin/ciadpi
+    fi
+fi
+
+if [ "$NEED_DOWNLOAD" -eq 1 ]; then
+    echo "  Скачиваем ByeDPI демон для архитектуры $DPI_ARCH..."
+    BYEDPI_URL="https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-${DPI_ARCH}.tar.gz"
+    curl -sSL "$BYEDPI_URL" | tar -xz -C /tmp/ 2>/dev/null
+    
     if [ -f "/tmp/ciadpi-${DPI_ARCH}" ]; then
-        mv "/tmp/ciadpi-${DPI_ARCH}" /opt/bin/ciadpi
+        mv -f "/tmp/ciadpi-${DPI_ARCH}" /opt/bin/ciadpi
     elif [ -f "/tmp/ciadpi" ]; then
-        mv "/tmp/ciadpi" /opt/bin/ciadpi
+        mv -f "/tmp/ciadpi" /opt/bin/ciadpi
     fi
     chmod +x /opt/bin/ciadpi 2>/dev/null
+    
+    # Проверяем запуск скачанного бинарника
+    if /opt/bin/ciadpi -h >/dev/null 2>&1 || /opt/bin/ciadpi --help >/dev/null 2>&1; then
+        echo "  ✓ ByeDPI ($DPI_ARCH) успешно установлен и проверен на запуск."
+    else
+        echo "  ⚠️ Ошибка проверки запуска $DPI_ARCH. Пробуем альтернативные варианты сборки..."
+        if [ "$DPI_ARCH" = "mipsel" ]; then ALT_ARCH="mips"; elif [ "$DPI_ARCH" = "mips" ]; then ALT_ARCH="mipsel"; elif [ "$DPI_ARCH" = "aarch64" ]; then ALT_ARCH="armv7l"; else ALT_ARCH=""; fi
+        if [ -n "$ALT_ARCH" ]; then
+            echo "  Пробуем сборку $ALT_ARCH..."
+            curl -sSL "https://github.com/hufrea/byedpi/releases/download/v0.17.3/byedpi-17.3-${ALT_ARCH}.tar.gz" | tar -xz -C /tmp/ 2>/dev/null
+            if [ -f "/tmp/ciadpi-${ALT_ARCH}" ]; then
+                mv -f "/tmp/ciadpi-${ALT_ARCH}" /opt/bin/ciadpi
+            elif [ -f "/tmp/ciadpi" ]; then
+                mv -f "/tmp/ciadpi" /opt/bin/ciadpi
+            fi
+            chmod +x /opt/bin/ciadpi 2>/dev/null
+            if /opt/bin/ciadpi -h >/dev/null 2>&1 || /opt/bin/ciadpi --help >/dev/null 2>&1; then
+                echo "  ✓ Альтернативная сборка ByeDPI ($ALT_ARCH) успешно запустилась!"
+            fi
+        fi
+    fi
 fi
 
 # Создаем симлинки для независимого управления процессами
@@ -168,7 +219,7 @@ ln -sf /opt/bin/ciadpi /opt/bin/ciadpi-2
 # Удаляем старую службу если была
 rm -f /opt/etc/init.d/S52ciadpi-youtube 2>/dev/null
 
-# 1. Служба S52ciadpi-1 (⚡ NFQWS 1 — ТВ, порт 10805)
+# 1. Служба S52ciadpi-1 (⚡ ByeDPI 1 — ТВ, порт 10805)
 cat << 'EOF' > /opt/etc/init.d/S52ciadpi-1
 #!/bin/sh
 
@@ -176,7 +227,7 @@ ENABLED=yes
 PROCS=/opt/bin/ciadpi-1
 PREARGS=""
 ARGS="-i 127.0.0.1 -p 10805 --split 1+s --disorder 1+s -D --pidfile /opt/var/run/ciadpi-1.pid"
-DESC="ciadpi-1 (NFQWS 1 - TV)"
+DESC="ciadpi-1 (ByeDPI 1 - TV)"
 PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 . /opt/etc/init.d/rc.func
@@ -184,7 +235,7 @@ EOF
 chmod +x /opt/etc/init.d/S52ciadpi-1
 /opt/etc/init.d/S52ciadpi-1 restart 2>/dev/null
 
-# 2. Служба S53ciadpi-2 (⚡ NFQWS 2 — Смартфоны/ПК, порт 10806)
+# 2. Служба S53ciadpi-2 (⚡ ByeDPI 2 — Смартфоны/ПК, порт 10806)
 cat << 'EOF' > /opt/etc/init.d/S53ciadpi-2
 #!/bin/sh
 
@@ -192,7 +243,7 @@ ENABLED=yes
 PROCS=/opt/bin/ciadpi-2
 PREARGS=""
 ARGS="-i 127.0.0.1 -p 10806 --tlsrec 1 -D --pidfile /opt/var/run/ciadpi-2.pid"
-DESC="ciadpi-2 (NFQWS 2 - Phone/PC)"
+DESC="ciadpi-2 (ByeDPI 2 - Phone/PC)"
 PATH=/opt/sbin:/opt/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 
 . /opt/etc/init.d/rc.func
@@ -200,7 +251,7 @@ EOF
 chmod +x /opt/etc/init.d/S53ciadpi-2
 /opt/etc/init.d/S53ciadpi-2 restart 2>/dev/null
 
-echo "  ✓ Службы YouTube DPI-Bypass настроены и запущены (NFQWS 1: 10805, NFQWS 2: 10806)"
+echo "  ✓ Службы YouTube DPI-Bypass настроены и запущены (ByeDPI 1: 10805, ByeDPI 2: 10806)"
 
 # 6. Развертывание базовой конфигурации config.yaml
 echo "→ Шаг 5: Проверка и развертывание конфигурации Mihomo..."

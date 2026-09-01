@@ -2486,8 +2486,8 @@ function handleExportSubscription(req, res, urlObj) {
       title = name.toUpperCase() + ' VPN';
     }
 
-    // Фильтруем внутренние локальные соксы роутера (NFQWS / Zapret на 127.0.0.1)
-    collectedProxies = collectedProxies.filter(p => p && p.server && p.server !== '127.0.0.1' && p.server !== 'localhost' && !p.name.includes('NFQWS'));
+    // Фильтруем внутренние локальные соксы роутера (ByeDPI / NFQWS на 127.0.0.1)
+    collectedProxies = collectedProxies.filter(p => p && p.server && p.server !== '127.0.0.1' && p.server !== 'localhost' && !p.name.includes('NFQWS') && !p.name.includes('ByeDPI'));
 
     // Если запрошен Base64 (для мобильных: Shadowrocket, Streisand, v2rayNG, Happ)
     if (format === 'b64' || format === 'txt') {
@@ -3053,14 +3053,14 @@ async function handleGetProxies(req, res) {
       history: directHistory
     });
 
-    // 2. Добавляем статические прокси (NFQWS)
-    const staticProxies = ['⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
+    // 2. Добавляем статические прокси (ByeDPI / NFQWS)
+    const staticProxies = ['⚡ ByeDPI 1 (ТВ)', '⚡ ByeDPI 2 (Смартфон/ПК)', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
     for (const sName of staticProxies) {
       if (proxiesObj[sName]) {
         list.push({
           name: sName,
           type: proxiesObj[sName].type || 'Socks5',
-          server: proxiesObj[sName].port ? `127.0.0.1:${proxiesObj[sName].port}` : 'Локальный сервис (NFQWS)',
+          server: proxiesObj[sName].port ? `127.0.0.1:${proxiesObj[sName].port}` : 'Локальный сервис (ByeDPI)',
           history: proxiesObj[sName].history || []
         });
       }
@@ -3092,9 +3092,9 @@ async function handleGetProxies(req, res) {
   }
 }
 
-// Фоновый периодический опрос задержки для DIRECT и NFQWS (каждые 30 секунд)
+// Фоновый периодический опрос задержки для DIRECT и ByeDPI / NFQWS (каждые 30 секунд)
 async function autoPingDirectAndNfqws() {
-  const targets = ['DIRECT', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
+  const targets = ['DIRECT', '⚡ ByeDPI 1 (ТВ)', '⚡ ByeDPI 2 (Смартфон/ПК)', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
   for (const name of targets) {
     try {
       const url = encodeURIComponent('http://www.gstatic.com/generate_204');
