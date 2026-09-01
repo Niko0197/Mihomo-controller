@@ -1,4 +1,4 @@
-﻿# --- ОСНОВНЫЕ ПОРТЫ ---
+# --- ОСНОВНЫЕ ПОРТЫ ---
 port: 7890
 socks-port: 7891
 mixed-port: 1080
@@ -56,13 +56,13 @@ proxy-providers:
       lazy: false
 
 proxies:
-  - name: "⚡ NFQWS 1 (ТВ)"
+  - name: "⚡ ByeDPI 1 (ТВ)"
     type: socks5
     server: 127.0.0.1
     port: 10805
     udp: true
 
-  - name: "⚡ NFQWS 2 (Смартфон/ПК)"
+  - name: "⚡ ByeDPI 2 (Смартфон/ПК)"
     type: socks5
     server: 127.0.0.1
     port: 10806
@@ -112,7 +112,7 @@ proxy-groups:
   - name: YouTube
     type: select
     icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
-    proxies: ['⚡ NFQWS 2 (Смартфон/ПК)', '⚡ NFQWS 1 (ТВ)', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+    proxies: ['⚡ ByeDPI 2 (Смартфон/ПК)', '⚡ ByeDPI 1 (ТВ)', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
 
   - name: Discord
     type: select

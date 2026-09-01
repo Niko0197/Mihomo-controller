@@ -77,7 +77,7 @@ const DEFAULT_SETTINGS = {
   slots: {
     slot1: {
       id: 'slot1',
-      name: '⚡ NFQWS 1 (ТВ)',
+      name: '⚡ ByeDPI 1 (ТВ)',
       service: 'S52ciadpi-1',
       binary: '/opt/bin/ciadpi-1',
       port: 10805,
@@ -88,7 +88,7 @@ const DEFAULT_SETTINGS = {
     },
     slot2: {
       id: 'slot2',
-      name: '⚡ NFQWS 2 (Смартфон/ПК)',
+      name: '⚡ ByeDPI 2 (Смартфон/ПК)',
       service: 'S53ciadpi-2',
       binary: '/opt/bin/ciadpi-2',
       port: 10806,

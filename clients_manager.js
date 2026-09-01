@@ -565,9 +565,9 @@ function syncClientsRulesToConfig() {
       const match = trimmed.match(/SRC-IP-CIDR,([^,/]+)/);
       if (match) {
         const ip = match[1].trim();
-        if (trimmed.includes('NFQWS 1')) {
+        if (trimmed.includes('ByeDPI 1') || trimmed.includes('NFQWS 1')) {
           if (!zapretNfqws1Ips.includes(ip)) zapretNfqws1Ips.push(ip);
-        } else if (trimmed.includes('NFQWS 2')) {
+        } else if (trimmed.includes('ByeDPI 2') || trimmed.includes('NFQWS 2')) {
           if (!zapretNfqws2Ips.includes(ip)) zapretNfqws2Ips.push(ip);
         }
       }
@@ -813,12 +813,12 @@ async function setClientZapretRulesInConfig(ipsInput, mode) {
 
     let { startZapretIdx: sz, endZapretIdx: ez } = findIndices();
 
-    if (mode === 'nfqws1') {
-      const newRule = `- AND,((SRC-IP-CIDR,${targetIp}/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)`;
+    if (mode === 'nfqws1' || mode === 'byedpi1') {
+      const newRule = `- AND,((SRC-IP-CIDR,${targetIp}/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 1 (ТВ)`;
       if (ez !== -1) lines.splice(ez, 0, newRule);
       else if (sz !== -1) lines.splice(sz + 1, 0, newRule);
-    } else if (mode === 'nfqws2') {
-      const newRule = `- AND,((SRC-IP-CIDR,${targetIp}/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)`;
+    } else if (mode === 'nfqws2' || mode === 'byedpi2') {
+      const newRule = `- AND,((SRC-IP-CIDR,${targetIp}/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 2 (Смартфон/ПК)`;
       if (ez !== -1) lines.splice(ez, 0, newRule);
       else if (sz !== -1) lines.splice(sz + 1, 0, newRule);
     }

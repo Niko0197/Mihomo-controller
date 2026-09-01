@@ -3143,7 +3143,7 @@ async function healthcheckAllGroups() {
     const providers = data.providers || {};
 
     const tasks = [];
-    const staticTargets = ['DIRECT', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
+    const staticTargets = ['DIRECT', '⚡ ByeDPI 1 (ТВ)', '⚡ ByeDPI 2 (Смартфон/ПК)', '⚡ NFQWS 1 (ТВ)', '⚡ NFQWS 2 (Смартфон/ПК)'];
     staticTargets.forEach(targetName => {
       tasks.push(
         fetch('/api/proxies/ping', {
@@ -3737,9 +3737,9 @@ function renderClientsTable() {
     selectZapret.style.cursor = 'pointer';
 
     const zapretOptions = [
-      { value: 'default', text: '⚡ Запрет: Авто' },
-      { value: 'nfqws1', text: '⚡ NFQWS 1 (ТВ)' },
-      { value: 'nfqws2', text: '⚡ NFQWS 2 (Смартфон/ПК)' }
+      { value: 'default', text: '⚡ Обход: Авто' },
+      { value: 'nfqws1', text: '⚡ ByeDPI 1 (ТВ)' },
+      { value: 'nfqws2', text: '⚡ ByeDPI 2 (Смартфон/ПК)' }
     ];
 
     const currentZapret = c.zapretMode || 'default';
@@ -3839,8 +3839,8 @@ async function changeClientZapret(ip, mode, selectEl) {
     const data = await res.json().catch(() => ({}));
     if (!res.ok || !data.success) throw new Error(data.message || data.error || 'HTTP ' + res.status);
     
-    const modeLabel = mode === 'nfqws1' ? '⚡ NFQWS 1 (ТВ)' : (mode === 'nfqws2' ? '⚡ NFQWS 2 (Смартфон/ПК)' : '⚡ По умолчанию');
-    showToast(`Для устройства ${ip} установлен Запрет: ${modeLabel}`);
+    const modeLabel = mode === 'nfqws1' ? '⚡ ByeDPI 1 (ТВ)' : (mode === 'nfqws2' ? '⚡ ByeDPI 2 (Смартфон/ПК)' : '⚡ По умолчанию');
+    showToast(`Для устройства ${ip} установлен маршрут: ${modeLabel}`);
     loadClients();
   } catch (err) {
     showToast(`Ошибка смены стратегии Запрета: ${err.message}`, 'error');
