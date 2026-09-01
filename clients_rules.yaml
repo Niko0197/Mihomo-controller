@@ -1,0 +1,34 @@
+# ============================================================
+#   Mihomo Controller — Правила маршрутизации устройств (Clients)
+# ============================================================
+
+# --- CLIENTS BYPASS RULES ---
+- SRC-IP-CIDR,192.168.1.64/32,DIRECT
+- SRC-IP-CIDR,192.168.1.46/32,DIRECT
+- SRC-IP-CIDR,192.168.1.143/32,DIRECT
+- SRC-IP-CIDR,192.168.1.116/32,DIRECT
+- SRC-IP-CIDR,192.168.1.144/32,DIRECT
+- SRC-IP-CIDR,192.168.1.90/32,DIRECT
+# --- END CLIENTS BYPASS RULES ---
+
+# --- CLIENTS ZAPRET RULES ---
+- AND,((SRC-IP-CIDR,192.168.1.2/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.7/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.101/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)
+- AND,((SRC-IP-CIDR,192.168.1.10/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.100/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)
+- AND,((SRC-IP-CIDR,192.168.1.20/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.5/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
+# --- END CLIENTS ZAPRET RULES ---
+
+# --- CLIENTS VPN RULES ---
+- SRC-IP-CIDR,192.168.1.10/32,🚀Auto-Best
+- SRC-IP-CIDR,192.168.1.100/32,🚀Auto-Best
+- SRC-IP-CIDR,192.168.1.5/32,⚙️Manual 2
+- SRC-IP-CIDR,192.168.1.4/32,🚀Auto-Best
+- SRC-IP-CIDR,192.168.1.20/32,🚀Auto-Best
+- SRC-IP-CIDR,192.168.1.97/32,🚀Auto-Best
+- SRC-IP-CIDR,192.168.1.101/32,🚀Auto-Best
+- SRC-IP-CIDR,192.168.1.2/32,⚙️Manual 2
+- SRC-IP-CIDR,192.168.1.7/32,🚀Auto-Best
+# --- END CLIENTS VPN RULES ---

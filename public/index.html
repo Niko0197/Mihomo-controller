@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.7.1">
+  <link rel="stylesheet" href="/app.css?v=1.9.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.7.1" defer></script>
-  <script src="/app_monitoring.js?v=1.7.1" defer></script>
+  <script src="/app.js?v=1.9.0" defer></script>
+  <script src="/app_monitoring.js?v=1.9.0" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -121,6 +121,7 @@
         <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
 
         <div class="nav-section-title">НАСТРОЙКИ</div>
+        <button class="tab-btn" id="tab-btn-dns" onclick="switchTab('dns')">🛡️ Настройка DNS</button>
         <button class="tab-btn" id="tab-btn-dpi" onclick="switchTab('dpi')">⚡ Тюнер DPI (ByeDPI)</button>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
@@ -214,7 +215,7 @@
           </div>
         </div>
 
-        <div id="table-wrapper">
+        <div id="leak-table-wrapper" class="table-wrapper">
           <table>
             <thead>
               <tr>
@@ -497,7 +498,7 @@
           </div>
         </div>
 
-        <div id="connections-table-wrapper" style="overflow-x: auto;">
+        <div id="connections-table-wrapper">
           <table>
             <thead>
               <tr>
@@ -535,7 +536,7 @@
           </div>
         </div>
 
-        <div id="clients-table-wrapper" style="overflow-x: auto;">
+        <div id="clients-table-wrapper">
           <table>
             <thead>
               <tr>
@@ -703,23 +704,229 @@
 
         <div id="trace-result-container" style="display: none; margin-top: 24px;">
           <div class="trace-header-info">
-            <div class="trace-info-item">
-              <span class="info-label">Разрешённые IP:</span>
-              <span class="info-value" id="trace-ips">-</span>
+            <div class="trace-info-item" style="flex: 2 1 280px;">
+              <span class="info-label">🎯 Сработавшее правило:</span>
+              <span class="info-value" id="trace-matched-rule" style="font-family: monospace; font-size: 0.95rem; color: #8ab4f8; word-break: break-all;">-</span>
             </div>
-            <div class="trace-info-item">
+            <div class="trace-info-item" style="flex: 1 1 180px;">
+              <span class="info-label">Группа / Направление:</span>
+              <span class="info-value" id="trace-final-route" style="font-weight: 700; font-family: var(--font-outfit); font-size: 1.15rem;">-</span>
+            </div>
+            <div class="trace-info-item trace-final-loc-item" style="flex: 2 1 260px;">
+              <span class="info-label">📍 Конечная локация / Нода:</span>
+              <span class="info-value" id="trace-final-proxy" style="font-weight: 700; font-family: var(--font-outfit); font-size: 1.15rem; color: #3ddc84;">-</span>
+            </div>
+            <div class="trace-info-item" style="flex: 1 1 140px;">
               <span class="info-label">Страна IP:</span>
               <span class="info-value" id="trace-country">-</span>
             </div>
-            <div class="trace-info-item">
-              <span class="info-label">Итоговый маршрут:</span>
-              <span class="info-value" id="trace-final-route" style="font-weight: 700; font-family: var(--font-outfit); font-size: 1.2rem;">-</span>
+            <div class="trace-info-item" style="flex: 1.5 1 180px;">
+              <span class="info-label">Разрешённые IP:</span>
+              <span class="info-value" id="trace-ips" style="font-family: monospace; font-size: 0.9rem;">-</span>
+            </div>
+          </div>
+
+          <!-- Proxy Chain Flow Path visualizer -->
+          <div id="trace-chain-container" style="display: none; margin-bottom: 24px; padding: 18px 22px; background: rgba(255,255,255,0.03); border: 1px solid var(--md-sys-color-outline); border-radius: 18px;">
+            <div class="info-label" style="font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; margin-bottom: 12px; font-weight: 600; display: flex; align-items: center; gap: 6px;">
+              <span>🛰️ Полная цепочка проксирования:</span>
+            </div>
+            <div id="trace-chain-flow" class="trace-chain-flow">
+              <!-- e.g. [Github] ➔ [🚀Auto-Best] ➔ [manual 1 Умная Локация (Vless / 45ms)] -->
             </div>
           </div>
 
           <h3 style="font-family: var(--font-outfit); margin: 20px 0 12px; font-weight: 600;">Пошаговое прохождение цепочки правил:</h3>
           <div class="trace-timeline" id="trace-steps-list">
             <!-- Шаги трассировки -->
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Вкладка: Настройка DNS -->
+    <div id="tab-content-dns" class="tab-content">
+      <div class="card" style="margin-bottom: 24px;">
+        <div class="card-title" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 12px;">
+          <span>🛡️ Настройка DNS и Резолвера</span>
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span class="badge" id="dns-active-status-badge" style="background: rgba(61, 220, 132, 0.15); color: #3ddc84; border: 1px solid rgba(61, 220, 132, 0.3); font-size: 0.8rem; padding: 4px 10px; border-radius: 6px;">Режим: redir-host</span>
+            <button class="btn" onclick="loadDnsSettings()" style="font-size: 0.82rem; padding: 6px 14px;">🔄 Обновить</button>
+          </div>
+        </div>
+        <p class="timestamp" style="margin-bottom: 20px; font-size: 0.95rem; line-height: 1.5;">
+          Управление встроенным DNS-резолвером ядра Mihomo. Вы можете выбрать готовые проверенные DoH/DoT пресеты или вписать свои адреса серверов. При нажатии «Применить» настройки мгновенно записываются в <code>config.yaml</code> и перезагружаются в ядре.
+        </p>
+
+        <!-- Блок 1: Основные DNS-серверы (Primary Nameservers) -->
+        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+            <label style="font-size: 1rem; font-weight: 600; color: var(--text); display: flex; align-items: center; gap: 8px;">
+              <span>🌐 Основные DNS-серверы (Nameserver)</span>
+              <span style="font-size: 0.8rem; font-weight: normal; color: var(--text-muted);">(Используются по умолчанию)</span>
+            </label>
+            <span id="dns-primary-count-badge" style="font-size: 0.78rem; color: var(--text-muted); background: var(--bg-card); padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-color);">0 серверов</span>
+          </div>
+
+          <!-- Быстрые пресеты для основных DNS -->
+          <div style="margin-bottom: 14px;">
+            <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">Быстрый выбор пресета:</div>
+            <div class="dns-presets-container" style="display: flex; flex-wrap: wrap; gap: 8px;">
+              <button type="button" class="dns-preset-btn" data-preset="adguard" onclick="applyDnsPreset('adguard', false)" title="AdGuard DoH + Anycast IP (Без рекламы)">
+                <span class="dns-preset-icon">🛡️</span>
+                <span class="dns-preset-name">AdGuard DNS (DoH + AdBlock)</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="cloudflare" onclick="applyDnsPreset('cloudflare', false)" title="Cloudflare 1.1.1.1 DoH (Высокая скорость)">
+                <span class="dns-preset-icon">⚡</span>
+                <span class="dns-preset-name">Cloudflare (1.1.1.1 DoH)</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="quad9" onclick="applyDnsPreset('quad9', false)" title="Quad9 9.9.9.9 DoH (Защита от малвари)">
+                <span class="dns-preset-icon">🔒</span>
+                <span class="dns-preset-name">Quad9 (DoH)</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="opendns" onclick="applyDnsPreset('opendns', false)" title="OpenDNS / Cisco Umbrella">
+                <span class="dns-preset-icon">🌿</span>
+                <span class="dns-preset-name">OpenDNS DoH</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="google" onclick="applyDnsPreset('google', false)" title="Google 8.8.8.8 DoH">
+                <span class="dns-preset-icon">🌐</span>
+                <span class="dns-preset-name">Google (8.8.8.8 DoH)</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="yandex" onclick="applyDnsPreset('yandex', false)" title="Yandex DNS (77.88.8.8)">
+                <span class="dns-preset-icon">🇷🇺</span>
+                <span class="dns-preset-name">Yandex DNS (RU)</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="local" onclick="applyDnsPreset('local', false)" title="Локальный резолвер роутера 127.0.0.1">
+                <span class="dns-preset-icon">🏠</span>
+                <span class="dns-preset-name">Локальный (127.0.0.1)</span>
+              </button>
+              <button type="button" class="dns-preset-btn" data-preset="custom" onclick="applyDnsPreset('custom', false)" title="Ввести собственный список DNS">
+                <span class="dns-preset-icon">✏️</span>
+                <span class="dns-preset-name">Свой вариант</span>
+              </button>
+            </div>
+          </div>
+
+          <!-- Текстовое поле ввода для основных DNS -->
+          <div style="position: relative;">
+            <textarea id="dns-primary-textarea" rows="4" placeholder="https://dns.adguard-dns.com/dns-query&#10;94.140.14.14&#10;94.140.15.15" style="width: 100%; box-sizing: border-box; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.88rem; line-height: 1.5; resize: vertical; outline: none; transition: border-color 0.2s;"></textarea>
+          </div>
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-top: 6px; font-size: 0.78rem; color: var(--text-muted);">
+            <span>💡 Вводите каждый адрес с новой строки (поддерживаются <code>https://...</code>, <code>tls://...</code>, <code>quic://...</code>, <code>IP:порт</code>).</span>
+            <span style="cursor: pointer; color: var(--accent);" onclick="clearDnsPrimary()">Очистить поле</span>
+          </div>
+        </div>
+
+        <!-- Блок 2: Резервный DNS (Fallback DNS) -->
+        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 24px;">
+          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 14px; flex-wrap: wrap; gap: 10px;">
+            <div style="display: flex; align-items: center; gap: 12px;">
+              <label class="switch">
+                <input type="checkbox" id="dns-fallback-toggle" onchange="toggleFallbackSection()">
+                <span class="slider"></span>
+              </label>
+              <div>
+                <label for="dns-fallback-toggle" style="font-size: 1rem; font-weight: 600; color: var(--text); cursor: pointer;">
+                  🔄 Резервный DNS (Fallback DNS)
+                </label>
+                <div style="font-size: 0.8rem; color: var(--text-muted);">Используется при сбоях или загрязнении ответов основного DNS (GeoIP-фильтрация)</div>
+              </div>
+            </div>
+            <span id="dns-fallback-status-badge" style="font-size: 0.78rem; padding: 3px 8px; border-radius: 4px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-muted);">Отключен</span>
+          </div>
+
+          <div id="dns-fallback-container" style="display: none; border-top: 1px solid rgba(255,255,255,0.06); padding-top: 16px; margin-top: 8px;">
+            <!-- Быстрые пресеты для Fallback -->
+            <div style="margin-bottom: 14px;">
+              <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">Быстрый выбор резервного DNS:</div>
+              <div class="dns-presets-container" style="display: flex; flex-wrap: wrap; gap: 8px;">
+                <button type="button" class="dns-preset-btn" data-preset="yandex" onclick="applyDnsPreset('yandex', true)" title="Yandex DNS (77.88.8.8)">
+                  <span class="dns-preset-icon">🇷🇺</span>
+                  <span class="dns-preset-name">Yandex DNS (77.88.8.8)</span>
+                </button>
+                <button type="button" class="dns-preset-btn" data-preset="cloudflare" onclick="applyDnsPreset('cloudflare', true)" title="Cloudflare (1.0.0.1)">
+                  <span class="dns-preset-icon">⚡</span>
+                  <span class="dns-preset-name">Cloudflare (1.0.0.1)</span>
+                </button>
+                <button type="button" class="dns-preset-btn" data-preset="adguard" onclick="applyDnsPreset('adguard', true)" title="AdGuard (94.140.14.14)">
+                  <span class="dns-preset-icon">🛡️</span>
+                  <span class="dns-preset-name">AdGuard (94.140.14.14)</span>
+                </button>
+                <button type="button" class="dns-preset-btn" data-preset="quad9" onclick="applyDnsPreset('quad9', true)" title="Quad9 (149.112.112.112)">
+                  <span class="dns-preset-icon">🔒</span>
+                  <span class="dns-preset-name">Quad9 (149.112.112.112)</span>
+                </button>
+                <button type="button" class="dns-preset-btn" data-preset="google" onclick="applyDnsPreset('google', true)" title="Google (8.8.4.4)">
+                  <span class="dns-preset-icon">🌐</span>
+                  <span class="dns-preset-name">Google (8.8.4.4)</span>
+                </button>
+                <button type="button" class="dns-preset-btn" data-preset="custom" onclick="applyDnsPreset('custom', true)" title="Ввести собственный список Fallback DNS">
+                  <span class="dns-preset-icon">✏️</span>
+                  <span class="dns-preset-name">Свой вариант</span>
+                </button>
+              </div>
+            </div>
+
+            <!-- Текстовое поле ввода для Fallback DNS -->
+            <div style="position: relative;">
+              <textarea id="dns-fallback-textarea" rows="3" placeholder="77.88.8.8&#10;77.88.8.1" style="width: 100%; box-sizing: border-box; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 8px; padding: 12px 14px; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.88rem; line-height: 1.5; resize: vertical; outline: none; transition: border-color 0.2s;"></textarea>
+            </div>
+
+            <!-- Настройки фильтрации Fallback (fallback-filter) -->
+            <div style="margin-top: 16px; padding: 14px; background: rgba(0,0,0,0.2); border-radius: 8px; border: 1px solid rgba(255,255,255,0.04);">
+              <div style="font-size: 0.88rem; font-weight: 600; color: var(--text); margin-bottom: 10px;">⚙️ Фильтрация Fallback (fallback-filter)</div>
+              <div style="display: flex; gap: 20px; flex-wrap: wrap; align-items: center;">
+                <label style="display: flex; align-items: center; gap: 8px; font-size: 0.85rem; color: var(--text); cursor: pointer;">
+                  <input type="checkbox" id="dns-fallback-geoip" checked style="accent-color: var(--accent); width: 16px; height: 16px;">
+                  <span>Фильтровать по коду GeoIP</span>
+                </label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <label style="font-size: 0.85rem; color: var(--text-muted);">Код страны:</label>
+                  <input type="text" id="dns-fallback-geoip-code" value="RU" style="width: 60px; height: 30px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 6px; text-align: center; font-weight: 600; font-size: 0.85rem; text-transform: uppercase;">
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Блок 3: Дополнительные параметры DNS ядра -->
+        <div style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 20px; margin-bottom: 40px;">
+          <div style="font-size: 1rem; font-weight: 600; color: var(--text); margin-bottom: 14px;">⚙️ Дополнительные параметры ядра</div>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 16px;">
+            <div>
+              <label style="display: block; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500;">Режим работы DNS (enhanced-mode):</label>
+              <select id="dns-enhanced-mode" style="width: 100%; height: 38px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 6px; padding: 0 10px; font-size: 0.9rem; font-family: var(--font-inter); outline: none;">
+                <option value="redir-host">redir-host (Рекомендуется для роутера)</option>
+                <option value="fake-ip">fake-ip (Виртуальные IP-пулы)</option>
+              </select>
+            </div>
+            <div>
+              <label style="display: block; font-size: 0.82rem; color: var(--text-muted); margin-bottom: 6px; font-weight: 500;">Адрес и порт прослушивания (listen):</label>
+              <input type="text" id="dns-listen-address" value="127.0.0.1:1053" style="width: 100%; height: 38px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 6px; padding: 0 12px; font-size: 0.9rem; font-family: monospace; outline: none; box-sizing: border-box;">
+            </div>
+            <div style="display: flex; align-items: flex-end; padding-bottom: 4px;">
+              <label style="display: flex; align-items: center; gap: 8px; font-size: 0.88rem; color: var(--text); cursor: pointer;">
+                <input type="checkbox" id="dns-ipv6-toggle" style="accent-color: var(--accent); width: 18px; height: 18px;">
+                <span>Включить резолв IPv6 DNS</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        <!-- Кнопки управления и сохранения -->
+        <div style="display: flex; gap: 12px; flex-wrap: wrap; align-items: center; justify-content: space-between; padding-top: 12px;">
+          <div style="display: flex; gap: 10px; flex-wrap: wrap;">
+            <button class="btn btn-primary" id="btn-save-dns" onclick="saveDnsSettings()" style="padding: 10px 24px; font-weight: 600; font-size: 0.92rem; display: flex; align-items: center; gap: 8px;">
+              <span>💾 Применить настройки DNS</span>
+            </button>
+            <button class="btn" onclick="loadDnsSettings()" style="padding: 10px 18px; font-size: 0.9rem;">
+              <span>🔄 Сбросить</span>
+            </button>
+          </div>
+          <div>
+            <button class="btn" onclick="applyRecommendedDnsPreset()" style="padding: 10px 16px; font-size: 0.85rem; border-color: rgba(61, 220, 132, 0.4); color: #3ddc84;" title="Установить AdGuard DoH + Yandex Fallback">
+              <span>🛡️ Рекомендуемый (AdGuard + Fallback)</span>
+            </button>
           </div>
         </div>
       </div>
@@ -775,19 +982,20 @@
           </div>
         </div>
 
-        <div id="table-wrapper">
+        <div id="rules-table-wrapper" class="table-wrapper">
           <table>
             <thead>
               <tr>
-                <th style="width: 20%;">Тип</th>
-                <th style="width: 45%;">Значение</th>
-                <th style="width: 25%;">Направление</th>
-                <th style="width: 10%; text-align: center;">Действие</th>
+                <th style="width: 52px; text-align: center;" title="Порядок приоритета (перетаскивайте строки для изменения порядка)">№</th>
+                <th style="width: 18%;">Тип</th>
+                <th style="width: 44%;">Значение</th>
+                <th style="width: 24%;">Направление</th>
+                <th style="width: 14%; text-align: center;">Действие</th>
               </tr>
             </thead>
             <tbody id="dynamic-rules-list">
               <tr>
-                <td colspan="4" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Загрузка правил...</td>
+                <td colspan="5" style="text-align: center; color: var(--text-muted); padding: 30px 0;">Загрузка правил...</td>
               </tr>
             </tbody>
           </table>

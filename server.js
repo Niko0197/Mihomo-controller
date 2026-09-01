@@ -8,10 +8,19 @@ const systemStats = require('./system_stats');
 const clientsManager = require('./clients_manager');
 const dpiManager = require('./dpi_manager');
 
-const PORT = 4000;
-const API_PORT = 9090;
-const API_HOST = '192.168.1.1';
-const configPath = '/opt/etc/mihomo/config.yaml';
+const PORT = process.env.PORT || 4000;
+const API_PORT = parseInt(process.env.MIHOMO_API_PORT, 10) || 9090;
+const API_HOST = process.env.MIHOMO_API_HOST || '127.0.0.1';
+function getConfigFilePath() {
+  if (fs.existsSync('/opt/etc/mihomo/config.yaml')) {
+    return '/opt/etc/mihomo/config.yaml';
+  }
+  if (fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
+    return '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
+  }
+  return path.join(__dirname, 'config.yaml');
+}
+const configPath = getConfigFilePath();
 const logRuPath = path.join(__dirname, 'log_ru.txt');
 let directCachedDelay = 0;
 // Автоматическая ротация текстовых логов (защита флеш-памяти роутера, макс 500 КБ)
@@ -253,18 +262,60 @@ function serveStaticFile(res, fileName, contentType) {
   });
 }
 
+function getFlagEmoji(countryCode) {
+  if (!countryCode || countryCode.length !== 2) return '';
+  const codePoints = countryCode
+    .toUpperCase()
+    .split('')
+    .map(char => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
+}
+
+// GeoIP Resolution via 2IP API (2ip.io / api.2ip.me)
 function getGeoIp(ip) {
   return new Promise((resolve) => {
-    const req = https.get('https://freeipapi.com/api/json/' + ip, { timeout: 1500 }, (res) => {
+    if (!ip) return resolve(null);
+    const req = https.get('https://api.2ip.me/geo.json?ip=' + encodeURIComponent(ip), { timeout: 3000 }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
         try {
           const parsed = JSON.parse(data);
-          resolve(parsed.countryCode || null);
-        } catch (e) {
-          resolve(null);
-        }
+          if (parsed && (parsed.country_code || parsed.country_rus || parsed.country)) {
+            const code = (parsed.country_code || '').toUpperCase();
+            const name = parsed.country_rus || parsed.country || '';
+            const flag = getFlagEmoji(code);
+            const formatted = flag ? `${flag} ${name} (${code})` : (name ? `${name} (${code})` : code);
+            return resolve(formatted);
+          }
+        } catch (e) {}
+        fallbackIpWhoIs(ip).then(resolve);
+      });
+    });
+    req.on('error', () => fallbackIpWhoIs(ip).then(resolve));
+    req.on('timeout', () => {
+      req.destroy();
+      fallbackIpWhoIs(ip).then(resolve);
+    });
+  });
+}
+
+function fallbackIpWhoIs(ip) {
+  return new Promise((resolve) => {
+    const req = https.get('https://ipwho.is/' + encodeURIComponent(ip), { timeout: 2500 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed && (parsed.country_code || parsed.country)) {
+            const flag = (parsed.flag && parsed.flag.emoji) ? parsed.flag.emoji : getFlagEmoji(parsed.country_code);
+            const code = (parsed.country_code || '').toUpperCase();
+            const name = parsed.country || '';
+            return resolve(flag ? `${flag} ${name} (${code})` : `${name} (${code})`);
+          }
+        } catch (e) {}
+        resolve(null);
       });
     });
     req.on('error', () => resolve(null));
@@ -629,6 +680,75 @@ async function handleXkeenTrace(req, res) {
       }
     }
 
+    // 5. Resolve Proxy Chain & Final Egress Proxy from Mihomo /proxies & /providers/proxies
+    let chain = [matchedPolicy || 'DIRECT'];
+    let finalProxy = matchedPolicy || 'DIRECT';
+    let finalProxyType = '';
+    let finalProxyDelay = null;
+
+    try {
+      if (matchedPolicy && matchedPolicy !== 'DIRECT' && matchedPolicy !== 'REJECT') {
+        let allProxies = {};
+        const mRes = await makeMihomoRequest('GET', '/proxies', null, 3000);
+        if (mRes.statusCode === 200) {
+          const parsed = JSON.parse(mRes.data);
+          allProxies = Object.assign({}, parsed.proxies || {});
+        }
+
+        // Also fetch provider proxies to get leaf node types and ping latencies
+        try {
+          const provRes = await makeMihomoRequest('GET', '/providers/proxies', null, 3000);
+          if (provRes.statusCode === 200) {
+            const parsedProv = JSON.parse(provRes.data);
+            const providers = parsedProv.providers || {};
+            for (const pKey of Object.keys(providers)) {
+              const pList = providers[pKey].proxies || [];
+              for (const px of pList) {
+                if (px && px.name && !allProxies[px.name]) {
+                  allProxies[px.name] = px;
+                }
+              }
+            }
+          }
+        } catch (e) {}
+
+        let current = matchedPolicy;
+        const visited = new Set([current]);
+        chain = [current];
+        finalProxy = current;
+
+        while (current) {
+          const proxyObj = allProxies[current];
+          if (!proxyObj) break;
+
+          const isGroup = ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(proxyObj.type);
+          const next = proxyObj.now || (isGroup && proxyObj.all && proxyObj.all[0]);
+
+          if (next && !visited.has(next)) {
+            chain.push(next);
+            visited.add(next);
+            finalProxy = next;
+            if (allProxies[next] && ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(allProxies[next].type)) {
+              current = next;
+            } else {
+              break;
+            }
+          } else {
+            break;
+          }
+        }
+
+        if (allProxies[finalProxy]) {
+          finalProxyType = allProxies[finalProxy].type || finalProxyType;
+          if (allProxies[finalProxy].history && allProxies[finalProxy].history.length > 0) {
+            finalProxyDelay = allProxies[finalProxy].history[allProxies[finalProxy].history.length - 1].delay || finalProxyDelay;
+          }
+        }
+      }
+    } catch (e) {
+      console.warn('[Trace] Ошибка резолвинга цепочки прокси:', e.message);
+    }
+
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
       success: true,
@@ -637,6 +757,10 @@ async function handleXkeenTrace(req, res) {
       country: countryCode,
       matchedRule,
       matchedPolicy,
+      chain,
+      finalProxy,
+      finalProxyType,
+      finalProxyDelay,
       steps
     }));
 
@@ -1682,6 +1806,259 @@ function handleSaveConfig(req, res) {
       }
       res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: false, message: err.message }));
+    }
+  });
+}
+
+// --- DNS УПРАВЛЕНИЕ ---
+
+function parseDnsConfig(yamlContent) {
+  const lines = yamlContent.split(/\r?\n/);
+  let inDns = false;
+  let inNameserver = false;
+  let inFallback = false;
+  let inFallbackFilter = false;
+  let inIpcidr = false;
+  
+  const result = {
+    enable: true,
+    ipv6: false,
+    enhanced_mode: 'redir-host',
+    listen: '127.0.0.1:1053',
+    nameserver: [],
+    fallback_enabled: false,
+    fallback: [],
+    fallback_filter_geoip: true,
+    fallback_filter_geoip_code: 'RU',
+    fallback_filter_ipcidr: ['240.0.0.0/4']
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'dns:') {
+      inDns = true;
+      continue;
+    }
+
+    if (inDns) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('\t') && !trimmed.startsWith('#')) {
+        inDns = false;
+        break;
+      }
+
+      if (trimmed.startsWith('#') || !trimmed) continue;
+
+      if (trimmed.startsWith('enable:')) {
+        result.enable = trimmed.split(':')[1].trim() === 'true';
+      } else if (trimmed.startsWith('ipv6:')) {
+        result.ipv6 = trimmed.split(':')[1].trim() === 'true';
+      } else if (trimmed.startsWith('enhanced-mode:')) {
+        result.enhanced_mode = trimmed.split(':')[1].trim().replace(/['"]/g, '');
+      } else if (trimmed.startsWith('listen:')) {
+        result.listen = trimmed.split(':').slice(1).join(':').trim().replace(/['"]/g, '');
+      } else if (trimmed.startsWith('nameserver:')) {
+        inNameserver = true;
+        inFallback = false;
+        inFallbackFilter = false;
+        inIpcidr = false;
+      } else if (trimmed.startsWith('fallback:')) {
+        inFallback = true;
+        inNameserver = false;
+        inFallbackFilter = false;
+        inIpcidr = false;
+        result.fallback_enabled = true;
+      } else if (trimmed.startsWith('fallback-filter:')) {
+        inFallbackFilter = true;
+        inNameserver = false;
+        inFallback = false;
+        inIpcidr = false;
+      } else if (inNameserver) {
+        if (trimmed.startsWith('-')) {
+          const val = trimmed.substring(1).trim().replace(/^['"]|['"]$/g, '');
+          if (val) result.nameserver.push(val);
+        } else if (trimmed.includes(':')) {
+          inNameserver = false;
+          i--;
+        }
+      } else if (inFallback) {
+        if (trimmed.startsWith('-')) {
+          const val = trimmed.substring(1).trim().replace(/^['"]|['"]$/g, '');
+          if (val) result.fallback.push(val);
+        } else if (trimmed.includes(':')) {
+          inFallback = false;
+          i--;
+        }
+      } else if (inFallbackFilter) {
+        if (trimmed.startsWith('geoip:')) {
+          result.fallback_filter_geoip = trimmed.split(':')[1].trim() === 'true';
+        } else if (trimmed.startsWith('geoip-code:')) {
+          result.fallback_filter_geoip_code = trimmed.split(':')[1].trim().replace(/['"]/g, '');
+        } else if (trimmed.startsWith('ipcidr:')) {
+          inIpcidr = true;
+        } else if (inIpcidr) {
+          if (trimmed.startsWith('-')) {
+            const val = trimmed.substring(1).trim().replace(/^['"]|['"]$/g, '');
+            if (val && !result.fallback_filter_ipcidr.includes(val)) {
+              result.fallback_filter_ipcidr.push(val);
+            }
+          } else if (trimmed.includes(':')) {
+            inIpcidr = false;
+            inFallbackFilter = false;
+            i--;
+          }
+        }
+      }
+    }
+  }
+
+  result.fallback_enabled = result.fallback.length > 0;
+  if (result.nameserver.length === 0) {
+    result.nameserver = ['https://dns.adguard-dns.com/dns-query', '94.140.14.14', '1.1.1.1'];
+  }
+  return result;
+}
+
+function replaceDnsSectionInYaml(yamlContent, dnsConfig) {
+  const lines = yamlContent.split(/\r?\n/);
+  let dnsStartIdx = -1;
+  let dnsEndIdx = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'dns:') {
+      dnsStartIdx = i;
+      let j = i + 1;
+      while (j < lines.length) {
+        const nextLine = lines[j];
+        const nextTrimmed = nextLine.trim();
+        if (nextLine.length > 0 && !nextLine.startsWith(' ') && !nextLine.startsWith('\t') && !nextTrimmed.startsWith('#')) {
+          break;
+        }
+        j++;
+      }
+      dnsEndIdx = j;
+      break;
+    }
+  }
+
+  const newDnsLines = [
+    'dns:',
+    `  enable: ${dnsConfig.enable !== false}`,
+    `  ipv6: ${dnsConfig.ipv6 === true}`,
+    `  enhanced-mode: ${dnsConfig.enhanced_mode || 'redir-host'}`,
+    `  listen: ${dnsConfig.listen || '127.0.0.1:1053'}`,
+    '  nameserver:'
+  ];
+
+  const nameservers = Array.isArray(dnsConfig.nameserver) && dnsConfig.nameserver.length > 0
+    ? dnsConfig.nameserver
+    : ['https://dns.adguard-dns.com/dns-query', '94.140.14.14', '1.1.1.1'];
+  nameservers.forEach(ns => {
+    const cleanNs = (ns || '').trim();
+    if (cleanNs) newDnsLines.push(`    - ${cleanNs}`);
+  });
+
+  if (dnsConfig.fallback_enabled && Array.isArray(dnsConfig.fallback) && dnsConfig.fallback.length > 0) {
+    newDnsLines.push('  fallback:');
+    dnsConfig.fallback.forEach(fb => {
+      const cleanFb = (fb || '').trim();
+      if (cleanFb) newDnsLines.push(`    - ${cleanFb}`);
+    });
+    newDnsLines.push('  fallback-filter:');
+    newDnsLines.push(`    geoip: ${dnsConfig.fallback_filter_geoip !== false}`);
+    newDnsLines.push(`    geoip-code: ${dnsConfig.fallback_filter_geoip_code || 'RU'}`);
+    newDnsLines.push('    ipcidr:');
+    const ipcidrs = Array.isArray(dnsConfig.fallback_filter_ipcidr) && dnsConfig.fallback_filter_ipcidr.length > 0
+      ? dnsConfig.fallback_filter_ipcidr
+      : ['240.0.0.0/4'];
+    ipcidrs.forEach(cidr => {
+      newDnsLines.push(`      - ${cidr.trim()}`);
+    });
+  }
+
+  if (dnsStartIdx !== -1) {
+    lines.splice(dnsStartIdx, dnsEndIdx - dnsStartIdx, ...newDnsLines);
+  } else {
+    let insertIdx = lines.findIndex(l => l.startsWith('anchors:') || l.startsWith('proxy-providers:') || l.startsWith('proxies:'));
+    if (insertIdx === -1) insertIdx = lines.length;
+    lines.splice(insertIdx, 0, ...newDnsLines, '');
+  }
+
+  return lines.join('\n');
+}
+
+// GET /api/dns
+function handleGetDnsConfig(req, res) {
+  try {
+    if (!fs.existsSync(configPath)) {
+      res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, message: 'Файл конфигурации не найден' }));
+      return;
+    }
+    const yamlText = fs.readFileSync(configPath, 'utf8');
+    const dnsData = parseDnsConfig(yamlText);
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, dns: dnsData }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, message: err.message }));
+  }
+}
+
+// POST /api/dns
+function handleSaveDnsConfig(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    let backupCreated = false;
+    const backupPath = configPath + '.tmp_bak';
+    try {
+      const payload = JSON.parse(body);
+      if (!payload.nameserver || !Array.isArray(payload.nameserver) || payload.nameserver.length === 0) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: 'Укажите хотя бы один основной DNS сервер' }));
+        return;
+      }
+
+      if (!fs.existsSync(configPath)) {
+        res.writeHead(404, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: 'Файл конфигурации не найден' }));
+        return;
+      }
+
+      fs.copyFileSync(configPath, backupPath);
+      backupCreated = true;
+
+      const oldYaml = fs.readFileSync(configPath, 'utf8');
+      const updatedYaml = replaceDnsSectionInYaml(oldYaml, payload);
+      fs.writeFileSync(configPath, updatedYaml, 'utf8');
+
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
+        try {
+          const parsed = JSON.parse(reloadRes.data);
+          if (parsed.message) errorMsg = parsed.message;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      fs.copyFileSync(backupPath, configPath + '.bak');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, message: 'Настройки DNS успешно сохранены и применены в Mihomo!' }));
+    } catch (err) {
+      if (backupCreated && fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, configPath);
+        fs.unlinkSync(backupPath);
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, message: 'Ошибка сохранения DNS: ' + err.message }));
     }
   });
 }
@@ -2935,6 +3312,44 @@ function setStoredAppMode(mode) {
   } catch (e) {}
 }
 
+function applyAppModeToConfig(mode) {
+  const activeCfg = getConfigFilePath();
+  if (!fs.existsSync(activeCfg)) return;
+  try {
+    let text = fs.readFileSync(activeCfg, 'utf8');
+
+    if (mode === 'direct') {
+      text = text.replace(/^mode:\s*(rule|direct|global)/m, 'mode: direct');
+    } else if (mode === 'zapret') {
+      text = text.replace(/^mode:\s*(rule|direct|global)/m, 'mode: rule');
+      // В режиме Запрета общий трафик идет напрямую, а YouTube идет через Запрет (NFQWS)
+      text = text.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,DIRECT');
+    } else if (mode === 'rule') {
+      text = text.replace(/^mode:\s*(rule|direct|global)/m, 'mode: rule');
+      text = text.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,🚀Auto-Best');
+    }
+
+    fs.writeFileSync(activeCfg, text, 'utf8');
+
+    const localCfg = path.join(__dirname, 'config.yaml');
+    if (activeCfg !== localCfg && fs.existsSync(localCfg)) {
+      let localText = fs.readFileSync(localCfg, 'utf8');
+      if (mode === 'direct') {
+        localText = localText.replace(/^mode:\s*(rule|direct|global)/m, 'mode: direct');
+      } else if (mode === 'zapret') {
+        localText = localText.replace(/^mode:\s*(rule|direct|global)/m, 'mode: rule');
+        localText = localText.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,DIRECT');
+      } else if (mode === 'rule') {
+        localText = localText.replace(/^mode:\s*(rule|direct|global)/m, 'mode: rule');
+        localText = localText.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,🚀Auto-Best');
+      }
+      fs.writeFileSync(localCfg, localText, 'utf8');
+    }
+  } catch (err) {
+    console.error('Ошибка применения режима в config.yaml:', err.message);
+  }
+}
+
 // GET /api/mihomo/mode
 async function handleGetMihomoMode(req, res) {
   try {
@@ -2962,13 +3377,16 @@ function handleSetMihomoMode(req, res) {
       }
 
       setStoredAppMode(mode);
+      applyAppModeToConfig(mode);
 
-      if (mode === 'direct' || mode === 'zapret') {
-        // Переключаем глобальный режим ядра в direct (трафик идет напрямую без VPN, Запрет работает на WAN)
+      if (mode === 'direct') {
         await makeMihomoRequest('PATCH', '/configs', { mode: 'direct' });
-      } else if (mode === 'rule') {
-        // Режим VPN (правила и группы активны)
+      } else if (mode === 'zapret') {
         await makeMihomoRequest('PATCH', '/configs', { mode: 'rule' });
+        await makeMihomoRequest('PUT', '/configs', { path: getConfigFilePath() });
+      } else if (mode === 'rule') {
+        await makeMihomoRequest('PATCH', '/configs', { mode: 'rule' });
+        await makeMihomoRequest('PUT', '/configs', { path: getConfigFilePath() });
       }
 
       // Сбрасываем активные сокеты для мгновенного применения нового режима
@@ -4134,6 +4552,103 @@ function handleUpdateDynamicRuleTarget(req, res) {
   });
 }
 
+// POST or PUT /api/config/dynamic-rules/reorder
+function handleReorderDynamicRules(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    const activeCfg = getConfigFilePath();
+    const backupPath = activeCfg + '.tmp_bak';
+    try {
+      const payload = JSON.parse(body || '{}');
+      const { fromLineIndex, toLineIndex, position, fromRule, toRule } = payload;
+
+      if (fromLineIndex === undefined || toLineIndex === undefined) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Параметры fromLineIndex и toLineIndex обязательны' }));
+        return;
+      }
+
+      if (!fs.existsSync(activeCfg)) {
+        throw new Error('Config file config.yaml not found');
+      }
+
+      fs.copyFileSync(activeCfg, backupPath);
+
+      let yamlText = fs.readFileSync(activeCfg, 'utf8');
+      const lines = yamlText.split(/\r?\n/);
+
+      let srcIdx = fromLineIndex;
+      let dstIdx = toLineIndex;
+
+      // Fallback check by originalLine if provided
+      if (fromRule && fromRule.originalLine && (!lines[srcIdx] || lines[srcIdx].trim() !== fromRule.originalLine.trim())) {
+        const found = lines.findIndex(l => l.trim() === fromRule.originalLine.trim());
+        if (found !== -1) srcIdx = found;
+      }
+      if (toRule && toRule.originalLine && (!lines[dstIdx] || lines[dstIdx].trim() !== toRule.originalLine.trim())) {
+        const found = lines.findIndex(l => l.trim() === toRule.originalLine.trim());
+        if (found !== -1) dstIdx = found;
+      }
+
+      if (srcIdx < 0 || srcIdx >= lines.length || dstIdx < 0 || dstIdx >= lines.length) {
+        throw new Error('Некорректный индекс строки правила');
+      }
+
+      if (srcIdx === dstIdx) {
+        if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, rules: parseAllRules(yamlText) }));
+        return;
+      }
+
+      const [movedLine] = lines.splice(srcIdx, 1);
+      
+      let targetInsertIdx = dstIdx;
+      if (srcIdx < dstIdx) {
+        targetInsertIdx = dstIdx - 1;
+      }
+      if (position === 'after') {
+        targetInsertIdx += 1;
+      }
+
+      lines.splice(targetInsertIdx, 0, movedLine);
+      yamlText = lines.join('\n');
+      fs.writeFileSync(activeCfg, yamlText, 'utf8');
+
+      const localCfg = path.join(__dirname, 'config.yaml');
+      if (activeCfg !== localCfg && fs.existsSync(localCfg)) {
+        try { fs.writeFileSync(localCfg, yamlText, 'utf8'); } catch (e) {}
+      }
+
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: activeCfg });
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
+        try {
+          const parsedError = JSON.parse(reloadRes.data);
+          if (parsedError.message) errorMsg = parsedError.message;
+        } catch (e) {}
+        throw new Error(errorMsg);
+      }
+
+      fs.copyFileSync(backupPath, activeCfg + '.bak');
+      if (fs.existsSync(backupPath)) fs.unlinkSync(backupPath);
+
+      const updatedRules = parseAllRules(yamlText);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, rules: updatedRules }));
+
+    } catch (err) {
+      if (fs.existsSync(backupPath)) {
+        fs.copyFileSync(backupPath, activeCfg);
+        fs.unlinkSync(backupPath);
+      }
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
 // Создаем HTTP сервер
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, 'http://' + req.headers.host);
@@ -4260,6 +4775,14 @@ const server = http.createServer(async (req, res) => {
 
   if (req.method === 'GET' && pathname === '/api/wifi/info') {
     handleGetWifiInfo(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/dns') {
+    handleGetDnsConfig(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/dns') {
+    handleSaveDnsConfig(req, res);
     return;
   }
   if (req.method === 'GET' && pathname === '/api/config/files') {
@@ -4400,6 +4923,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'PUT' && pathname === '/api/config/dynamic-rules') {
     handleUpdateDynamicRuleTarget(req, res);
+    return;
+  }
+  if ((req.method === 'POST' || req.method === 'PUT') && (pathname === '/api/config/dynamic-rules/reorder' || pathname === '/api/config/rules/reorder')) {
+    handleReorderDynamicRules(req, res);
     return;
   }
 
@@ -4789,7 +5316,18 @@ function startServer(attempt) {
 
   server.listen(PORT, '0.0.0.0', () => {
     console.log('[VPN Web Controller] Сервер успешно запущен по адресу http://0.0.0.0:' + PORT + '/');
-    makeMihomoRequest('PUT', '/configs', { path: configPath }).catch(() => {});
+    try {
+      if (clientsManager && typeof clientsManager.syncClientsRulesToConfig === 'function') {
+        clientsManager.syncClientsRulesToConfig();
+      }
+    } catch (e) {
+      console.error('Ошибка начальной синхронизации правил клиентов:', e.message);
+    }
+    try {
+      const mode = getStoredAppMode();
+      applyAppModeToConfig(mode);
+    } catch (e) {}
+    makeMihomoRequest('PUT', '/configs', { path: getConfigFilePath() }).catch(() => {});
   });
 
   server.once('error', (err) => {

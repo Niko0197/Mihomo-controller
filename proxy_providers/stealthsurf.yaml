@@ -1,0 +1,29 @@
+proxies:
+  - name: "🇺🇸 Премиум конфиг"
+    type: vless
+    server: 23.26.4.113
+    port: 18687
+    uuid: 163295e4-2923-4f52-af01-5e82d0852e5f
+    flow: xtls-rprx-vision
+    network: tcp
+    udp: true
+    tls: true
+    client-fingerprint: random
+    reality-opts:
+      public-key: z7-gF5MtTchVM4LsMuiFoTzayHhuPqZvU5zAiVSJ3mk
+      short-id: 517b0a0f
+
+  - name: "💫 Умная локация"
+    type: vless
+    server: 144.48.11.223
+    port: 29836
+    uuid: d6333ef3-e7f9-4ba1-aa98-5e6d1a7a9f4a
+    flow: xtls-rprx-vision
+    network: tcp
+    udp: true
+    tls: true
+    client-fingerprint: random
+    reality-opts:
+      public-key: yfilBN6g0L2WnnIFwQc7-cGc1wV2ncn3Zb7TXP3wcTg
+      short-id: 68106a3f
+

@@ -1,5 +1,6 @@
 @echo off
 set ROUTER_IP=192.168.1.1
+if not "%~1"=="" set ROUTER_IP=%~1
 set API_PORT=9090
 set SECRET=
 
