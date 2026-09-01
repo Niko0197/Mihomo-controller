@@ -1979,19 +1979,32 @@ if (btnClearLogs) {
 }
 
 
-// --- 4. Trace Route Diagnostic Tool ---
-const btnRunTrace = document.getElementById('btn-run-trace');
-if (btnRunTrace) {
-  btnRunTrace.onclick = runTraceTest;
+function getFlagEmoji(countryCode) {
+  if (!countryCode || countryCode.length !== 2) return '';
+  const codePoints = countryCode
+    .toUpperCase()
+    .split('')
+    .map(char => 127397 + char.charCodeAt(0));
+  return String.fromCodePoint(...codePoints);
 }
 
-const traceDomainInput = document.getElementById('trace-domain-input');
-if (traceDomainInput) {
-  traceDomainInput.addEventListener('keydown', function(event) {
-    if (event.key === 'Enter') {
-      runTraceTest();
-    }
-  });
+function fallbackClientIpWhoIs(ip) {
+  fetch('https://ipwho.is/' + encodeURIComponent(ip))
+    .then(r => r.json())
+    .then(ipInfo => {
+      if (ipInfo && (ipInfo.country || ipInfo.country_code)) {
+        const flag = (ipInfo.flag && ipInfo.flag.emoji) ? ipInfo.flag.emoji : getFlagEmoji(ipInfo.country_code);
+        const name = ipInfo.country || '';
+        const code = (ipInfo.country_code || '').toUpperCase();
+        const formatted = flag ? `${flag} ${name} (${code})` : `${name} (${code})`;
+        document.getElementById('trace-country').textContent = formatted;
+      } else {
+        document.getElementById('trace-country').textContent = 'Неизвестно';
+      }
+    })
+    .catch(() => {
+      document.getElementById('trace-country').textContent = 'Неизвестно';
+    });
 }
 
 async function runTraceTest() {
@@ -2008,11 +2021,15 @@ async function runTraceTest() {
   const loading = document.getElementById('trace-loading');
   const resultContainer = document.getElementById('trace-result-container');
   const stepsList = document.getElementById('trace-steps-list');
+  const chainContainer = document.getElementById('trace-chain-container');
+  const chainFlow = document.getElementById('trace-chain-flow');
   
   btn.disabled = true;
   loading.style.display = 'block';
   resultContainer.style.display = 'none';
   stepsList.innerHTML = '';
+  if (chainContainer) chainContainer.style.display = 'none';
+  if (chainFlow) chainFlow.innerHTML = '';
   
   try {
     const res = await fetch('/api/xkeen/trace?domain=' + encodeURIComponent(domain));
@@ -2020,10 +2037,38 @@ async function runTraceTest() {
     const data = await res.json();
     
     if (data.success) {
-      // Render general details
-      document.getElementById('trace-ips').textContent = data.ips.join(', ') || 'Не определены';
-      document.getElementById('trace-country').textContent = data.country ? `${data.country}` : 'Неизвестно';
+      // 1. General details
+      document.getElementById('trace-ips').textContent = (data.ips && data.ips.length > 0) ? data.ips.join(', ') : 'Не определены';
+      document.getElementById('trace-country').textContent = data.country ? `${data.country}` : 'Определяем...';
       
+      // Auto-lookup GeoIP via 2IP API (2ip.io / api.2ip.me)
+      if ((!data.country || data.country === 'Неизвестно' || data.country === 'Определяем...') && data.ips && data.ips.length > 0) {
+        const firstIpv4 = data.ips.find(ip => !ip.includes(':')) || data.ips[0];
+        if (firstIpv4) {
+          fetch('https://api.2ip.me/geo.json?ip=' + encodeURIComponent(firstIpv4))
+            .then(r => r.json())
+            .then(ipInfo => {
+              if (ipInfo && (ipInfo.country_code || ipInfo.country_rus || ipInfo.country)) {
+                const code = (ipInfo.country_code || '').toUpperCase();
+                const name = ipInfo.country_rus || ipInfo.country || '';
+                const flag = getFlagEmoji(code);
+                const formatted = flag ? `${flag} ${name} (${code})` : (name ? `${name} (${code})` : code);
+                document.getElementById('trace-country').textContent = formatted;
+              } else {
+                fallbackClientIpWhoIs(firstIpv4);
+              }
+            })
+            .catch(() => {
+              fallbackClientIpWhoIs(firstIpv4);
+            });
+        }
+      }
+
+      const matchedRuleEl = document.getElementById('trace-matched-rule');
+      if (matchedRuleEl) {
+        matchedRuleEl.textContent = data.matchedRule || 'MATCH,DIRECT';
+      }
+
       const finalRouteEl = document.getElementById('trace-final-route');
       finalRouteEl.textContent = data.matchedPolicy || 'DIRECT';
       
@@ -2035,8 +2080,146 @@ async function runTraceTest() {
       } else {
         finalRouteEl.style.color = 'var(--md-sys-color-primary)';
       }
+
+      // 2. Resolve Full Chain down to leaf proxy (e.g. [GitHub] ➔ [Auto-Best] ➔ [StealthSurf] ➔ [Умная локация])
+      let chain = data.chain || [data.matchedPolicy || 'DIRECT'];
+      let finalProxy = data.finalProxy || data.matchedPolicy || 'DIRECT';
+      let finalProxyType = data.finalProxyType || '';
+      let finalProxyDelay = data.finalProxyDelay || null;
+
+      // Always deeply traverse groups to reach the leaf node from providers if chain ended on a group
+      if (data.matchedPolicy && data.matchedPolicy !== 'DIRECT' && data.matchedPolicy !== 'REJECT') {
+        try {
+          let allPx = {};
+          const pxRes = await fetch('/api/xkeen/proxies');
+          if (pxRes.ok) {
+            const pxData = await pxRes.json();
+            allPx = Object.assign({}, pxData.proxies || pxData || {});
+          }
+
+          // Merge provider proxies
+          try {
+            const provRes = await fetch('/api/proxies');
+            if (provRes.ok) {
+              const provData = await provRes.json();
+              if (provData.providers) {
+                Object.keys(provData.providers).forEach(pKey => {
+                  const pList = provData.providers[pKey].proxies || [];
+                  pList.forEach(px => {
+                    if (px && px.name && !allPx[px.name]) allPx[px.name] = px;
+                  });
+                });
+              }
+            }
+          } catch (e) {}
+
+          let cur = data.matchedPolicy;
+          const visited = new Set([cur]);
+          const clientChain = [cur];
+          let resolvedFinal = cur;
+
+          while (cur && allPx[cur]) {
+            const pObj = allPx[cur];
+            const isGroup = ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(pObj.type);
+            const next = pObj.now || (isGroup && pObj.all && pObj.all[0]);
+
+            if (next && !visited.has(next)) {
+              clientChain.push(next);
+              visited.add(next);
+              resolvedFinal = next;
+              if (allPx[next] && ['Selector', 'URLTest', 'Fallback', 'LoadBalance', 'Relay'].includes(allPx[next].type)) {
+                cur = next;
+              } else {
+                break;
+              }
+            } else {
+              break;
+            }
+          }
+
+          if (clientChain.length > chain.length || !finalProxyType) {
+            chain = clientChain;
+            finalProxy = resolvedFinal;
+            if (allPx[finalProxy]) {
+              finalProxyType = allPx[finalProxy].type || finalProxyType;
+              if (allPx[finalProxy].history && allPx[finalProxy].history.length > 0) {
+                finalProxyDelay = allPx[finalProxy].history[allPx[finalProxy].history.length - 1].delay || finalProxyDelay;
+              }
+            }
+          }
+        } catch (e) {}
+      }
+
+      // 3. Render Final Proxy / Location
+      const finalProxyEl = document.getElementById('trace-final-proxy');
+      if (finalProxyEl) {
+        if (finalProxy === 'DIRECT') {
+          finalProxyEl.innerHTML = '<span style="color: var(--success);">⚡ DIRECT (Напрямую без VPN)</span>';
+        } else if (finalProxy === 'REJECT') {
+          finalProxyEl.innerHTML = '<span style="color: var(--danger);">🛑 REJECT (Заблокировано)</span>';
+        } else {
+          let extraBadges = '';
+          if (finalProxyType) {
+            extraBadges += ` <span class="trace-node-type-badge">${finalProxyType}</span>`;
+          }
+          if (finalProxyDelay !== null && finalProxyDelay > 0) {
+            extraBadges += ` <span class="trace-node-ping-badge">${finalProxyDelay}ms</span>`;
+          }
+          finalProxyEl.innerHTML = `<span>${finalProxy}</span>${extraBadges}`;
+        }
+      }
+
+      // 4. Render Visual Proxy Chain Flow
+      if (chainContainer && chainFlow) {
+        chainFlow.innerHTML = '';
+        chain.forEach((nodeName, idx) => {
+          if (idx > 0) {
+            const arrow = document.createElement('span');
+            arrow.className = 'trace-chain-arrow';
+            arrow.textContent = '➔';
+            chainFlow.appendChild(arrow);
+          }
+
+          const nodeEl = document.createElement('div');
+          const isFinal = idx === chain.length - 1;
+          
+          if (isFinal) {
+            if (nodeName === 'DIRECT') {
+              nodeEl.className = 'trace-chain-node direct-node';
+            } else if (nodeName === 'REJECT') {
+              nodeEl.className = 'trace-chain-node reject-node';
+            } else {
+              nodeEl.className = 'trace-chain-node final-node';
+            }
+          } else {
+            nodeEl.className = 'trace-chain-node';
+          }
+
+          const nameSpan = document.createElement('span');
+          nameSpan.textContent = nodeName;
+          nodeEl.appendChild(nameSpan);
+
+          if (isFinal && finalProxyType && nodeName !== 'DIRECT' && nodeName !== 'REJECT') {
+            const typeBadge = document.createElement('span');
+            typeBadge.className = 'trace-node-type-badge';
+            typeBadge.textContent = finalProxyType;
+            nodeEl.appendChild(typeBadge);
+          }
+
+          if (isFinal && finalProxyDelay && finalProxyDelay > 0 && nodeName !== 'DIRECT' && nodeName !== 'REJECT') {
+            const pingBadge = document.createElement('span');
+            pingBadge.className = 'trace-node-ping-badge';
+            pingBadge.textContent = `${finalProxyDelay}ms`;
+            nodeEl.appendChild(pingBadge);
+          }
+
+          chainFlow.appendChild(nodeEl);
+        });
+
+        chainContainer.style.display = 'block';
+      }
       
-      // Render matching evaluation trace list
+      // 5. Render matching evaluation trace list
       data.steps.forEach(step => {
         const div = document.createElement('div');
         div.className = 'trace-step ' + (step.matched ? 'matched' : 'skipped');
@@ -2070,6 +2253,20 @@ async function runTraceTest() {
     btn.disabled = false;
     loading.style.display = 'none';
   }
+}
+
+const btnRunTrace = document.getElementById('btn-run-trace');
+if (btnRunTrace) {
+  btnRunTrace.onclick = runTraceTest;
+}
+
+const traceDomainInput = document.getElementById('trace-domain-input');
+if (traceDomainInput) {
+  traceDomainInput.addEventListener('keydown', function(event) {
+    if (event.key === 'Enter') {
+      runTraceTest();
+    }
+  });
 }
 
 // --- Window load initializer ---
@@ -3325,9 +3522,9 @@ function renderClientsTable() {
       if (tdSpeed) {
         let expectedSpeedHtml = '';
         if (c.active && (c.downSpeed > 0 || c.upSpeed > 0)) {
-          expectedSpeedHtml = `<span style="color:#a8c7fa;">${formatSpeed(c.downSpeed)} ↓</span><br><span style="color:#3ddc84;">${formatSpeed(c.upSpeed)} ↑</span>`;
+          expectedSpeedHtml = `<span style="color:#a8c7fa; font-weight:500;">${formatSpeed(c.downSpeed)} ↓</span><br><span style="color:#3ddc84; font-weight:500;">${formatSpeed(c.upSpeed)} ↑</span>`;
         } else {
-          expectedSpeedHtml = '<span style="color:var(--text-muted);">0 KB/s</span>';
+          expectedSpeedHtml = '<span style="color:var(--text-muted); opacity:0.75;">0 KB/s</span>';
         }
         if (tdSpeed.innerHTML !== expectedSpeedHtml) {
           tdSpeed.innerHTML = expectedSpeedHtml;
@@ -3438,9 +3635,9 @@ function renderClientsTable() {
     const tdSpeed = document.createElement('td');
     tdSpeed.className = 'client-speed-text';
     if (c.active && (c.downSpeed > 0 || c.upSpeed > 0)) {
-      tdSpeed.innerHTML = `<span style="color:#a8c7fa;">${formatSpeed(c.downSpeed)} ↓</span><br><span style="color:#3ddc84;">${formatSpeed(c.upSpeed)} ↑</span>`;
+      tdSpeed.innerHTML = `<span style="color:#a8c7fa; font-weight:500;">${formatSpeed(c.downSpeed)} ↓</span><br><span style="color:#3ddc84; font-weight:500;">${formatSpeed(c.upSpeed)} ↑</span>`;
     } else {
-      tdSpeed.innerHTML = '<span style="color:var(--text-muted);">0 KB/s</span>';
+      tdSpeed.innerHTML = '<span style="color:var(--text-muted); opacity:0.75;">0 KB/s</span>';
     }
     
     // VPN Cumulative traffic

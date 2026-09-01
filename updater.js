@@ -3,8 +3,8 @@ const https = require('https');
 const fs = require('fs');
 const path = require('path');
 
-const API_PORT = 9090;
-const API_HOST = '192.168.1.1';
+const API_PORT = parseInt(process.env.MIHOMO_API_PORT, 10) || 9090;
+const API_HOST = process.env.MIHOMO_API_HOST || '127.0.0.1';
 const logRuPath = path.join(__dirname, 'log_ru.txt');
 const statePath = path.join(__dirname, 'updater_state.json');
 
@@ -85,10 +85,26 @@ function makeRequest(method, endpoint, body = null) {
   });
 }
 
+function getAppMode() {
+  try {
+    const appModePath = path.join(__dirname, 'app_mode.json');
+    if (fs.existsSync(appModePath)) {
+      const data = JSON.parse(fs.readFileSync(appModePath, 'utf8'));
+      if (data && data.mode) return data.mode;
+    }
+  } catch (e) {}
+  return 'rule';
+}
+
 async function setMihomoMode(mode) {
   try {
     await makeRequest('PATCH', '/configs', JSON.stringify({ mode }));
-    const altConfigPath = '/opt/etc/mihomo/config.yaml';
+    let altConfigPath = '/opt/etc/mihomo/config.yaml';
+    if (!fs.existsSync(altConfigPath) && fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
+      altConfigPath = '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
+    } else if (!fs.existsSync(altConfigPath)) {
+      altConfigPath = path.join(__dirname, 'config.yaml');
+    }
     if (fs.existsSync(altConfigPath)) {
       let content = fs.readFileSync(altConfigPath, 'utf8');
       content = content.replace(/^mode:\s*(rule|direct|global)/m, `mode: ${mode}`);
@@ -334,42 +350,50 @@ async function main() {
   }
 
   // --- Логика Failover ---
-  // Проверка падения основного StealthSurf
-  const isStealthBothDown = !isStealth1Alive && !isStealth2Alive;
-  if (isStealthBothDown && isGithubAlive) {
-    if (!state.stealthWasDown) {
-      console.log(`[${getTimestamp()}] ВНИМАНИЕ: Оба прокси StealthSurf недоступны. Резервный канал GitHub активен.`);
-      state.stealthWasDown = true;
+  // Проверяем, управляет ли пользователь режимом вручную (например, включен DIRECT или ZAPRET)
+  const currentAppMode = getAppMode();
+  if (currentAppMode === 'rule') {
+    // Проверка падения основного StealthSurf
+    const isStealthBothDown = !isStealth1Alive && !isStealth2Alive;
+    if (isStealthBothDown && isGithubAlive) {
+      if (!state.stealthWasDown) {
+        console.log(`[${getTimestamp()}] ВНИМАНИЕ: Оба прокси StealthSurf недоступны. Резервный канал GitHub активен.`);
+        state.stealthWasDown = true;
+      }
+    } else if (!isStealthBothDown) {
+      if (state.stealthWasDown) {
+        console.log(`[${getTimestamp()}] ИНФО: Основной прокси-канал StealthSurf восстановлен.`);
+        state.stealthWasDown = false;
+      }
     }
-  } else if (!isStealthBothDown) {
-    if (state.stealthWasDown) {
-      console.log(`[${getTimestamp()}] ИНФО: Основной прокси-канал StealthSurf восстановлен.`);
-      state.stealthWasDown = false;
-    }
-  }
 
-  // Проверка полного падения всех каналов
-  const isAllDown = isStealthBothDown && !isGithubAlive;
-  if (isAllDown) {
-    if (state.allDownSince === 0) {
-      state.allDownSince = now;
-      console.log(`[${getTimestamp()}] ВНИМАНИЕ: Все VPN-каналы недоступны. Отсчёт 30 секунд до аварийного переключения режима в DIRECT...`);
-    } else if (state.allDownSince !== -1 && (now - state.allDownSince) >= 30 * 1000) {
-      console.log(`[${getTimestamp()}] КРИТИЧЕСКАЯ ОШИБКА: Все VPN-каналы недоступны > 30 сек. Автоматическое переключение общего режима ядра в DIRECT!`);
-      await setMihomoMode('direct');
-      state.allDownSince = -1;
+    // Проверка полного падения всех каналов
+    const isAllDown = isStealthBothDown && !isGithubAlive;
+    if (isAllDown) {
+      if (state.allDownSince === 0) {
+        state.allDownSince = now;
+        console.log(`[${getTimestamp()}] ВНИМАНИЕ: Все VPN-каналы недоступны. Отсчёт 30 секунд до аварийного переключения режима в DIRECT...`);
+      } else if (state.allDownSince !== -1 && (now - state.allDownSince) >= 30 * 1000) {
+        console.log(`[${getTimestamp()}] КРИТИЧЕСКАЯ ОШИБКА: Все VPN-каналы недоступны > 30 сек. Автоматическое переключение общего режима ядра в DIRECT!`);
+        await setMihomoMode('direct');
+        state.allDownSince = -1;
+      }
+    } else {
+      // Если хотя бы один канал поднялся
+      if (state.allDownSince !== 0) {
+        if (state.allDownSince === -1) {
+          console.log(`[${getTimestamp()}] ИНФО: VPN-каналы восстановили работу! Автоматический возврат общего режима ядра в RULE (Маршруты).`);
+          await setMihomoMode('rule');
+        } else {
+          console.log(`[${getTimestamp()}] ИНФО: Угроза отключения снята, каналы частично доступны.`);
+        }
+        state.allDownSince = 0;
+      }
     }
   } else {
-    // Если хотя бы один канал поднялся
-    if (state.allDownSince !== 0) {
-      if (state.allDownSince === -1) {
-        console.log(`[${getTimestamp()}] ИНФО: VPN-каналы восстановили работу! Автоматический возврат общего режима ядра в RULE (Маршруты).`);
-        await setMihomoMode('rule');
-      } else {
-        console.log(`[${getTimestamp()}] ИНФО: Угроза отключения снята, каналы частично доступны.`);
-      }
-      state.allDownSince = 0;
-    }
+    // В ручном режиме DIRECT или ZAPRET сбрасываем счетчик failover
+    state.allDownSince = 0;
+    state.stealthWasDown = false;
   }
 
   writeState(state);

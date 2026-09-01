@@ -96,7 +96,7 @@ if [ "$MODE" = "update" ]; then
     fi
 
     # Обновляем только код приложения, НЕ трогая пользовательские данные
-    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js dpi_manager.js install.sh uninstall.sh config.yaml; do
+    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js dpi_manager.js install.sh uninstall.sh config.example.yaml; do
         if [ -f "$TEMP_DIR/$FILE" ]; then
             cp -f "$TEMP_DIR/$FILE" "$INSTALL_DIR/$FILE"
             echo "  ✓ Обновлён: $FILE"
@@ -121,6 +121,8 @@ if [ "$MODE" = "update" ]; then
     echo ""
     echo "  Сохранены без изменений:"
     echo "    • clients_db.json (база клиентов)"
+    echo "    • clients_rules.yaml (правила устройств)"
+    echo "    • app_mode.json (режим работы роутера)"
     echo "    • traffic_db.json (статистика трафика)"
     echo "    • dpi_settings.json (настройки DPI и замочков)"
     echo "    • log.txt, *.log (логи)"
@@ -203,9 +205,18 @@ echo "  ✓ Службы YouTube DPI-Bypass настроены и запущен
 # 6. Развертывание базовой конфигурации config.yaml
 echo "→ Шаг 5: Проверка и развертывание конфигурации Mihomo..."
 mkdir -p /opt/etc/mihomo/proxy_providers
-if [ ! -f "/opt/etc/mihomo/config.yaml" ] && [ -f "$INSTALL_DIR/config.yaml" ]; then
-    cp "$INSTALL_DIR/config.yaml" /opt/etc/mihomo/config.yaml
-    echo "  ✓ Развернут готовый config.yaml с преднастроенной маршрутизацией и YouTube DPI"
+if [ ! -f "/opt/etc/mihomo/config.yaml" ]; then
+    if [ -f "$INSTALL_DIR/config.example.yaml" ]; then
+        cp "$INSTALL_DIR/config.example.yaml" /opt/etc/mihomo/config.yaml
+        echo "  ✓ Развернут базовый config.yaml из шаблона config.example.yaml"
+    fi
+fi
+
+# Перезапуск службы Mihomo (если установлена), чтобы подхватить конфиг
+if [ -f "/opt/etc/init.d/S99mihomo" ]; then
+    /opt/etc/init.d/S99mihomo restart 2>/dev/null
+elif [ -f "/opt/etc/init.d/S99clash" ]; then
+    /opt/etc/init.d/S99clash restart 2>/dev/null
 fi
 
 # 7. Создание/обновление службы автозапуска веб-панели
@@ -235,6 +246,15 @@ if [ -f "$INIT_SCRIPT" ]; then
     "$INIT_SCRIPT" restart
 fi
 
+# Определение локального IP-адреса роутера для вывода ссылки
+ROUTER_IP=$(ip -4 addr show br0 2>/dev/null | grep -o 'inet [0-9.]*' | head -n1 | awk '{print $2}' || true)
+if [ -z "$ROUTER_IP" ]; then
+    ROUTER_IP=$(ip route get 1.1.1.1 2>/dev/null | grep -o 'src [0-9.]*' | head -n1 | awk '{print $2}' || true)
+fi
+if [ -z "$ROUTER_IP" ]; then
+    ROUTER_IP="192.168.1.1"
+fi
+
 echo ""
 echo "========================================="
 if [ "$MODE" = "update" ]; then
@@ -244,8 +264,11 @@ else
 fi
 echo ""
 echo "  YouTube DPI-Bypass: Работает из коробки (порт 10805)"
-echo "  Панель управления: http://192.168.1.1:4000"
+echo "  Панель управления: http://${ROUTER_IP}:4000 (или http://127.0.0.1:4000)"
 echo ""
+if ! command -v mihomo >/dev/null 2>&1 && [ ! -f "/opt/bin/mihomo" ] && [ ! -f "/opt/etc/init.d/S99mihomo" ]; then
+    echo "  💡 Примечание: Убедитесь, что ядро Mihomo (или XKeen) установлено на роутере."
+fi
 echo "  Для полного удаления панели запустите:"
 echo "  sh -c \"\$(curl -fsSL https://raw.githubusercontent.com/$GITHUB_USER/$REPO_NAME/$BRANCH/uninstall.sh)\""
 echo "========================================="

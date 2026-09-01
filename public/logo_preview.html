@@ -1,0 +1,283 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <title>Mihomo Controller - Logo Concepts Preview</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background-color: #0b0f19;
+      color: #f1f5f9;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+      padding: 40px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    h1 {
+      font-size: 26px;
+      font-weight: 700;
+      margin-bottom: 8px;
+      background: linear-gradient(135deg, #7ee8fa, #34d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    p.subtitle {
+      color: #94a3b8;
+      font-size: 14px;
+      margin-bottom: 36px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 24px;
+      max-width: 1100px;
+      width: 100%;
+    }
+    .card {
+      background: #111827;
+      border: 1px solid #1f293d;
+      border-radius: 12px;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      transition: all 0.25s ease;
+    }
+    .card:hover {
+      border-color: #34d39955;
+      transform: translateY(-2px);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.4);
+    }
+    .badge {
+      font-size: 11px;
+      font-weight: 600;
+      color: #7ee8fa;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-bottom: 16px;
+    }
+    .logo-container {
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+      padding: 16px;
+      background: #080c14;
+      border-radius: 8px;
+    }
+    .logo-text {
+      display: flex;
+      flex-direction: column;
+      line-height: 1.15;
+    }
+    .logo-text .title {
+      color: #ffffff;
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+    .logo-text .sub {
+      color: #e2e8f0;
+      font-size: 19px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+    }
+    .desc {
+      color: #94a3b8;
+      font-size: 13px;
+      line-height: 1.5;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Mihomo Controller — 10 Концептов Логотипа</h1>
+  <p class="subtitle">Интерактивный просмотр векторных SVG-концепций на тёмной теме</p>
+
+  <svg style="display: none;">
+    <defs>
+      <linearGradient id="glowGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="#7ee8fa" />
+        <stop offset="100%" stop-color="#34d399" />
+      </linearGradient>
+    </defs>
+  </svg>
+
+  <div class="grid">
+
+    <!-- 1. MC Ribbon -->
+    <div class="card">
+      <div class="badge">Концепт 1 • SaaS Ribbon</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M12 36V16L24 24L36 16V36L24 28L12 36Z" stroke="url(#glowGrad)" stroke-width="3.5" stroke-linejoin="round" stroke-linecap="round"/>
+          <path d="M12 16L24 8L36 16" stroke="url(#glowGrad)" stroke-width="3.5" stroke-linejoin="round"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Изометрическая объёмная лента, сплетающая литеры M и C.</div>
+    </div>
+
+    <!-- 2. Cyber Shield -->
+    <div class="card">
+      <div class="badge">Концепт 2 • Security & VPN</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M24 4L8 10V22C8 32.5 14.8 42.2 24 44C33.2 42.2 40 32.5 40 22V10L24 4Z" stroke="url(#glowGrad)" stroke-width="2.5" stroke-linejoin="round"/>
+          <circle cx="24" cy="22" r="3" fill="url(#glowGrad)"/>
+          <circle cx="16" cy="18" r="2" fill="url(#glowGrad)"/>
+          <circle cx="32" cy="18" r="2" fill="url(#glowGrad)"/>
+          <circle cx="20" cy="30" r="2" fill="url(#glowGrad)"/>
+          <circle cx="28" cy="30" r="2" fill="url(#glowGrad)"/>
+          <path d="M16 18L24 22M32 18L24 22M24 22L20 30M24 22L28 30M16 18L20 30M32 18L28 30" stroke="url(#glowGrad)" stroke-width="1.2" stroke-opacity="0.8"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Защитный кибер-щит с топологической сеткой маршрутов внутри.</div>
+    </div>
+
+    <!-- 3. Orbit Node -->
+    <div class="card">
+      <div class="badge">Концепт 3 • Orbital Router</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="14" stroke="url(#glowGrad)" stroke-width="2.5"/>
+          <ellipse cx="24" cy="24" rx="20" ry="7" transform="rotate(-30 24 24)" stroke="url(#glowGrad)" stroke-width="2.5"/>
+          <circle cx="38" cy="16" r="3.5" fill="#7ee8fa"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Орбитальное кольцо со спутником-нодой, передающей пакеты.</div>
+    </div>
+
+    <!-- 4. Prism Cube -->
+    <div class="card">
+      <div class="badge">Концепт 4 • Isometric Core</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M24 6L40 15V33L24 42L8 33V15L24 6Z" stroke="url(#glowGrad)" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M24 6V24M40 15L24 24M8 15L24 24M24 24V42" stroke="url(#glowGrad)" stroke-width="2"/>
+          <circle cx="24" cy="24" r="4" fill="url(#glowGrad)"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Изометрический призма-куб, символизирующий мощное ядро Mihomo.</div>
+    </div>
+
+    <!-- 5. Signal M -->
+    <div class="card">
+      <div class="badge">Концепт 5 • Live Signal M</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M6 24C6 20 8 16 10 14M12 24C12 21 13 18 15 17" stroke="url(#glowGrad)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M20 34V14L28 26L36 14V34" stroke="url(#glowGrad)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Сетевой пульс и радиочастота, переходящие в букву M.</div>
+    </div>
+
+    <!-- 6. Stealth Jet -->
+    <div class="card">
+      <div class="badge">Концепт 6 • Stealth & Speed</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M6 22L42 10L30 42L22 26L6 22Z" fill="url(#glowGrad)" fill-opacity="0.15" stroke="url(#glowGrad)" stroke-width="2.5" stroke-linejoin="round"/>
+          <path d="M42 10L22 26" stroke="url(#glowGrad)" stroke-width="2.5"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Аэродинамичный самолёт скорости / обхода DPI блокировок.</div>
+    </div>
+
+    <!-- 7. Infinity Loop -->
+    <div class="card">
+      <div class="badge">Концепт 7 • Infinity Gateway</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M15 18C10 18 6 21 6 25C6 29 10 32 15 32C21 32 27 18 33 18C38 18 42 21 42 25C42 29 38 32 33 32C27 32 21 18 15 18Z" stroke="url(#glowGrad)" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Бесперебойный аптайм и непрерывный туннель данных.</div>
+    </div>
+
+    <!-- 8. Radar -->
+    <div class="card">
+      <div class="badge">Концепт 8 • Network Radar</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <circle cx="24" cy="24" r="18" stroke="url(#glowGrad)" stroke-width="1.8"/>
+          <circle cx="24" cy="24" r="11" stroke="url(#glowGrad)" stroke-width="1.8"/>
+          <circle cx="24" cy="24" r="4" fill="url(#glowGrad)"/>
+          <line x1="24" y1="4" x2="24" y2="44" stroke="url(#glowGrad)" stroke-width="1.5" stroke-opacity="0.6"/>
+          <line x1="4" y1="24" x2="44" y2="24" stroke="url(#glowGrad)" stroke-width="1.5" stroke-opacity="0.6"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Радар мониторинга узлов, пинга и проверки доступности.</div>
+    </div>
+
+    <!-- 9. Cyber Switch -->
+    <div class="card">
+      <div class="badge">Концепт 9 • Cyber Switch UI</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <rect x="6" y="10" width="36" height="18" rx="9" stroke="url(#glowGrad)" stroke-width="2.5"/>
+          <circle cx="33" cy="19" r="6" fill="url(#glowGrad)"/>
+          <line x1="6" y1="36" x2="42" y2="36" stroke="url(#glowGrad)" stroke-width="2.5" stroke-linecap="round"/>
+          <circle cx="16" cy="36" r="4" fill="url(#glowGrad)"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Тумблер включения и регулятор параметров контроллера.</div>
+    </div>
+
+    <!-- 10. Code Chevron -->
+    <div class="card">
+      <div class="badge">Концепт 10 • Dev Terminal M</div>
+      <div class="logo-container">
+        <svg width="42" height="42" viewBox="0 0 48 48" fill="none">
+          <path d="M14 16L6 24L14 32" stroke="url(#glowGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M26 12L20 36" stroke="url(#glowGrad)" stroke-width="3" stroke-linecap="round"/>
+          <path d="M34 16L42 24L34 32" stroke="url(#glowGrad)" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+        <div class="logo-text">
+          <span class="title">Mihomo</span>
+          <span class="sub">Controller</span>
+        </div>
+      </div>
+      <div class="desc">Шевроны кода и терминала для dev-ориентированного стиля.</div>
+    </div>
+
+  </div>
+
+</body>
+</html>

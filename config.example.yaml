@@ -1,0 +1,183 @@
+﻿# --- ОСНОВНЫЕ ПОРТЫ ---
+port: 7890
+socks-port: 7891
+mixed-port: 1080
+redir-port: 1182
+tproxy-port: 1181
+allow-lan: true
+mode: rule
+log-level: silent
+ipv6: false
+tcp-concurrent: true
+unified-delay: true
+geo-auto-update: false
+geo-update-interval: 168
+external-controller: 0.0.0.0:9090
+external-ui: ./zash
+external-ui-url: "https://github.com/Zephyruso/zashboard/releases/latest/download/dist-cdn-fonts.zip"
+find-process-mode: off
+profile: { store-selected: true }
+sniffer: { enable: true, sniff: { HTTP: { ports: [80, 8080] }, TLS: { ports: [443, 8443] } }, skip-dst-address: [rule-set:telegram@ipcidr] }
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: redir-host
+  listen: 127.0.0.1:1053
+  nameserver:
+    - https://dns.adguard-dns.com/dns-query
+    - 94.140.14.14
+    - 94.140.15.15
+  fallback:
+    - 77.88.8.8
+    - 77.88.8.1
+  fallback-filter:
+    geoip: true
+    geoip-code: RU
+    ipcidr:
+      - 240.0.0.0/4
+
+anchors:
+  a1: &domain { type: http, format: mrs, behavior: domain, interval: 86400 }
+  a2: &ipcidr { type: http, format: mrs, behavior: ipcidr, interval: 86400 }
+  a3: &classical { type: http, format: text, behavior: classical, interval: 86400 }
+  a4: &inline { type: inline, behavior: classical }
+
+proxy-providers:
+  default_provider:
+    type: http
+    url: "https://example.com/your-sub-link-here"
+    interval: 3600
+    path: ./proxy_providers/default_provider.yaml
+    health-check:
+      enable: true
+      url: http://www.gstatic.com/generate_204
+      interval: 30
+      lazy: false
+
+proxies:
+  - name: "⚡ NFQWS 1 (ТВ)"
+    type: socks5
+    server: 127.0.0.1
+    port: 10805
+    udp: true
+
+  - name: "⚡ NFQWS 2 (Смартфон/ПК)"
+    type: socks5
+    server: 127.0.0.1
+    port: 10806
+    udp: true
+
+proxy-groups:
+  - name: GLOBAL
+    type: select
+    proxies:
+      - '🚀Auto-Best'
+      - '⚙️Manual 1'
+      - '⚙️Manual 2'
+      - '⚙️Manual 3'
+      - DIRECT
+      - REJECT
+
+  - name: '🚀Auto-Best'
+    type: fallback
+    url: http://www.gstatic.com/generate_204
+    interval: 5
+    use:
+      - default_provider
+    proxies:
+      - DIRECT
+
+  - name: '⚙️Manual 1'
+    type: select
+    use:
+      - default_provider
+    proxies:
+      - DIRECT
+
+  - name: '⚙️Manual 2'
+    type: select
+    use:
+      - default_provider
+    proxies:
+      - DIRECT
+
+  - name: '⚙️Manual 3'
+    type: select
+    use:
+      - default_provider
+    proxies:
+      - DIRECT
+
+  - name: YouTube
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/YouTube.png
+    proxies: ['⚡ NFQWS 2 (Смартфон/ПК)', '⚡ NFQWS 1 (ТВ)', '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Discord
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Discord.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Twitch
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Twitch.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Telegram
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Telegram.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Meta
+    type: select
+    icon: https://github.com/zxc-rv/assets/raw/main/group-icons/meta.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: Google
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Google_Search.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: AI
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/ChatGPT.png
+    proxies: ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', DIRECT]
+
+  - name: CDN
+    type: select
+    icon: https://cdn.jsdelivr.net/gh/Koolson/Qure@master/IconSet/Color/Cloudflare.png
+    proxies: [DIRECT, '🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3']
+
+rule-providers:
+  direct-apps@classical: { <<: *classical, url: "https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/rules/direct-apps.list", path: ./rules/direct-apps.list }
+  category-ru@domain: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/category-ru.mrs", path: ./rules/category-ru.mrs }
+  youtube@domain: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/youtube.mrs", path: ./rules/youtube.mrs }
+  discord@classical: { <<: *classical, url: "https://raw.githubusercontent.com/Niko0197/Mihomo-controller/main/rules/discord.list", path: ./rules/discord.list }
+  telegram@domain: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/telegram.mrs", path: ./rules/telegram.mrs }
+  telegram@ipcidr: { <<: *ipcidr, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geoip/telegram.mrs", path: ./rules/telegram-ip.mrs }
+  meta@domain: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/meta.mrs", path: ./rules/meta.mrs }
+  meta@ipcidr: { <<: *ipcidr, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geoip/facebook.mrs", path: ./rules/facebook-ip.mrs }
+  google@domain: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/google.mrs", path: ./rules/google.mrs }
+  google@ipcidr: { <<: *ipcidr, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geoip/google.mrs", path: ./rules/google-ip.mrs }
+  openai@domain: { <<: *domain, url: "https://github.com/MetaCubeX/meta-rules-dat/raw/meta/geo/geosite/openai.mrs", path: ./rules/openai.mrs }
+
+rules:
+  - IP-CIDR,127.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,192.168.0.0/16,DIRECT,no-resolve
+  - IP-CIDR,10.0.0.0/8,DIRECT,no-resolve
+  - IP-CIDR,172.16.0.0/12,DIRECT,no-resolve
+
+  - RULE-SET,direct-apps@classical,DIRECT
+  - RULE-SET,youtube@domain,YouTube
+  - RULE-SET,discord@classical,Discord
+  - OR,((RULE-SET,meta@domain),(RULE-SET,meta@ipcidr,no-resolve)),Meta
+  - OR,((RULE-SET,telegram@domain),(RULE-SET,telegram@ipcidr,no-resolve)),Telegram
+  - OR,((RULE-SET,google@domain),(RULE-SET,google@ipcidr)),Google
+  - RULE-SET,openai@domain,AI
+  - RULE-SET,category-ru@domain,DIRECT
+
+  # --- CLIENTS VPN RULES ---
+  # --- END CLIENTS VPN RULES ---
+
+  - MATCH,🚀Auto-Best

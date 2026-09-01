@@ -117,6 +117,7 @@ function switchTab(tabId) {
     'dpi': '⚡ Тюнер DPI и авто-ротация',
     'rules': '🛠️ Быстрые пользовательские правила',
     'editor': '📝 Редактор YAML конфигураций',
+    'dns': '🛡️ Настройка DNS и Резолвера',
     'qr': '📱 QR-подключения клиентов',
     'leak': '🔍 Анализ утечек доменов'
   };
@@ -132,6 +133,8 @@ function switchTab(tabId) {
     setTimeout(() => {
       if (configEditor) configEditor.refresh();
     }, 50);
+  } else if (tabId === 'dns') {
+    loadDnsSettings();
   } else if (tabId === 'import') {
     loadImportGroups();
   } else if (tabId === 'subs') {
@@ -1439,11 +1442,27 @@ function renderRulesTable() {
   emptyState.style.display = 'none';
   tbody.innerHTML = '';
 
-  filtered.forEach(r => {
+  filtered.forEach((r, idx) => {
     const tr = document.createElement('tr');
+    tr.className = 'rule-row';
+    tr.dataset.index = idx;
+    tr.dataset.lineIndex = r.lineIndex;
+
     if (!r.dynamic) {
-      tr.style.opacity = '0.7';
+      tr.classList.add('system-rule');
     }
+
+    // Drag Handle & Index Cell
+    const tdDrag = document.createElement('td');
+    tdDrag.className = 'rule-drag-cell';
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'rule-drag-handle';
+    dragHandle.title = 'Зажмите и перетащите для изменения приоритета правила';
+    dragHandle.innerHTML = `
+      <span class="rule-order-num">${idx + 1}</span>
+      <span class="rule-drag-grip">⠿</span>
+    `;
+    tdDrag.appendChild(dragHandle);
 
     const tdType = document.createElement('td');
     const badge = document.createElement('span');
@@ -1489,25 +1508,284 @@ function renderRulesTable() {
       deleteBtn.style.padding = '4px 10px';
       deleteBtn.style.fontSize = '0.85rem';
       deleteBtn.innerHTML = '🗑️';
+      deleteBtn.title = 'Удалить пользовательское правило';
       deleteBtn.onclick = () => deleteDynamicRule(r);
       tdAction.appendChild(deleteBtn);
     } else {
       const lockSpan = document.createElement('span');
       lockSpan.style.color = 'var(--text-muted)';
       lockSpan.style.fontSize = '0.9rem';
-      lockSpan.title = 'Системное правило (только чтение)';
+      lockSpan.title = 'Системное правило из конфигурации (можно менять приоритет перетаскиванием)';
       lockSpan.textContent = '🔒';
       tdAction.appendChild(lockSpan);
     }
 
+    tr.appendChild(tdDrag);
     tr.appendChild(tdType);
     tr.appendChild(tdValue);
     tr.appendChild(tdTarget);
     tr.appendChild(tdAction);
 
+    // Initialize Y-axis constrained Drag & Drop on the handle
+    initRulePointerDrag(tr, dragHandle, idx, filtered);
+
     tbody.appendChild(tr);
   });
   initCustomSelects();
+}
+
+function initRulePointerDrag(tr, dragHandle, idx, filtered) {
+  dragHandle.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return; // Only primary button
+    e.preventDefault();
+
+    const tbody = document.getElementById('dynamic-rules-list');
+    const startIdx = Array.from(tbody.querySelectorAll('.rule-row')).indexOf(tr);
+    if (startIdx === -1) return;
+
+    const rowRect = tr.getBoundingClientRect();
+    const startClientY = e.clientY;
+
+    // Create floating avatar locked to exact table horizontal bounds
+    const avatar = document.createElement('div');
+    avatar.className = 'rule-drag-avatar';
+    avatar.style.top = `${rowRect.top}px`;
+    avatar.style.left = `${rowRect.left}px`;
+    avatar.style.width = `${rowRect.width}px`;
+    avatar.style.height = `${rowRect.height}px`;
+
+    const avatarTable = document.createElement('table');
+    const avatarTbody = document.createElement('tbody');
+    const clonedTr = tr.cloneNode(true);
+    clonedTr.classList.remove('rule-row-placeholder', 'just-dropped');
+
+    Array.from(tr.children).forEach((td, cIdx) => {
+      if (clonedTr.children[cIdx]) {
+        clonedTr.children[cIdx].style.width = `${td.offsetWidth}px`;
+        clonedTr.children[cIdx].style.minWidth = `${td.offsetWidth}px`;
+        clonedTr.children[cIdx].style.maxWidth = `${td.offsetWidth}px`;
+      }
+    });
+
+    avatarTbody.appendChild(clonedTr);
+    avatarTable.appendChild(avatarTbody);
+    avatar.appendChild(avatarTable);
+    document.body.appendChild(avatar);
+
+    tr.classList.add('rule-row-placeholder');
+    let placeholder = tr;
+
+    function onPointerMove(moveEvent) {
+      // STRICT Y-AXIS LOCK:
+      const deltaY = moveEvent.clientY - startClientY;
+      avatar.style.transform = `translate3d(0, ${deltaY}px, 0) scale(1.01)`;
+
+      // Auto-scroll window if near top/bottom viewport
+      const threshold = 100;
+      if (moveEvent.clientY < threshold) {
+        const speed = Math.min(22, (threshold - moveEvent.clientY) / 3);
+        window.scrollBy(0, -speed);
+      } else if (moveEvent.clientY > window.innerHeight - threshold) {
+        const speed = Math.min(22, (moveEvent.clientY - (window.innerHeight - threshold)) / 3);
+        window.scrollBy(0, speed);
+      }
+
+      // Check hover position relative to rows
+      const currentRows = Array.from(tbody.querySelectorAll('.rule-row'));
+      const cursorY = moveEvent.clientY;
+
+      for (let i = 0; i < currentRows.length; i++) {
+        const otherRow = currentRows[i];
+        if (otherRow === placeholder) continue;
+
+        const rect = otherRow.getBoundingClientRect();
+        const midY = rect.top + rect.height / 2;
+
+        if (cursorY < midY && i === 0) {
+          tbody.insertBefore(placeholder, otherRow);
+          break;
+        } else if (cursorY > midY && i === currentRows.length - 1) {
+          tbody.appendChild(placeholder);
+          break;
+        } else if (cursorY >= rect.top && cursorY <= rect.bottom) {
+          if (cursorY < midY) {
+            tbody.insertBefore(placeholder, otherRow);
+          } else {
+            tbody.insertBefore(placeholder, otherRow.nextSibling);
+          }
+          break;
+        }
+      }
+
+      // Update visible sequence numbers in real time
+      const updatedRows = Array.from(tbody.querySelectorAll('.rule-row'));
+      updatedRows.forEach((r, rIdx) => {
+        const numSpan = r.querySelector('.rule-order-num');
+        if (numSpan) numSpan.textContent = rIdx + 1;
+      });
+    }
+
+    async function onPointerUp(upEvent) {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+
+      const finalRect = placeholder.getBoundingClientRect();
+      avatar.style.transition = 'transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), opacity 0.15s ease';
+      avatar.style.transform = `translate3d(0, ${finalRect.top - rowRect.top}px, 0) scale(1)`;
+
+      setTimeout(async () => {
+        if (avatar.parentNode) avatar.parentNode.removeChild(avatar);
+        placeholder.classList.remove('rule-row-placeholder');
+
+        const finalRows = Array.from(tbody.querySelectorAll('.rule-row'));
+        const newIdx = finalRows.indexOf(placeholder);
+
+        if (newIdx !== -1 && newIdx !== startIdx) {
+          const fromRule = filtered[startIdx];
+          const toRule = filtered[newIdx];
+          const position = newIdx > startIdx ? 'after' : 'before';
+
+          await reorderDynamicRule(fromRule, toRule, position);
+        } else {
+          placeholder.classList.add('just-dropped');
+          setTimeout(() => placeholder.classList.remove('just-dropped'), 800);
+        }
+      }, 180);
+    }
+
+    window.addEventListener('pointermove', onPointerMove, { passive: false });
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+  });
+}
+
+function moveLineInYamlText(yamlText, fromRule, toRule, position) {
+  const lines = yamlText.split(/\r?\n/);
+  
+  let srcIdx = -1;
+  let dstIdx = -1;
+
+  if (fromRule && fromRule.originalLine) {
+    srcIdx = lines.findIndex(l => l.trim() === fromRule.originalLine.trim());
+  }
+  if (toRule && toRule.originalLine) {
+    dstIdx = lines.findIndex(l => l.trim() === toRule.originalLine.trim());
+  }
+
+  if (srcIdx === -1 && fromRule && fromRule.lineIndex !== undefined && lines[fromRule.lineIndex]) {
+    srcIdx = fromRule.lineIndex;
+  }
+  if (dstIdx === -1 && toRule && toRule.lineIndex !== undefined && lines[toRule.lineIndex]) {
+    dstIdx = toRule.lineIndex;
+  }
+
+  if (srcIdx === -1 || dstIdx === -1 || srcIdx === dstIdx) {
+    return yamlText;
+  }
+
+  const [movedLine] = lines.splice(srcIdx, 1);
+  let targetInsertIdx = dstIdx;
+  if (srcIdx < dstIdx) {
+    targetInsertIdx = dstIdx - 1;
+  }
+  if (position === 'after') {
+    targetInsertIdx += 1;
+  }
+
+  lines.splice(targetInsertIdx, 0, movedLine);
+  return lines.join('\n');
+}
+
+async function reorderDynamicRule(fromRule, toRule, position) {
+  if (!fromRule || !toRule) return;
+
+  const fromMasterIdx = dynamicRulesList.findIndex(r => r === fromRule || (r.type === fromRule.type && r.value === fromRule.value && r.target === fromRule.target && r.lineIndex === fromRule.lineIndex));
+  const toMasterIdx = dynamicRulesList.findIndex(r => r === toRule || (r.type === toRule.type && r.value === toRule.value && r.target === toRule.target && r.lineIndex === toRule.lineIndex));
+
+  if (fromMasterIdx === -1 || toMasterIdx === -1 || fromMasterIdx === toMasterIdx) return;
+
+  const [movedItem] = dynamicRulesList.splice(fromMasterIdx, 1);
+  let insertIdx = dynamicRulesList.findIndex(r => r === toRule || (r.type === toRule.type && r.value === toRule.value && r.target === toRule.target && r.lineIndex === toRule.lineIndex));
+  if (position === 'after') {
+    insertIdx += 1;
+  }
+  dynamicRulesList.splice(insertIdx, 0, movedItem);
+  renderRulesTable();
+
+  const tbody = document.getElementById('dynamic-rules-list');
+  const rows = tbody.querySelectorAll('.rule-row');
+  const targetRow = Array.from(rows).find(r => r.dataset.lineIndex == movedItem.lineIndex);
+  if (targetRow) {
+    targetRow.classList.add('just-dropped');
+    setTimeout(() => targetRow.classList.remove('just-dropped'), 1000);
+  }
+
+  try {
+    let saved = false;
+
+    // 1. Try dedicated endpoint first if available
+    try {
+      const res = await fetch('/api/config/dynamic-rules/reorder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          fromLineIndex: fromRule.lineIndex,
+          toLineIndex: toRule.lineIndex,
+          position: position,
+          fromRule: {
+            type: fromRule.type,
+            value: fromRule.value,
+            target: fromRule.target,
+            originalLine: fromRule.originalLine
+          },
+          toRule: {
+            type: toRule.type,
+            value: toRule.value,
+            target: toRule.target,
+            originalLine: toRule.originalLine
+          }
+        })
+      });
+
+      if (res.ok) {
+        const data = await res.json().catch(() => null);
+        if (data && data.success) {
+          saved = true;
+          if (data.rules) {
+            dynamicRulesList = data.rules;
+            renderRulesTable();
+          }
+        }
+      }
+    } catch (e) {}
+
+    // 2. Direct on-the-fly config saving fallback (works instantly without any server restart)
+    if (!saved) {
+      const cfgRes = await fetch('/api/config?file=config');
+      if (!cfgRes.ok) throw new Error('Не удалось прочитать config.yaml');
+      const currentYaml = await cfgRes.text();
+      const newYaml = moveLineInYamlText(currentYaml, fromRule, toRule, position);
+
+      const saveRes = await fetch('/api/config?file=config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain; charset=utf-8' },
+        body: newYaml
+      });
+
+      if (!saveRes.ok) {
+        const errText = await saveRes.text();
+        throw new Error(errText || 'Ошибка сохранения конфигурации');
+      }
+
+      await loadDynamicRules();
+    }
+
+    showToast('⚡ Порядок правил обновлен и применен', 'success');
+  } catch (err) {
+    showToast('Не удалось переместить правило: ' + err.message, 'error');
+    await loadDynamicRules();
+  }
 }
 
 function filterRulesTable() {
@@ -1754,24 +2032,39 @@ function convertToCustomSelect(selectEl) {
     document.querySelectorAll('.custom-select-wrapper').forEach(w => {
       if (w !== wrapper) {
         w.classList.remove('open');
+        w.classList.remove('open-up');
         const parentTr = w.closest('tr');
         if (parentTr) parentTr.style.zIndex = '';
       }
     });
     
-    const isOpen = wrapper.classList.toggle('open');
-    const tr = wrapper.closest('tr');
-    if (tr) {
-      tr.style.zIndex = isOpen ? '99999' : '';
-      tr.style.position = 'relative';
-    }
-    
-    // If opening, ensure the active option is scrolled into view
-    if (isOpen) {
+    const wasOpen = wrapper.classList.contains('open');
+    if (!wasOpen) {
+      const rect = wrapper.getBoundingClientRect();
+      const dropdownHeight = dropdown.scrollHeight || (selectEl.options.length * 38 + 10);
+      const spaceBelow = window.innerHeight - rect.bottom;
+      
+      // Open upwards ONLY when genuinely no space below for this specific dropdown
+      if (spaceBelow < dropdownHeight + 10 && rect.top > dropdownHeight + 10) {
+        wrapper.classList.add('open-up');
+      } else {
+        wrapper.classList.remove('open-up');
+      }
+      wrapper.classList.add('open');
+      const tr = wrapper.closest('tr');
+      if (tr) {
+        tr.style.zIndex = '99999';
+        tr.style.position = 'relative';
+      }
+
       const selected = dropdown.querySelector('.custom-select-option.selected');
       if (selected) {
         dropdown.scrollTop = selected.offsetTop - dropdown.offsetTop - 10;
       }
+    } else {
+      wrapper.classList.remove('open');
+      const tr = wrapper.closest('tr');
+      if (tr) tr.style.zIndex = '';
     }
   });
 
@@ -1817,14 +2110,18 @@ function initCustomSelects() {
   });
 }
 
-// Global click listener to close dropdowns when clicking outside
-document.addEventListener('click', () => {
-  document.querySelectorAll('.custom-select-wrapper').forEach(wrapper => {
+// Global click/scroll listener to close dropdowns
+function closeAllCustomSelects() {
+  document.querySelectorAll('.custom-select-wrapper.open').forEach(wrapper => {
     wrapper.classList.remove('open');
     const parentTr = wrapper.closest('tr');
     if (parentTr) parentTr.style.zIndex = '';
   });
-});
+}
+
+document.addEventListener('click', closeAllCustomSelects);
+window.addEventListener('scroll', closeAllCustomSelects, { passive: true });
+window.addEventListener('resize', closeAllCustomSelects, { passive: true });
 
 // === ФУНКЦИОНАЛ УПРАВЛЕНИЯ ВЕРСИЯМИ И ОБНОВЛЕНИЯМИ ===
 let selectedCommitSha = null;
@@ -2954,5 +3251,393 @@ async function saveDpiAutoHealSettings() {
   }
 }
 window.saveDpiAutoHealSettings = saveDpiAutoHealSettings;
+
+// ============================================
+//   DNS MANAGER & PRESETS
+// ============================================
+
+const DNS_PRESETS = {
+  adguard: {
+    primary: [
+      'https://dns.adguard-dns.com/dns-query',
+      '94.140.14.14',
+      '94.140.15.15'
+    ],
+    fallback: [
+      '94.140.14.14',
+      '94.140.15.15'
+    ]
+  },
+  cloudflare: {
+    primary: [
+      'https://1.1.1.1/dns-query',
+      '1.1.1.1',
+      '1.0.0.1'
+    ],
+    fallback: [
+      '1.0.0.1',
+      '1.1.1.1'
+    ]
+  },
+  quad9: {
+    primary: [
+      'https://dns.quad9.net/dns-query',
+      '9.9.9.9',
+      '149.112.112.112'
+    ],
+    fallback: [
+      '149.112.112.112',
+      '9.9.9.9'
+    ]
+  },
+  opendns: {
+    primary: [
+      'https://doh.opendns.com/dns-query',
+      '208.67.222.222',
+      '208.67.220.220'
+    ],
+    fallback: [
+      '208.67.220.220'
+    ]
+  },
+  google: {
+    primary: [
+      'https://dns.google/dns-query',
+      '8.8.8.8',
+      '8.8.4.4'
+    ],
+    fallback: [
+      '8.8.4.4',
+      '8.8.8.8'
+    ]
+  },
+  yandex: {
+    primary: [
+      '77.88.8.8',
+      '77.88.8.1'
+    ],
+    fallback: [
+      '77.88.8.8',
+      '77.88.8.1'
+    ]
+  },
+  local: {
+    primary: [
+      '127.0.0.1'
+    ],
+    fallback: [
+      '127.0.0.1'
+    ]
+  }
+};
+
+let currentDnsData = null;
+
+async function loadDnsSettings() {
+  try {
+    const res = await fetch('/api/dns');
+    if (!res.ok) {
+      if (res.status === 404) {
+        showToast('Эндпоинт /api/dns не найден на запущенном сервере (404). Пожалуйста, перезапустите службу контроллера!', 'error');
+        return;
+      }
+      const errText = await res.text();
+      showToast(`Ошибка сервера (${res.status}): ${errText}`, 'error');
+      return;
+    }
+    const data = await res.json();
+    if (data.success && data.dns) {
+      currentDnsData = data.dns;
+      renderDnsSettings(data.dns);
+    } else {
+      showToast('Ошибка загрузки настроек DNS: ' + (data.message || data.error || 'Неизвестная ошибка'), 'error');
+    }
+  } catch (err) {
+    console.error('Ошибка загрузки DNS:', err);
+    showToast('Сбой связи с сервером при получении DNS: ' + err.message, 'error');
+  }
+}
+window.loadDnsSettings = loadDnsSettings;
+
+function renderDnsSettings(dns) {
+  // Primary nameservers
+  const primaryArea = document.getElementById('dns-primary-textarea');
+  if (primaryArea) {
+    primaryArea.value = (dns.nameserver || []).join('\n');
+    updateDnsPrimaryCountBadge();
+    syncDnsPresetButtons(false);
+
+    if (!primaryArea.dataset.dnsInputBound) {
+      primaryArea.dataset.dnsInputBound = 'true';
+      primaryArea.addEventListener('input', () => {
+        updateDnsPrimaryCountBadge();
+        syncDnsPresetButtons(false);
+      });
+    }
+  }
+
+  // Fallback section
+  const fallbackToggle = document.getElementById('dns-fallback-toggle');
+  const fallbackArea = document.getElementById('dns-fallback-textarea');
+  const fallbackContainer = document.getElementById('dns-fallback-container');
+  const fallbackBadge = document.getElementById('dns-fallback-status-badge');
+  const isFallbackEnabled = dns.fallback_enabled || (dns.fallback && dns.fallback.length > 0);
+
+  if (fallbackToggle) {
+    fallbackToggle.checked = !!isFallbackEnabled;
+  }
+  if (fallbackArea) {
+    fallbackArea.value = (dns.fallback || []).join('\n');
+    syncDnsPresetButtons(true);
+
+    if (!fallbackArea.dataset.dnsInputBound) {
+      fallbackArea.dataset.dnsInputBound = 'true';
+      fallbackArea.addEventListener('input', () => {
+        syncDnsPresetButtons(true);
+      });
+    }
+  }
+  if (fallbackContainer) {
+    fallbackContainer.style.display = isFallbackEnabled ? 'block' : 'none';
+  }
+  if (fallbackBadge) {
+    fallbackBadge.textContent = isFallbackEnabled ? `Включен (${(dns.fallback || []).length} серверов)` : 'Отключен';
+    fallbackBadge.style.color = isFallbackEnabled ? '#3ddc84' : 'var(--text-muted)';
+    fallbackBadge.style.borderColor = isFallbackEnabled ? 'rgba(61, 220, 132, 0.4)' : 'var(--border-color)';
+  }
+
+  // Fallback filter
+  const geoipCb = document.getElementById('dns-fallback-geoip');
+  const geoipCode = document.getElementById('dns-fallback-geoip-code');
+  if (geoipCb) geoipCb.checked = dns.fallback_filter_geoip !== false;
+  if (geoipCode) geoipCode.value = dns.fallback_filter_geoip_code || 'RU';
+
+  // Advanced core settings
+  const modeSelect = document.getElementById('dns-enhanced-mode');
+  const listenInput = document.getElementById('dns-listen-address');
+  const ipv6Cb = document.getElementById('dns-ipv6-toggle');
+  const activeBadge = document.getElementById('dns-active-status-badge');
+
+  if (modeSelect) modeSelect.value = dns.enhanced_mode || 'redir-host';
+  if (listenInput) listenInput.value = dns.listen || '127.0.0.1:1053';
+  if (ipv6Cb) ipv6Cb.checked = !!dns.ipv6;
+  if (activeBadge) activeBadge.textContent = `Режим: ${dns.enhanced_mode || 'redir-host'}`;
+}
+
+function updateDnsPrimaryCountBadge() {
+  const primaryArea = document.getElementById('dns-primary-textarea');
+  const badge = document.getElementById('dns-primary-count-badge');
+  if (!primaryArea || !badge) return;
+  const lines = primaryArea.value.split('\n').map(l => l.trim()).filter(Boolean);
+  badge.textContent = `${lines.length} ${getNounDns(lines.length, 'сервер', 'сервера', 'серверов')}`;
+}
+
+function getNounDns(number, one, two, five) {
+  let n = Math.abs(number);
+  n %= 100;
+  if (n >= 5 && n <= 20) return five;
+  n %= 10;
+  if (n === 1) return one;
+  if (n >= 2 && n <= 4) return two;
+  return five;
+}
+
+function toggleFallbackSection() {
+  const toggle = document.getElementById('dns-fallback-toggle');
+  const container = document.getElementById('dns-fallback-container');
+  const badge = document.getElementById('dns-fallback-status-badge');
+  const isEnabled = toggle && toggle.checked;
+
+  if (container) {
+    container.style.display = isEnabled ? 'block' : 'none';
+  }
+  if (badge) {
+    badge.textContent = isEnabled ? 'Включен' : 'Отключен';
+    badge.style.color = isEnabled ? '#3ddc84' : 'var(--text-muted)';
+    badge.style.borderColor = isEnabled ? 'rgba(61, 220, 132, 0.4)' : 'var(--border-color)';
+  }
+}
+window.toggleFallbackSection = toggleFallbackSection;
+
+function syncDnsPresetButtons(isFallback = false) {
+  const targetArea = document.getElementById(isFallback ? 'dns-fallback-textarea' : 'dns-primary-textarea');
+  if (!targetArea) return;
+
+  const currentLines = targetArea.value
+    .split('\n')
+    .map(l => l.trim().toLowerCase())
+    .filter(Boolean);
+
+  const container = isFallback
+    ? document.querySelector('#dns-fallback-container .dns-presets-container')
+    : document.querySelector('#tab-content-dns .dns-presets-container');
+
+  if (!container) return;
+
+  let matchedPresetKey = null;
+  const buttons = container.querySelectorAll('.dns-preset-btn');
+
+  // Check which predefined preset matches the textarea
+  for (const [key, val] of Object.entries(DNS_PRESETS)) {
+    const presetServers = (isFallback ? val.fallback : val.primary)
+      .map(s => s.trim().toLowerCase())
+      .filter(Boolean);
+
+    const isMatch = currentLines.length > 0 &&
+      currentLines.length === presetServers.length &&
+      presetServers.every((s, idx) => currentLines[idx] === s);
+
+    if (isMatch) {
+      matchedPresetKey = key;
+      break;
+    }
+  }
+
+  // If no predefined preset matches, highlight 'custom'
+  if (!matchedPresetKey) {
+    matchedPresetKey = 'custom';
+  }
+
+  buttons.forEach(btn => {
+    const presetKey = btn.getAttribute('data-preset');
+    if (presetKey === matchedPresetKey) {
+      btn.classList.add('active-preset');
+    } else {
+      btn.classList.remove('active-preset');
+    }
+  });
+}
+window.syncDnsPresetButtons = syncDnsPresetButtons;
+
+function applyDnsPreset(presetKey, isFallback = false) {
+  const targetArea = document.getElementById(isFallback ? 'dns-fallback-textarea' : 'dns-primary-textarea');
+  if (!targetArea) return;
+
+  if (isFallback) {
+    const toggle = document.getElementById('dns-fallback-toggle');
+    if (toggle && !toggle.checked) {
+      toggle.checked = true;
+      toggleFallbackSection();
+    }
+  }
+
+  if (presetKey === 'custom') {
+    targetArea.value = '';
+    if (!isFallback) {
+      updateDnsPrimaryCountBadge();
+    }
+    syncDnsPresetButtons(isFallback);
+    targetArea.focus();
+    showToast(`Поле очищено. Введите свои адреса для ${isFallback ? 'Fallback' : 'Primary'} DNS`, 'info');
+    return;
+  }
+
+  const preset = DNS_PRESETS[presetKey];
+  if (!preset) return;
+
+  const servers = isFallback ? preset.fallback : preset.primary;
+  targetArea.value = servers.join('\n');
+
+  if (!isFallback) {
+    updateDnsPrimaryCountBadge();
+  }
+
+  syncDnsPresetButtons(isFallback);
+  showToast(`Применен пресет ${presetKey.toUpperCase()} для ${isFallback ? 'Fallback' : 'Primary'} DNS!`, 'success');
+}
+window.applyDnsPreset = applyDnsPreset;
+
+function applyRecommendedDnsPreset() {
+  applyDnsPreset('adguard', false);
+  applyDnsPreset('yandex', true);
+  showToast('Установлен рекомендуемый пресет: AdGuard DoH (Primary) + Yandex DNS (Fallback)', 'success');
+}
+window.applyRecommendedDnsPreset = applyRecommendedDnsPreset;
+
+function clearDnsPrimary() {
+  const primaryArea = document.getElementById('dns-primary-textarea');
+  if (primaryArea) {
+    primaryArea.value = '';
+    updateDnsPrimaryCountBadge();
+    syncDnsPresetButtons(false);
+  }
+}
+window.clearDnsPrimary = clearDnsPrimary;
+
+async function saveDnsSettings() {
+  const saveBtn = document.getElementById('btn-save-dns');
+  const primaryArea = document.getElementById('dns-primary-textarea');
+  const fallbackArea = document.getElementById('dns-fallback-textarea');
+  const fallbackToggle = document.getElementById('dns-fallback-toggle');
+  const geoipCb = document.getElementById('dns-fallback-geoip');
+  const geoipCode = document.getElementById('dns-fallback-geoip-code');
+  const modeSelect = document.getElementById('dns-enhanced-mode');
+  const listenInput = document.getElementById('dns-listen-address');
+  const ipv6Cb = document.getElementById('dns-ipv6-toggle');
+
+  const nameservers = (primaryArea ? primaryArea.value : '').split('\n').map(l => l.trim()).filter(Boolean);
+  if (nameservers.length === 0) {
+    showToast('Укажите хотя бы один основной DNS сервер!', 'error');
+    if (primaryArea) primaryArea.focus();
+    return;
+  }
+
+  const fallbackEnabled = fallbackToggle ? fallbackToggle.checked : false;
+  const fallbacks = (fallbackArea ? fallbackArea.value : '').split('\n').map(l => l.trim()).filter(Boolean);
+
+  const payload = {
+    enable: true,
+    ipv6: ipv6Cb ? ipv6Cb.checked : false,
+    enhanced_mode: modeSelect ? modeSelect.value : 'redir-host',
+    listen: listenInput ? listenInput.value.trim() : '127.0.0.1:1053',
+    nameserver: nameservers,
+    fallback_enabled: fallbackEnabled,
+    fallback: fallbacks,
+    fallback_filter_geoip: geoipCb ? geoipCb.checked : true,
+    fallback_filter_geoip_code: geoipCode ? (geoipCode.value.trim().toUpperCase() || 'RU') : 'RU'
+  };
+
+  const oldBtnHtml = saveBtn ? saveBtn.innerHTML : '';
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.innerHTML = '<span>⏳ Применение в ядре...</span>';
+  }
+
+  try {
+    const res = await fetch('/api/dns', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    if (!res.ok) {
+      const errText = await res.text();
+      showToast(`Ошибка сервера (${res.status}): ${errText}`, 'error');
+      return;
+    }
+    const data = await res.json();
+    if (data.success) {
+      showToast('✓ Настройки DNS успешно сохранены и применены в Mihomo!', 'success');
+      loadDnsSettings();
+    } else {
+      showToast('Ошибка: ' + (data.message || data.error || 'Не удалось применить DNS'), 'error');
+    }
+  } catch (err) {
+    console.error('Ошибка сохранения DNS:', err);
+    showToast('Сбой отправки запроса сохранения DNS: ' + err.message, 'error');
+  } finally {
+    if (saveBtn) {
+      saveBtn.disabled = false;
+      saveBtn.innerHTML = oldBtnHtml;
+    }
+  }
+}
+window.saveDnsSettings = saveDnsSettings;
+
+document.addEventListener('input', (e) => {
+  if (e.target && e.target.id === 'dns-primary-textarea') {
+    updateDnsPrimaryCountBadge();
+  }
+});
+
 
 
