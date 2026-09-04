@@ -14,7 +14,6 @@ dpi_settings.json
 app_mode.json
 test_dpi.js
 clients_rules.yaml
-config.yaml
 rules/clients_*.yaml
 
 # Системные папки

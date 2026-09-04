@@ -90,7 +90,7 @@ if [ "$MODE" = "update" ]; then
     fi
 
     # Обновляем только код приложения, НЕ трогая пользовательские данные
-    for FILE in server.js updater.js clients_manager.js system_stats.js yaml_utils.js dpi_manager.js install.sh uninstall.sh config.example.yaml; do
+    for FILE in server.js panel_logger.js updater.js clients_manager.js system_stats.js yaml_utils.js dpi_manager.js install.sh uninstall.sh; do
         if [ -f "$TEMP_DIR/$FILE" ]; then
             cp -f "$TEMP_DIR/$FILE" "$INSTALL_DIR/$FILE"
             echo "  ✓ Обновлён: $FILE"
@@ -257,7 +257,10 @@ echo "  ✓ Службы YouTube DPI-Bypass настроены и запущен
 echo "→ Шаг 5: Проверка и развертывание конфигурации Mihomo..."
 mkdir -p /opt/etc/mihomo/proxy_providers
 if [ ! -f "/opt/etc/mihomo/config.yaml" ]; then
-    if [ -f "$INSTALL_DIR/config.example.yaml" ]; then
+    if [ -f "$INSTALL_DIR/config.yaml" ]; then
+        cp "$INSTALL_DIR/config.yaml" /opt/etc/mihomo/config.yaml
+        echo "  ✓ Развернут базовый config.yaml"
+    elif [ -f "$INSTALL_DIR/config.example.yaml" ]; then
         cp "$INSTALL_DIR/config.example.yaml" /opt/etc/mihomo/config.yaml
         echo "  ✓ Развернут базовый config.yaml из шаблона config.example.yaml"
     fi

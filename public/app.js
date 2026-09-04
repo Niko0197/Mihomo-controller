@@ -2296,7 +2296,7 @@ function updatePanelHeroBanner(isUpdateAvailable, currentCommit, latestCommit) {
     hero.className = 'update-hero-banner up-to-date';
     if (icon) icon.textContent = '✅';
     if (title) title.textContent = 'У вас установлена актуальная версия панели';
-    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.0'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
+    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.1'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
     if (actions) actions.style.display = 'none';
   }
 }
