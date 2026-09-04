@@ -112,12 +112,13 @@ function switchTab(tabId) {
     'traffic': '📊 График трафика real-time',
     'connections': '🔌 Активные соединения',
     'packet-monitor': '📦 Мониторинг сетевых пакетов',
-    'logs': '📋 Системные логи ядра',
+    'logs': '📋 Журнал событий и логи',
     'trace': '🛰️ Трассировка маршрутов',
     'dpi': '⚡ Тюнер DPI и авто-ротация',
     'rules': '🛠️ Быстрые пользовательские правила',
     'editor': '📝 Редактор YAML конфигураций',
     'dns': '🛡️ Настройка DNS и Резолвера',
+    'updates': '🔄 Управление версиями и обновлениями',
     'qr': '📱 QR-подключения клиентов',
     'leak': '🔍 Анализ утечек доменов'
   };
@@ -159,6 +160,7 @@ function switchTab(tabId) {
     if (typeof startConnectionsPolling === 'function') startConnectionsPolling(false);
   } else if (tabId === 'logs') {
     if (typeof reRenderLogs === 'function') reRenderLogs();
+    if (typeof onLogsTabActivated === 'function') onLogsTabActivated();
   } else if (tabId === 'clients') {
     if (typeof startClientsPolling === 'function') startClientsPolling(false);
     if (typeof loadClientsData === 'function') loadClientsData();
@@ -1122,6 +1124,8 @@ window.onload = function() {
   });
   loadPanelVersion();
   loadMihomoVersion();
+  checkForUpdates(false);
+  setInterval(() => checkForUpdates(false), 15 * 60 * 1000); // Проверка обновлений каждые 15 минут
   updateXkeenStatus().then(() => {
     if (window.isXkeenRunning && typeof loadProxiesDashboard === 'function') {
       loadProxiesDashboard();
@@ -2126,18 +2130,43 @@ window.addEventListener('resize', closeAllCustomSelects, { passive: true });
 // === ФУНКЦИОНАЛ УПРАВЛЕНИЯ ВЕРСИЯМИ И ОБНОВЛЕНИЯМИ ===
 let selectedCommitSha = null;
 let currentCommitSha = null;
+let updateChannelMode = localStorage.getItem('vpn_update_channel_mode') || 'main';
 
-async function loadVersionsList() {
+function setUpdateChannelMode(mode) {
+  updateChannelMode = mode === 'all' ? 'all' : 'main';
+  localStorage.setItem('vpn_update_channel_mode', updateChannelMode);
+
+  const btnMain = document.getElementById('mode-btn-main');
+  const btnAll = document.getElementById('mode-btn-all');
+  if (btnMain && btnAll) {
+    btnMain.classList.toggle('active', updateChannelMode === 'main');
+    btnAll.classList.toggle('active', updateChannelMode === 'all');
+  }
+
+  loadVersionsList(false);
+  checkForUpdates(false);
+}
+
+async function loadVersionsList(isManual = false) {
   const container = document.getElementById('versions-list-container');
   const installBtn = document.getElementById('btn-install-version');
+  if (!container) return;
   
-  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка списка версий с роутера...</div>';
-  installBtn.disabled = true;
+  // Sync mode buttons UI state
+  const btnMain = document.getElementById('mode-btn-main');
+  const btnAll = document.getElementById('mode-btn-all');
+  if (btnMain && btnAll) {
+    btnMain.classList.toggle('active', updateChannelMode === 'main');
+    btnAll.classList.toggle('active', updateChannelMode === 'all');
+  }
+
+  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;"><span class="spinner"></span> Загрузка списка версий с роутера...</div>';
+  if (installBtn) installBtn.disabled = true;
   selectedCommitSha = null;
   currentCommitSha = null;
 
   try {
-    const res = await fetch('/api/system/versions');
+    const res = await fetch(`/api/system/versions?mode=${encodeURIComponent(updateChannelMode)}`);
     if (!res.ok) throw new Error('Ошибка при запросе версий');
     const payload = await res.json();
     if (!payload.success) throw new Error(payload.error || 'Неизвестная ошибка');
@@ -2146,7 +2175,9 @@ async function loadVersionsList() {
     const commits = payload.commits || [];
 
     // Обновляем метки ветки
-    document.getElementById('active-branch-label').textContent = branch;
+    const branchLabel = document.getElementById('active-branch-label');
+    if (branchLabel) branchLabel.textContent = branch;
+
     const branchSelect = document.getElementById('update-branch-select');
     if (branchSelect) {
       branchSelect.value = branch;
@@ -2158,72 +2189,24 @@ async function loadVersionsList() {
     container.innerHTML = '';
     if (commits.length === 0) {
       container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Коммиты не найдены.</div>';
+      updatePanelHeroBanner(false, null, null);
       return;
     }
 
-    // ДЕДУБЛИКАЦИЯ: Если есть одинаковые версии, объединяем их списки изменений
-    const uniqueCommits = [];
-    const versionMap = new Map(); // version -> array of commits
-
-    commits.forEach(c => {
-      if (!versionMap.has(c.version)) {
-        versionMap.set(c.version, []);
-      }
-      versionMap.get(c.version).push(c);
-    });
-
-    versionMap.forEach((commitsList, versionKey) => {
-      if (commitsList.length === 1) {
-        const c = commitsList[0];
-        if (Array.isArray(c.changes)) {
-          c.changes = c.changes.filter(change => {
-            const lower = change.toLowerCase();
-            return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version') && !lower.startsWith('local:');
-          });
-        }
-        uniqueCommits.push(c);
-      } else {
-        // Объединяем все изменения из всех коммитов этой версии
-        let mergedChanges = [];
-        commitsList.forEach(c => {
-          const list = Array.isArray(c.changes) ? c.changes : (c.message ? [c.message] : []);
-          list.forEach(change => {
-            const lower = change.toLowerCase();
-            if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version') || lower.startsWith('local:')) return;
-            mergedChanges.push(change);
-          });
-        });
-        
-        // Очищаем дубликаты строк изменений
-        mergedChanges = Array.from(new Set(mergedChanges));
-
-        // Ищем коммит, где ветка - main или master
-        let repCommit = commitsList.find(c => c.branch === 'main' || c.branch === 'master');
-        if (!repCommit) {
-          // Если нет коммита из main, оставляем самый первый (новейший)
-          repCommit = commitsList[0];
-        }
-
-        // Создаем копию коммита с объединенными изменениями
-        const mergedCommit = { ...repCommit, changes: mergedChanges };
-
-        // Если хотя бы один из дубликатов был текущим (активным), помечаем как текущий
-        const hasCurrent = commitsList.some(c => c.current);
-        if (hasCurrent) {
-          mergedCommit.current = true;
-        }
-        uniqueCommits.push(mergedCommit);
-      }
-    });
-
-    // Сохраняем текущий SHA
-    const currentCommit = uniqueCommits.find(c => c.current);
+    // Сохраняем текущий SHA и определяем статус обновлений
+    const currentCommit = commits.find(c => c.current);
     if (currentCommit) {
       currentCommitSha = currentCommit.sha;
       selectedCommitSha = currentCommit.sha;
     }
 
-    uniqueCommits.forEach(commit => {
+    const latestCommit = commits[0];
+    const isUpdateAvailable = Boolean(currentCommit && latestCommit && currentCommit.sha !== latestCommit.sha);
+
+    // Обновляем верхний баннер Hero
+    updatePanelHeroBanner(isUpdateAvailable, currentCommit, latestCommit);
+
+    commits.forEach(commit => {
       const card = document.createElement('div');
       card.className = 'version-item-card';
       if (commit.current) {
@@ -2269,26 +2252,107 @@ async function loadVersionsList() {
       `;
 
       card.addEventListener('click', () => {
-        // Убираем выделение со всех карточек
         container.querySelectorAll('.version-item-card').forEach(c => c.classList.remove('selected'));
-        // Выделяем текущую
         card.classList.add('selected');
         selectedCommitSha = commit.sha;
 
-        // Если выбрали текущую запущенную версию, отключаем кнопку установки
-        if (selectedCommitSha === currentCommitSha) {
-          installBtn.disabled = true;
-        } else {
-          installBtn.disabled = false;
+        if (installBtn) {
+          installBtn.disabled = (selectedCommitSha === currentCommitSha);
         }
       });
 
       container.appendChild(card);
     });
 
+    if (isManual) {
+      showToast('Список версий обновлен', 'success');
+    }
+
   } catch (err) {
     container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px 0;">Ошибка загрузки версий: ${err.message}</div>`;
     showToast('Ошибка при загрузке версий: ' + err.message, 'error');
+  }
+}
+
+function updatePanelHeroBanner(isUpdateAvailable, currentCommit, latestCommit) {
+  const hero = document.getElementById('panel-update-hero');
+  const icon = document.getElementById('panel-hero-icon');
+  const title = document.getElementById('panel-hero-title');
+  const desc = document.getElementById('panel-hero-desc');
+  const actions = document.getElementById('panel-hero-actions');
+  const heroBtn = document.getElementById('btn-hero-update-panel');
+  if (!hero) return;
+
+  if (isUpdateAvailable && latestCommit) {
+    hero.className = 'update-hero-banner update-available';
+    if (icon) icon.textContent = '🚀';
+    if (title) title.textContent = `Доступно обновление панели до ${latestCommit.version}`;
+    if (desc) desc.textContent = `Текущая: ${currentCommit ? currentCommit.version : 'Неизвестно'} • Нажмите для мгновенного обновления`;
+    if (actions) actions.style.display = 'block';
+    if (heroBtn) {
+      heroBtn.onclick = () => installSpecificVersion(latestCommit.sha, latestCommit.version);
+    }
+  } else {
+    hero.className = 'update-hero-banner up-to-date';
+    if (icon) icon.textContent = '✅';
+    if (title) title.textContent = 'У вас установлена актуальная версия панели';
+    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.0'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
+    if (actions) actions.style.display = 'none';
+  }
+}
+
+async function installLatestAvailable() {
+  try {
+    const res = await fetch(`/api/system/versions?mode=${encodeURIComponent(updateChannelMode)}`);
+    const data = await res.json();
+    if (data.success && data.commits && data.commits.length > 0) {
+      const latest = data.commits[0];
+      installSpecificVersion(latest.sha, latest.version);
+    } else {
+      showToast('Не удалось получить последнюю версию панели', 'error');
+    }
+  } catch (e) {
+    showToast('Ошибка: ' + e.message, 'error');
+  }
+}
+
+async function installSelectedVersion() {
+  if (!selectedCommitSha) {
+    showToast('Сначала выберите версию для установки', 'error');
+    return;
+  }
+
+  if (selectedCommitSha === currentCommitSha) {
+    showToast('Выбранная версия уже установлена', 'error');
+    return;
+  }
+
+  installSpecificVersion(selectedCommitSha);
+}
+
+async function installSpecificVersion(sha, versionStr) {
+  if (!sha) return;
+  const verLabel = versionStr ? `версию ${versionStr}` : `коммит ${sha.substring(0, 7)}`;
+  if (!confirm(`Вы действительно хотите установить ${verLabel}?\nВсе ваши настройки и базы данных будут сохранены.`)) {
+    return;
+  }
+
+  try {
+    showToast('Установка версии панели...');
+    const response = await fetch('/api/system/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sha })
+    });
+
+    if (!response.ok) {
+      const data = await response.json();
+      throw new Error(data.error || 'Ошибка при установке');
+    }
+
+    triggerUpdateRestart('Установка версии и перезапуск панели...');
+  } catch (err) {
+    showToast('Ошибка при установке версии: ' + err.message, 'error');
   }
 }
 
@@ -2317,40 +2381,6 @@ async function changeUpdateBranch() {
     triggerUpdateRestart('Переключение ветки и перезапуск панели...');
   } catch (err) {
     showToast('Ошибка при изменении ветки: ' + err.message, 'error');
-  }
-}
-
-async function installSelectedVersion() {
-  if (!selectedCommitSha) {
-    showToast('Сначала выберите версию для установки', 'error');
-    return;
-  }
-
-  if (selectedCommitSha === currentCommitSha) {
-    showToast('Выбранная версия уже установлена', 'error');
-    return;
-  }
-
-  if (!confirm(`Вы действительно хотите переключить панель на версию ${selectedCommitSha.substring(0, 7)}?\nВсе ваши настройки и базы данных будут сохранены.`)) {
-    return;
-  }
-
-  try {
-    showToast('Установка выбранной версии...');
-    const response = await fetch('/api/system/update', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sha: selectedCommitSha })
-    });
-
-    if (!response.ok) {
-      const data = await response.json();
-      throw new Error(data.error || 'Ошибка при установке');
-    }
-
-    triggerUpdateRestart('Установка версии и перезапуск панели...');
-  } catch (err) {
-    showToast('Ошибка при установке версии: ' + err.message, 'error');
   }
 }
 
@@ -2387,29 +2417,20 @@ async function triggerUpdateRestart(customMessage) {
 }
 
 function isDevVersion(versionStr) {
-  // Clean version string (remove 'v' prefix if present)
-  const clean = versionStr.startsWith('v') ? versionStr.substring(1) : versionStr;
-  
-  // Check if it matches semver pattern X.Y.Z
-  const parts = clean.split('.');
-  if (parts.length === 3) {
-    const major = parseInt(parts[0], 10);
-    const minor = parseInt(parts[1], 10);
-    const patch = parseInt(parts[2], 10);
-    if (!isNaN(major) && !isNaN(minor) && !isNaN(patch)) {
-      return patch !== 0; // Dev version if patch is not 0
-    }
-  }
-  
-  // If it's a short SHA or doesn't follow X.Y.0 pattern, treat as dev version unless it is exactly 1.0.0
-  if (clean === '1.0.0') return false;
-  
-  return true;
+  if (!versionStr) return false;
+  const clean = versionStr.trim().replace(/^v/i, '');
+  if (/alpha|beta|rc|dev/i.test(clean)) return true;
+  if (/^\d+\.\d+(\.\d+)?$/.test(clean)) return false;
+  if (/^[0-9a-f]{7,40}$/i.test(clean)) return true;
+  return false;
 }
 
 // === Управление ядром Mihomo (версии, релизы, обновление) ===
 window.mihomoArch = '';
+let currentMihomoVersionStr = '';
 let selectedMihomoRelease = null;
+let coreReleasesFilterMode = 'main'; // 'main' | 'all'
+let allMihomoReleases = [];
 
 async function loadMihomoVersion() {
   try {
@@ -2419,6 +2440,7 @@ async function loadMihomoVersion() {
       const coreVersionVal = document.getElementById('core-version-val');
       if (coreVersionVal && data.success) {
         coreVersionVal.textContent = data.version;
+        currentMihomoVersionStr = data.version || '';
         window.mihomoArch = data.arch;
       }
     }
@@ -2446,6 +2468,17 @@ function closeMihomoUpdateModal() {
   }
 }
 
+function setCoreReleasesFilter(mode) {
+  coreReleasesFilterMode = mode === 'all' ? 'all' : 'main';
+  const btnMain = document.getElementById('btn-core-mode-main');
+  const btnAll = document.getElementById('btn-core-mode-all');
+  if (btnMain && btnAll) {
+    btnMain.classList.toggle('active', coreReleasesFilterMode === 'main');
+    btnAll.classList.toggle('active', coreReleasesFilterMode === 'all');
+  }
+  renderMihomoReleases();
+}
+
 async function loadMihomoReleases() {
   const listContainer = document.getElementById('mihomo-releases-list');
   const installBtn = document.getElementById('btn-install-mihomo');
@@ -2454,99 +2487,20 @@ async function loadMihomoReleases() {
   
   listContainer.innerHTML = `
     <div class="releases-loading">
-      <span class="spinner"></span> Загрузка списка релизов...
+      <span class="spinner"></span> Загрузка списка релизов с GitHub...
     </div>
   `;
-  installBtn.disabled = true;
+  if (installBtn) installBtn.disabled = true;
   selectedMihomoRelease = null;
   
   try {
     const res = await fetch('/api/mihomo/releases');
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
-    if (!data.success) {
-      throw new Error(data.error || 'Неизвестная ошибка сервера');
-    }
+    if (!data.success) throw new Error(data.error || 'Неизвестная ошибка сервера');
     
-    const releases = data.releases || [];
-    if (releases.length === 0) {
-      listContainer.innerHTML = '<div class="releases-loading">Релизы не найдены.</div>';
-      return;
-    }
-    
-    const countBadge = document.querySelector('.github-count');
-    if (countBadge) {
-      countBadge.textContent = releases.length;
-    }
-    
-    listContainer.innerHTML = '';
-    
-    releases.forEach((rel, idx) => {
-      const card = document.createElement('div');
-      card.className = 'release-card';
-      
-      const formattedDate = rel.published_at ? new Date(rel.published_at).toISOString().split('T')[0] : '';
-      
-      let changesHtml = '';
-      if (rel.changes && rel.changes.length > 0) {
-        const listItems = rel.changes.map(ch => {
-          const cleanCh = ch.replace(/`([^`]+)`/g, '<code>$1</code>');
-          return `<li>${cleanCh}</li>`;
-        }).join('');
-        
-        changesHtml = `
-          <div class="release-changes">
-            <div class="changes-title">What's Changed</div>
-            <ul class="changes-list">${listItems}</ul>
-          </div>
-        `;
-      }
-      
-      const hasAsset = !!rel.download_url;
-      const warningHtml = !hasAsset 
-        ? `<div style="color: var(--md-sys-color-error); font-size: 0.8rem; margin-top: 6px; font-family: var(--font-inter);">
-             Внимание: Файл под архитектуру "${window.mihomoArch || 'неизвестно'}" не найден в этом релизе.
-           </div>`
-        : '';
-      
-      card.innerHTML = `
-        <div class="release-card-header">
-          <div class="release-info">
-            <div class="release-version">${rel.tag_name}</div>
-            <div class="release-date">${formattedDate}</div>
-            ${warningHtml}
-          </div>
-          <div class="release-radio-container">
-            <input type="radio" name="mihomo-release-choice" class="release-radio-input" 
-                   value="${idx}" ${!hasAsset ? 'disabled' : ''}>
-          </div>
-        </div>
-        ${changesHtml}
-      `;
-      
-      if (hasAsset) {
-        card.addEventListener('click', (e) => {
-          const radio = card.querySelector('.release-radio-input');
-          if (e.target !== radio) {
-            radio.checked = true;
-          }
-          
-          document.querySelectorAll('.release-card').forEach(c => c.classList.remove('selected'));
-          card.classList.add('selected');
-          
-          selectedMihomoRelease = rel;
-          installBtn.disabled = false;
-        });
-      } else {
-        card.style.opacity = '0.5';
-        card.style.cursor = 'not-allowed';
-      }
-      
-      listContainer.appendChild(card);
-    });
-    
+    allMihomoReleases = data.releases || [];
+    renderMihomoReleases();
   } catch (err) {
     console.error('Error fetching releases:', err);
     listContainer.innerHTML = `
@@ -2556,6 +2510,151 @@ async function loadMihomoReleases() {
       </div>
     `;
   }
+}
+
+function renderMihomoReleases() {
+  const listContainer = document.getElementById('mihomo-releases-list');
+  const installBtn = document.getElementById('btn-install-mihomo');
+  if (!listContainer) return;
+
+  if (installBtn) installBtn.disabled = true;
+  selectedMihomoRelease = null;
+
+  let releases = allMihomoReleases;
+  if (coreReleasesFilterMode === 'main') {
+    releases = releases.filter(r => !r.prerelease && !/alpha|beta|rc|dev/i.test(r.tag_name));
+  }
+
+  const countBadge = document.querySelector('.github-count');
+  if (countBadge) {
+    countBadge.textContent = releases.length;
+  }
+
+  // Обновляем Core Hero Banner
+  updateCoreHeroBanner(releases);
+
+  if (releases.length === 0) {
+    listContainer.innerHTML = '<div class="releases-loading">Релизы по данному фильтру не найдены.</div>';
+    return;
+  }
+
+  listContainer.innerHTML = '';
+
+  releases.forEach((rel, idx) => {
+    const card = document.createElement('div');
+    card.className = 'release-card';
+
+    const isDev = Boolean(rel.prerelease || /alpha|beta|rc|dev/i.test(rel.tag_name));
+    const typeBadge = isDev 
+      ? '<span class="version-dev-badge" style="margin-left: 8px;">Alpha / Pre-release</span>' 
+      : '<span class="version-main-badge" style="margin-left: 8px;">Stable</span>';
+
+    const formattedDate = rel.published_at ? new Date(rel.published_at).toISOString().split('T')[0] : '';
+
+    let changesHtml = '';
+    if (rel.changes && rel.changes.length > 0) {
+      const listItems = rel.changes.map(ch => {
+        const cleanCh = ch.replace(/`([^`]+)`/g, '<code>$1</code>');
+        return `<li>${cleanCh}</li>`;
+      }).join('');
+
+      changesHtml = `
+        <div class="release-changes">
+          <div class="changes-title">What's Changed</div>
+          <ul class="changes-list">${listItems}</ul>
+        </div>
+      `;
+    }
+
+    const hasAsset = !!rel.download_url;
+    const warningHtml = !hasAsset 
+      ? `<div style="color: var(--md-sys-color-error); font-size: 0.8rem; margin-top: 6px; font-family: var(--font-inter);">
+           Внимание: Файл под архитектуру "${window.mihomoArch || 'неизвестно'}" не найден в этом релизе.
+         </div>`
+      : '';
+
+    card.innerHTML = `
+      <div class="release-card-header">
+        <div class="release-info">
+          <div class="release-version" style="display: flex; align-items: center; flex-wrap: wrap; gap: 4px;">
+            <span>${rel.tag_name}</span>
+            ${typeBadge}
+          </div>
+          <div class="release-date">${formattedDate}</div>
+          ${warningHtml}
+        </div>
+        <div class="release-radio-container">
+          <input type="radio" name="mihomo-release-choice" class="release-radio-input" 
+                 value="${idx}" ${!hasAsset ? 'disabled' : ''}>
+        </div>
+      </div>
+      ${changesHtml}
+    `;
+
+    if (hasAsset) {
+      card.addEventListener('click', (e) => {
+        const radio = card.querySelector('.release-radio-input');
+        if (e.target !== radio) {
+          radio.checked = true;
+        }
+
+        document.querySelectorAll('.release-card').forEach(c => c.classList.remove('selected'));
+        card.classList.add('selected');
+
+        selectedMihomoRelease = rel;
+        if (installBtn) installBtn.disabled = false;
+      });
+    } else {
+      card.style.opacity = '0.5';
+      card.style.cursor = 'not-allowed';
+    }
+
+    listContainer.appendChild(card);
+  });
+}
+
+function updateCoreHeroBanner(filteredReleases) {
+  const hero = document.getElementById('core-update-hero');
+  const icon = document.getElementById('core-hero-icon');
+  const title = document.getElementById('core-hero-title');
+  const desc = document.getElementById('core-hero-desc');
+  const actions = document.getElementById('core-hero-actions');
+  if (!hero) return;
+
+  const topAvailable = filteredReleases && filteredReleases.find(r => !!r.download_url);
+  const curVerClean = (currentMihomoVersionStr || '').replace(/^v/i, '').trim();
+  const topVerClean = topAvailable ? topAvailable.tag_name.replace(/^v/i, '').trim() : '';
+
+  const hasCoreUpdate = Boolean(topAvailable && topVerClean && (!curVerClean || topVerClean !== curVerClean));
+
+  if (hasCoreUpdate) {
+    hero.className = 'update-hero-banner update-available';
+    if (icon) icon.textContent = '🚀';
+    if (title) title.textContent = `Доступна новая версия ядра: ${topAvailable.tag_name}`;
+    if (desc) desc.textContent = `Текущая: ${currentMihomoVersionStr || 'активна'} • Нажмите для быстрого обновления`;
+    if (actions) actions.style.display = 'block';
+  } else {
+    hero.className = 'update-hero-banner up-to-date';
+    if (icon) icon.textContent = '✅';
+    if (title) title.textContent = 'Ядро Mihomo актуально';
+    if (desc) desc.textContent = `Текущая версия: ${currentMihomoVersionStr || 'активна'} • Служба XKeen работает штатно`;
+    if (actions) actions.style.display = 'none';
+  }
+}
+
+async function installLatestCoreAvailable() {
+  let releases = allMihomoReleases;
+  if (coreReleasesFilterMode === 'main') {
+    releases = releases.filter(r => !r.prerelease && !/alpha|beta|rc|dev/i.test(r.tag_name));
+  }
+  const topAvailable = releases.find(r => !!r.download_url);
+  if (!topAvailable) {
+    showToast('Подходящий файл ядра для обновления не найден', 'error');
+    return;
+  }
+
+  selectedMihomoRelease = topAvailable;
+  installMihomoCore();
 }
 
 async function installMihomoCore() {
@@ -2569,7 +2668,7 @@ async function installMihomoCore() {
   }
   
   closeMihomoUpdateModal();
-  showMihomoDimmerOverlay('Установка нового ядра Mihomo и перезапуск службы XKeen...');
+  showMihomoDimmerOverlay(`Установка ядра Mihomo ${tag} и перезапуск службы XKeen...`);
   
   try {
     const res = await fetch('/api/mihomo/update', {
@@ -2588,6 +2687,7 @@ async function installMihomoCore() {
     if (res.ok && data.success) {
       showToast(data.message || `Ядро успешно обновлено до ${tag}`, 'success');
       loadMihomoVersion();
+      checkForUpdates(false);
     } else {
       showToast(data.error || 'Ошибка при установке ядра', 'error');
     }
@@ -2596,6 +2696,59 @@ async function installMihomoCore() {
     showToast(`Ошибка сети: ${err.message}`, 'error');
   } finally {
     hideMihomoDimmerOverlay();
+  }
+}
+
+// Фоновая и ручная проверка наличия обновлений
+async function checkForUpdates(isManual = false) {
+  try {
+    const res = await fetch(`/api/system/check-updates?mode=${encodeURIComponent(updateChannelMode)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (!data.success) return;
+
+    const panelBadge = document.getElementById('panel-update-badge');
+    const coreBadge = document.getElementById('core-update-badge');
+    const navDot = document.getElementById('nav-update-dot');
+
+    const panelHasUpdate = Boolean(data.panel && data.panel.has_update);
+    const coreHasUpdate = Boolean(data.core && data.core.has_update);
+
+    if (panelBadge) {
+      panelBadge.style.display = panelHasUpdate ? 'inline-flex' : 'none';
+      if (panelHasUpdate && data.panel.latest_version) {
+        panelBadge.title = `Доступна версия ${data.panel.latest_version}`;
+      }
+    }
+
+    if (coreBadge) {
+      coreBadge.style.display = coreHasUpdate ? 'inline-flex' : 'none';
+      if (coreHasUpdate && data.core.latest_version) {
+        coreBadge.title = `Доступно ядро ${data.core.latest_version}`;
+      }
+    }
+
+    if (navDot) {
+      navDot.style.display = (panelHasUpdate || coreHasUpdate) ? 'inline-block' : 'none';
+    }
+
+    if (isManual) {
+      if (panelHasUpdate && coreHasUpdate) {
+        showToast(`Доступны обновления: Панель (${data.panel.latest_version}) и Ядро (${data.core.latest_version})!`, 'info');
+      } else if (panelHasUpdate) {
+        showToast(`Доступно обновление панели до ${data.panel.latest_version}!`, 'info');
+      } else if (coreHasUpdate) {
+        showToast(`Доступно обновление ядра Mihomo до ${data.core.latest_version}!`, 'info');
+      } else {
+        showToast('Установлены самые актуальные версии панели и ядра ✅', 'success');
+      }
+      loadVersionsList(false);
+    }
+  } catch (e) {
+    console.error('Check updates error:', e);
+    if (isManual) {
+      showToast('Ошибка при проверке обновлений: ' + e.message, 'error');
+    }
   }
 }
 
@@ -3632,6 +3785,21 @@ async function saveDnsSettings() {
   }
 }
 window.saveDnsSettings = saveDnsSettings;
+
+// Экспорт функций управления обновлениями для глобального доступа из HTML
+window.setUpdateChannelMode = setUpdateChannelMode;
+window.loadVersionsList = loadVersionsList;
+window.installSelectedVersion = installSelectedVersion;
+window.installLatestAvailable = installLatestAvailable;
+window.installSpecificVersion = installSpecificVersion;
+window.changeUpdateBranch = changeUpdateBranch;
+window.checkForUpdates = checkForUpdates;
+window.openMihomoUpdateModal = openMihomoUpdateModal;
+window.closeMihomoUpdateModal = closeMihomoUpdateModal;
+window.setCoreReleasesFilter = setCoreReleasesFilter;
+window.loadMihomoReleases = loadMihomoReleases;
+window.installLatestCoreAvailable = installLatestCoreAvailable;
+window.installMihomoCore = installMihomoCore;
 
 document.addEventListener('input', (e) => {
   if (e.target && e.target.id === 'dns-primary-textarea') {

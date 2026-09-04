@@ -115,9 +115,10 @@ window.switchTab = function(tabId) {
     if (speedUpEl) speedUpEl.textContent = formatSpeed(lastUp);
     
     initAllTrafficCharts();
-    updateAllTrafficCharts();
   } else if (tabId === 'logs') {
-    if (window.isXkeenRunning) {
+    if (typeof onLogsTabActivated === 'function') {
+      onLogsTabActivated();
+    } else if (window.isXkeenRunning) {
       reRenderLogs();
     }
   } else if (tabId === 'proxies-dashboard') {
@@ -1977,6 +1978,305 @@ if (btnClearLogs) {
     showToast('Консоли очищены!');
   };
 }
+
+// === УПРАВЛЕНИЕ ЛОГАМИ ВЕБ-ПАНЕЛИ (КОНТРОЛЛЕРА) ===
+let activeLogSource = 'core'; // 'core' | 'panel'
+let activePanelLogLevel = 'all'; // 'all' | 'info' | 'warn' | 'error'
+let panelLogsCache = [];
+let panelLogsAutoRefreshInterval = null;
+let userScrolledUpPanelLog = false;
+
+function escapePanelHtml(str) {
+  if (typeof str !== 'string') return String(str || '');
+  return str
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
+
+function switchLogSource(source) {
+  activeLogSource = source === 'panel' ? 'panel' : 'core';
+
+  const btnCore = document.getElementById('btn-log-source-core');
+  const btnPanel = document.getElementById('btn-log-source-panel');
+  const coreView = document.getElementById('core-logs-view');
+  const panelView = document.getElementById('panel-logs-view');
+  const fileBadge = document.getElementById('panel-log-file-badge');
+
+  if (btnCore && btnPanel) {
+    btnCore.classList.toggle('active', activeLogSource === 'core');
+    btnPanel.classList.toggle('active', activeLogSource === 'panel');
+  }
+
+  if (activeLogSource === 'core') {
+    if (coreView) coreView.style.display = 'block';
+    if (panelView) panelView.style.display = 'none';
+    if (fileBadge) fileBadge.style.display = 'none';
+    stopPanelLogAutoRefresh();
+    if (window.isXkeenRunning) {
+      reRenderLogs();
+    }
+  } else {
+    if (coreView) coreView.style.display = 'none';
+    if (panelView) panelView.style.display = 'block';
+    if (fileBadge) fileBadge.style.display = 'block';
+    initPanelLogConsoleEvents();
+    fetchAndRenderPanelLogs(false);
+    startPanelLogAutoRefresh();
+  }
+}
+
+function setPanelLogLevel(level) {
+  activePanelLogLevel = level || 'all';
+
+  const buttons = document.querySelectorAll('#panel-log-level-tabs .log-level-btn');
+  buttons.forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.panelLevel === activePanelLogLevel);
+  });
+
+  renderPanelLogsList();
+}
+
+async function fetchAndRenderPanelLogs(isManual = false) {
+  const consoleEl = document.getElementById('panel-log-console');
+  try {
+    const res = await fetch('/api/system/panel-logs?tail=800');
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    if (!data.success) throw new Error(data.error || 'Ошибка получения логов');
+
+    // Обновляем информацию о файле и пути
+    const linuxPathEl = document.getElementById('txt-panel-log-linux-path');
+    const smbPathEl = document.getElementById('txt-panel-log-smb-path');
+    const fileSizeEl = document.getElementById('panel-log-file-size');
+
+    if (linuxPathEl && data.file_path) linuxPathEl.textContent = data.file_path;
+    if (smbPathEl && data.smb_path) smbPathEl.textContent = data.smb_path;
+    if (fileSizeEl && data.formatted_size) fileSizeEl.textContent = data.formatted_size;
+
+    panelLogsCache = data.logs || [];
+    renderPanelLogsList();
+
+    if (isManual) {
+      showToast('Журнал веб-панели обновлен', 'success');
+    }
+  } catch (err) {
+    console.error('Failed to fetch panel logs:', err);
+    if (consoleEl && panelLogsCache.length === 0) {
+      consoleEl.innerHTML = `<div style="color: var(--danger); padding: 20px; text-align: center;">Ошибка загрузки логов панели: ${escapePanelHtml(err.message)}</div>`;
+    }
+    if (isManual) {
+      showToast('Ошибка при загрузке логов: ' + err.message, 'error');
+    }
+  }
+}
+
+function renderPanelLogsList() {
+  const consoleEl = document.getElementById('panel-log-console');
+  if (!consoleEl) return;
+
+  const searchInput = document.getElementById('panel-log-search-box');
+  const query = searchInput ? searchInput.value.toLowerCase().trim() : '';
+
+  const filtered = panelLogsCache.filter(item => {
+    // Level filter
+    const lvl = (item.level || 'INFO').toUpperCase();
+    if (activePanelLogLevel === 'error') {
+      if (lvl !== 'ERROR') return false;
+    } else if (activePanelLogLevel === 'warn') {
+      if (lvl !== 'WARN' && lvl !== 'ERROR') return false;
+    } else if (activePanelLogLevel === 'info') {
+      if (lvl !== 'INFO' && lvl !== 'WARN' && lvl !== 'ERROR') return false;
+    }
+
+    // Search query filter
+    if (query) {
+      const msg = (item.message || '').toLowerCase();
+      const raw = (item.raw || '').toLowerCase();
+      if (!msg.includes(query) && !raw.includes(query)) return false;
+    }
+
+    return true;
+  });
+
+  if (filtered.length === 0) {
+    consoleEl.innerHTML = '<div style="color: var(--text-muted); padding: 30px; text-align: center;">Логи отсутствуют или не соответствуют фильтру</div>';
+    return;
+  }
+
+  const html = filtered.map(item => {
+    const lvl = (item.level || 'INFO').toUpperCase();
+    const lvlClass = lvl.toLowerCase();
+    const timeStr = item.timestamp || '';
+    const safeMsg = escapePanelHtml(item.message || item.raw || '');
+
+    return `<div class="panel-log-row log-${lvlClass}">` +
+             `<span class="panel-log-time">${timeStr}</span>` +
+             `<span class="panel-log-badge ${lvlClass}">[${lvl}]</span>` +
+             `<span class="panel-log-msg">${safeMsg}</span>` +
+           `</div>`;
+  }).join('');
+
+  consoleEl.innerHTML = html;
+
+  // Autoscroll check
+  const autoscrollCb = document.getElementById('panel-log-autoscroll');
+  const canScroll = !autoscrollCb || autoscrollCb.checked;
+  if (canScroll && !userScrolledUpPanelLog) {
+    consoleEl.scrollTop = consoleEl.scrollHeight;
+  }
+}
+
+function initPanelLogConsoleEvents() {
+  const consoleEl = document.getElementById('panel-log-console');
+  if (!consoleEl || consoleEl.dataset.eventsAttached === 'true') return;
+
+  consoleEl.dataset.eventsAttached = 'true';
+  consoleEl.addEventListener('scroll', () => {
+    const threshold = 30; // px tolerance
+    const isAtBottom = (consoleEl.scrollHeight - consoleEl.scrollTop - consoleEl.clientHeight) < threshold;
+
+    const autoscrollCb = document.getElementById('panel-log-autoscroll');
+    if (isAtBottom) {
+      userScrolledUpPanelLog = false;
+      if (autoscrollCb) autoscrollCb.checked = true;
+    } else {
+      userScrolledUpPanelLog = true;
+      if (autoscrollCb) autoscrollCb.checked = false;
+    }
+  });
+
+  const autoscrollCb = document.getElementById('panel-log-autoscroll');
+  if (autoscrollCb) {
+    autoscrollCb.onchange = function() {
+      if (this.checked) {
+        userScrolledUpPanelLog = false;
+        consoleEl.scrollTop = consoleEl.scrollHeight;
+      } else {
+        userScrolledUpPanelLog = true;
+      }
+    };
+  }
+
+  const autorefreshCb = document.getElementById('panel-log-autorefresh');
+  if (autorefreshCb) {
+    autorefreshCb.onchange = function() {
+      if (this.checked) {
+        startPanelLogAutoRefresh();
+      } else {
+        stopPanelLogAutoRefresh();
+      }
+    };
+  }
+}
+
+function startPanelLogAutoRefresh() {
+  stopPanelLogAutoRefresh();
+  panelLogsAutoRefreshInterval = setInterval(() => {
+    if (activeLogSource === 'panel' && currentTab === 'logs') {
+      const autorefreshCb = document.getElementById('panel-log-autorefresh');
+      if (!autorefreshCb || autorefreshCb.checked) {
+        fetchAndRenderPanelLogs(false);
+      }
+    }
+  }, 3500);
+}
+
+function stopPanelLogAutoRefresh() {
+  if (panelLogsAutoRefreshInterval) {
+    clearInterval(panelLogsAutoRefreshInterval);
+    panelLogsAutoRefreshInterval = null;
+  }
+}
+
+function copyPanelLogPath() {
+  const smbPath = '\\\\Netcraze-9884\\opkg\\root\\vpn_updater\\logs\\panel.log';
+  if (navigator.clipboard && window.isSecureContext) {
+    navigator.clipboard.writeText(smbPath).then(() => {
+      showToast('Сетевой путь к panel.log скопирован в буфер обмена!', 'success');
+    }).catch(() => fallbackCopy(smbPath));
+  } else {
+    fallbackCopy(smbPath);
+  }
+
+  function fallbackCopy(text) {
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-9999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    try {
+      document.execCommand('copy');
+      showToast('Сетевой путь к panel.log скопирован в буфер обмена!', 'success');
+    } catch (err) {
+      showToast('Путь: ' + text, 'info');
+    }
+    document.body.removeChild(textArea);
+  }
+}
+
+function downloadPanelLogFile() {
+  const link = document.createElement('a');
+  link.href = '/api/system/panel-logs/download';
+  link.download = 'panel.log';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  showToast('Скачивание файла журнала panel.log началось', 'success');
+}
+
+async function clearPanelLogs() {
+  if (!confirm('Вы действительно хотите очистить файл журнала веб-панели (panel.log)?')) {
+    return;
+  }
+
+  try {
+    const res = await fetch('/api/system/panel-logs/clear', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+    if (res.ok && data.success) {
+      panelLogsCache = [];
+      renderPanelLogsList();
+      const fileSizeEl = document.getElementById('panel-log-file-size');
+      if (fileSizeEl) fileSizeEl.textContent = '0 KB';
+      showToast('Журнал веб-панели успешно очищен', 'success');
+    } else {
+      showToast('Ошибка очистки логов: ' + (data.error || 'Неизвестная ошибка'), 'error');
+    }
+  } catch (err) {
+    console.error('Failed to clear panel logs:', err);
+    showToast('Сбой запроса очистки: ' + err.message, 'error');
+  }
+}
+
+function onLogsTabActivated() {
+  if (activeLogSource === 'panel') {
+    initPanelLogConsoleEvents();
+    fetchAndRenderPanelLogs(false);
+    startPanelLogAutoRefresh();
+  } else {
+    stopPanelLogAutoRefresh();
+    if (window.isXkeenRunning) {
+      reRenderLogs();
+    }
+  }
+}
+
+// Window exports
+window.switchLogSource = switchLogSource;
+window.setPanelLogLevel = setPanelLogLevel;
+window.fetchAndRenderPanelLogs = fetchAndRenderPanelLogs;
+window.renderPanelLogsList = renderPanelLogsList;
+window.copyPanelLogPath = copyPanelLogPath;
+window.downloadPanelLogFile = downloadPanelLogFile;
+window.clearPanelLogs = clearPanelLogs;
+window.onLogsTabActivated = onLogsTabActivated;
 
 
 function getFlagEmoji(countryCode) {

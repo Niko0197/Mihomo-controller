@@ -40,11 +40,13 @@
         <!-- Блок версий панели и ядра -->
         <div class="sys-card-versions">
           <div class="sys-version-row panel-row" id="panel-version-info" onclick="switchTab('updates')" title="Нажмите для управления обновлениями веб-панели">
-            <span class="version-label">Версия: <strong id="panel-version-val">...</strong></span>
+            <span class="version-label">Панель: <strong id="panel-version-val">...</strong></span>
+            <span class="update-pulse-badge" id="panel-update-badge" style="display: none;">⬆️ Обновить</span>
             <span class="branch-badge" id="panel-branch-val">...</span>
           </div>
           <div class="sys-version-row core-row" id="core-version-info" onclick="openMihomoUpdateModal()" title="Нажмите для управления обновлениями ядра Mihomo">
             <span class="version-label">Ядро: <strong id="core-version-val">Загрузка...</strong></span>
+            <span class="update-pulse-badge core-pulse-badge" id="core-update-badge" style="display: none;">⬆️ Обновить</span>
           </div>
         </div>
 
@@ -117,7 +119,7 @@
         <button class="tab-btn" id="tab-btn-traffic" onclick="switchTab('traffic')">📊 Трафик</button>
         <button class="tab-btn" id="tab-btn-connections" onclick="switchTab('connections')">🔌 Соединения</button>
         <button class="tab-btn" id="tab-btn-packet-monitor" onclick="switchTab('packet-monitor')">📦 Пакеты</button>
-        <button class="tab-btn" id="tab-btn-logs" onclick="switchTab('logs')">📋 Логи ядра</button>
+        <button class="tab-btn" id="tab-btn-logs" onclick="switchTab('logs')">📋 Журнал и логи</button>
         <button class="tab-btn" id="tab-btn-trace" onclick="switchTab('trace')">🛰️ Трассировка</button>
 
         <div class="nav-section-title">НАСТРОЙКИ</div>
@@ -125,6 +127,7 @@
         <button class="tab-btn" id="tab-btn-dpi" onclick="switchTab('dpi')">⚡ Тюнер DPI (ByeDPI)</button>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
+        <button class="tab-btn" id="tab-btn-updates" onclick="switchTab('updates')">🔄 Обновления <span class="nav-update-dot" id="nav-update-dot" style="display: none;"></span></button>
 
         <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
         <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
@@ -647,9 +650,21 @@
       </div>
     </div>
 
-    <!-- Вкладка 10: Логи ядра -->
+    <!-- Вкладка 10: Логи (Ядро и Веб-панель) -->
     <div id="tab-content-logs" class="tab-content">
-      <div class="card">
+      <!-- Переключатель источника логов: Ядро Mihomo / Веб-панель -->
+      <div class="logs-source-container" style="margin-bottom: 16px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px;">
+        <div class="segmented-control" id="logs-source-segmented" style="max-width: 440px;">
+          <button class="segmented-btn active" id="btn-log-source-core" onclick="switchLogSource('core')">📋 Ядро Mihomo</button>
+          <button class="segmented-btn" id="btn-log-source-panel" onclick="switchLogSource('panel')">💻 Веб-панель (Контроллер)</button>
+        </div>
+        <div id="panel-log-file-badge" style="display: none; font-size: 0.82rem; color: var(--text-muted); background: rgba(255,255,255,0.04); border: 1px solid var(--border-color); padding: 6px 12px; border-radius: 8px;">
+          📁 Файл: <code style="color: #64b5f6;">/opt/root/vpn_updater/logs/panel.log</code>
+        </div>
+      </div>
+
+      <!-- 1. Секция логов ЯДРА MIHOMO (существующая) -->
+      <div class="card" id="core-logs-view">
         <div class="card-title">
           <span>📋 Системные логи ядра Mihomo</span>
           <div style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap;">
@@ -669,7 +684,7 @@
 
         <div class="controls-row" style="margin-bottom: 15px;">
           <div class="search-wrapper">
-            <input type="text" class="search-input" id="log-search-box" placeholder="Фильтр по ключевым словам в логах...">
+            <input type="text" class="search-input" id="log-search-box" placeholder="Фильтр по ключевым словам в логах ядра...">
           </div>
         </div>
 
@@ -678,6 +693,60 @@
           <div class="console-terminal" id="log-console-info"></div>
           <div class="console-terminal" id="log-console-warning" style="display: none;"></div>
           <div class="console-terminal" id="log-console-error" style="display: none;"></div>
+        </div>
+      </div>
+
+      <!-- 2. Секция логов ВЕБ-ПАНЕЛИ (Новая) -->
+      <div class="card" id="panel-logs-view" style="display: none;">
+        <!-- Карточка путей к файлу на роутере и в сети -->
+        <div class="log-path-banner" style="margin-bottom: 18px; padding: 12px 16px; background: rgba(33, 150, 243, 0.08); border: 1px solid rgba(33, 150, 243, 0.25); border-radius: 10px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+          <div style="font-size: 0.85rem; display: flex; flex-direction: column; gap: 4px;">
+            <div>
+              <span style="color: var(--text-muted);">📁 Путь на роутере:</span>
+              <code id="txt-panel-log-linux-path" style="color: #90caf9; user-select: all; font-weight: 500;">/opt/root/vpn_updater/logs/panel.log</code>
+            </div>
+            <div>
+              <span style="color: var(--text-muted);">📂 Сетевой доступ (SMB):</span>
+              <code id="txt-panel-log-smb-path" style="color: #a5d6a7; user-select: all; font-weight: 500;">\\Netcraze-9884\opkg\root\vpn_updater\logs\panel.log</code>
+            </div>
+          </div>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <span id="panel-log-file-size" style="font-size: 0.8rem; color: var(--text-muted); background: rgba(255,255,255,0.06); padding: 4px 8px; border-radius: 6px;">0 KB</span>
+            <button class="btn btn-sm" onclick="copyPanelLogPath()" title="Скопировать сетевой путь" style="font-size: 0.8rem; padding: 5px 10px;">📋 Копировать путь</button>
+          </div>
+        </div>
+
+        <div class="card-title">
+          <span>💻 Журнал событий веб-панели (Node.js)</span>
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <div class="log-level-tabs" id="panel-log-level-tabs">
+              <button class="log-level-btn active" data-panel-level="all" onclick="setPanelLogLevel('all')">Все</button>
+              <button class="log-level-btn" data-panel-level="info" onclick="setPanelLogLevel('info')">Info</button>
+              <button class="log-level-btn" data-panel-level="warn" onclick="setPanelLogLevel('warn')">Warning</button>
+              <button class="log-level-btn" data-panel-level="error" onclick="setPanelLogLevel('error')">Error</button>
+            </div>
+            <label style="font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;">
+              <input type="checkbox" id="panel-log-autoscroll" checked> Автопрокрутка
+            </label>
+            <label style="font-size: 0.85rem; color: var(--text-muted); display: flex; align-items: center; gap: 6px; cursor: pointer; user-select: none;" title="Автоматически обновлять логи каждые 3 секунды">
+              <input type="checkbox" id="panel-log-autorefresh" checked> Авто-обновление
+            </label>
+            <button class="btn btn-primary" style="font-size: 0.85rem; padding: 6px 14px;" id="btn-download-panel-log" onclick="downloadPanelLogFile()">📥 Скачать panel.log</button>
+            <button class="btn" style="font-size: 0.85rem; padding: 6px 12px;" id="btn-refresh-panel-log" onclick="fetchAndRenderPanelLogs(true)">🔄 Обновить</button>
+            <button class="btn" style="font-size: 0.85rem; padding: 6px 12px;" id="btn-clear-panel-log" onclick="clearPanelLogs()">🗑️ Очистить</button>
+          </div>
+        </div>
+
+        <div class="controls-row" style="margin-bottom: 15px;">
+          <div class="search-wrapper">
+            <input type="text" class="search-input" id="panel-log-search-box" placeholder="Фильтр по событиям панели (запросы, обновления, клиенты, ошибки)..." oninput="renderPanelLogsList()">
+          </div>
+        </div>
+
+        <div class="console-wrapper">
+          <div class="console-terminal" id="panel-log-console" style="min-height: 480px; max-height: 600px; font-family: 'SF Mono', Consolas, Monaco, monospace; font-size: 0.86rem; line-height: 1.5; padding: 12px; background: #0c1017; border-radius: 8px; overflow-y: auto; color: #e6edf3;">
+            <div style="color: var(--text-muted); padding: 20px; text-align: center;">Загрузка журнала панели...</div>
+          </div>
         </div>
       </div>
     </div>
@@ -1200,25 +1269,43 @@
     <div id="tab-content-updates" class="tab-content">
       <div class="card">
         <div class="card-title">
-          <span>🔄 Управление версиями и обновлениями</span>
+          <span>🔄 Управление версиями и обновлениями веб-панели</span>
+          <button class="btn btn-sm" onclick="checkForUpdates(true)" style="font-size: 0.8rem; padding: 5px 12px;">🔍 Проверить обновления</button>
         </div>
-        
-        <div class="controls-row" style="margin-bottom: 24px; gap: 20px; flex-wrap: wrap;">
-          <div style="display: flex; align-items: center; gap: 10px;">
-            <label style="font-weight: 500; font-size: 0.9rem; color: var(--text-muted);">Ветка обновлений:</label>
-            <select id="update-branch-select" style="background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 6px; padding: 6px 12px; font-size: 0.9rem; font-family: var(--font-inter); outline: none; height: 38px;">
-              <option value="main">main (стабильная)</option>
-              <option value="Dev">Dev (разработка)</option>
-            </select>
-            <button class="btn btn-primary" style="font-size: 0.85rem; padding: 6px 14px; height: 38px;" onclick="changeUpdateBranch()">Применить ветку</button>
-          </div>
-          
-          <div style="flex-grow: 1; text-align: right; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
-            <span style="font-size: 0.85rem; color: var(--text-muted);">Текущая ветка: <strong id="active-branch-label" class="selectable">...</strong></span>
+
+        <!-- Hero Update Banner -->
+        <div id="panel-update-hero" class="update-hero-banner up-to-date" style="margin-bottom: 20px;">
+          <div class="update-hero-content">
+            <div class="update-hero-icon" id="panel-hero-icon">✅</div>
+            <div class="update-hero-info">
+              <div class="update-hero-title" id="panel-hero-title">У вас установлена актуальная версия панели</div>
+              <div class="update-hero-desc" id="panel-hero-desc">Текущая версия: v1.9.0 • Система не требует обновления</div>
+            </div>
+            <div class="update-hero-actions" id="panel-hero-actions" style="display: none;">
+              <button class="btn btn-primary btn-glow" id="btn-hero-update-panel" onclick="installLatestAvailable()">🚀 Обновить в 1 клик</button>
+            </div>
           </div>
         </div>
 
-        <h3 style="margin-bottom: 12px; font-size: 1.1rem; font-weight: 600; color: var(--text); font-family: var(--font-outfit);">Доступные версии (коммиты):</h3>
+        <!-- Segmented Mode Control: Main vs All -->
+        <div class="controls-row" style="margin-bottom: 20px; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
+          <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+            <label style="font-weight: 600; font-size: 0.88rem; color: var(--text-muted);">Канал обновлений:</label>
+            <div class="segmented-control" id="channel-mode-segmented" style="max-width: 380px;">
+              <button class="segmented-btn active" id="mode-btn-main" onclick="setUpdateChannelMode('main')">🛡️ Main (Стабильные)</button>
+              <button class="segmented-btn" id="mode-btn-all" onclick="setUpdateChannelMode('all')">⚡ Все версии и Dev</button>
+            </div>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 10px;">
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Текущая ветка: <strong id="active-branch-label" class="selectable" style="color: #64b5f6;">...</strong></span>
+            <button class="btn btn-sm" onclick="loadVersionsList(true)" style="font-size: 0.82rem; padding: 5px 12px;">🔄 Обновить список</button>
+          </div>
+        </div>
+
+        <h3 style="margin-bottom: 12px; font-size: 1.05rem; font-weight: 600; color: var(--text); font-family: var(--font-outfit);">
+          Доступные выпуски и версии:
+        </h3>
         
         <div id="versions-list-container" class="versions-list">
           <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка списка версий с роутера...</div>
@@ -1242,18 +1329,34 @@
           <svg class="modal-title-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>
           </svg>
-          <span>Обновление Mihomo</span>
+          <span>Обновление ядра Mihomo</span>
         </div>
         <button class="modal-close-btn" onclick="closeMihomoUpdateModal()">
           <svg viewBox="0 0 24 24"><path fill="currentColor" d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
         </button>
       </div>
+
+      <!-- Core Status Hero -->
+      <div id="core-update-hero" class="update-hero-banner up-to-date" style="margin: 0 20px 14px 20px;">
+        <div class="update-hero-content">
+          <div class="update-hero-icon" id="core-hero-icon">✅</div>
+          <div class="update-hero-info">
+            <div class="update-hero-title" id="core-hero-title">Ядро актуально</div>
+            <div class="update-hero-desc" id="core-hero-desc">Текущая версия ядра активна и работает стабильно</div>
+          </div>
+          <div class="update-hero-actions" id="core-hero-actions" style="display: none;">
+            <button class="btn btn-primary btn-sm btn-glow" onclick="installLatestCoreAvailable()">⬆️ Обновить ядро</button>
+          </div>
+        </div>
+      </div>
       
-      <div class="modal-subheader">
-        <span class="subheader-text">Выберите версию для установки</span>
+      <div class="modal-subheader" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin: 0 20px 12px 20px;">
+        <div class="segmented-control segmented-control-sm" style="max-width: 340px;">
+          <button class="segmented-btn active" id="btn-core-mode-main" onclick="setCoreReleasesFilter('main')">🛡️ Стабильные (Stable)</button>
+          <button class="segmented-btn" id="btn-core-mode-all" onclick="setCoreReleasesFilter('all')">⚡ Все (включая Alpha)</button>
+        </div>
         <div class="github-badge-container">
-          <span class="github-label">GitHub</span>
-          <span class="github-count">10</span>
+          <span class="github-label">GitHub Releases</span>
         </div>
       </div>
       

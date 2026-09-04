@@ -3,6 +3,8 @@ const https = require('https');
 const fs = require('fs');
 const zlib = require('zlib');
 const path = require('path');
+const panelLogger = require('./panel_logger');
+panelLogger.initLogger();
 const yamlUtils = require('./yaml_utils');
 const systemStats = require('./system_stats');
 const clientsManager = require('./clients_manager');
@@ -3431,22 +3433,177 @@ function handleServerRestart(req, res) {
   }
 }
 
-// GET /api/system/versions
-function handleGetVersions(req, res) {
-  const { exec } = require('child_process');
-  
+// Helper for parsing semver string: major.minor.patch
+function parseSemver(verStr) {
+  if (!verStr) return null;
+  const clean = String(verStr).trim().replace(/^v/i, '');
+  const match = clean.match(/^(\d+)\.(\d+)(?:\.(\d+))?(?:-([a-zA-Z0-9.]+))?/);
+  if (!match) return null;
+  return {
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: match[3] !== undefined ? parseInt(match[3], 10) : 0,
+    prerelease: match[4] || ''
+  };
+}
+
+// Compare two semver strings: returns 1 if v1 > v2, -1 if v1 < v2, 0 if equal
+function compareSemver(v1, v2) {
+  const p1 = parseSemver(v1);
+  const p2 = parseSemver(v2);
+  if (!p1 && !p2) return 0;
+  if (!p1) return -1;
+  if (!p2) return 1;
+
+  if (p1.major !== p2.major) return p1.major - p2.major;
+  if (p1.minor !== p2.minor) return p1.minor - p2.minor;
+  if (p1.patch !== p2.patch) return p1.patch - p2.patch;
+
+  if (!p1.prerelease && p2.prerelease) return 1;
+  if (p1.prerelease && !p2.prerelease) return -1;
+  if (p1.prerelease && p2.prerelease) {
+    return p1.prerelease.localeCompare(p2.prerelease);
+  }
+  return 0;
+}
+
+function getPanelVersionData() {
+  try {
+    const vPath = path.join(__dirname, 'public', 'version.json');
+    if (fs.existsSync(vPath)) {
+      return JSON.parse(fs.readFileSync(vPath, 'utf8'));
+    }
+  } catch (e) {}
+  return { version: '1.0.0', branch: 'main' };
+}
+
+function parseLogLines(logText, tagMap, branch) {
+  const lines = logText.split('\n').filter(line => line.trim().length > 0);
+  const commits = [];
+  for (const line of lines) {
+    const parts = line.split('|');
+    if (parts.length < 4) continue;
+    const sha = parts[0].trim();
+    const date = parts[1].trim();
+    const author = parts[2].trim();
+    const message = parts.slice(3).join('|').trim();
+
+    if (/^merge (branch|remote-tracking branch|pull request)/i.test(message)) {
+      continue;
+    }
+
+    let version = '';
+    let isDev = false;
+
+    if (tagMap[sha]) {
+      version = tagMap[sha];
+    } else {
+      const releaseMatch = message.match(/release:\s*v?(\d+\.\d+(?:\.\d+)?)/i);
+      if (releaseMatch) {
+        version = 'v' + releaseMatch[1];
+      } else {
+        version = sha.substring(0, 7);
+        isDev = true;
+      }
+    }
+
+    if (version && !version.startsWith('v') && /^\d/.test(version)) {
+      version = 'v' + version;
+    }
+
+    commits.push({
+      sha,
+      version: version || sha.substring(0, 7),
+      branch: branch || '',
+      date,
+      author,
+      message,
+      isDev: isDev || !tagMap[sha],
+      changes: [message]
+    });
+  }
+  return commits;
+}
+
+function processAndSendVersions(res, currentBranch, currentHeadSha, targetBranch, targetCommitCount, mode) {
+  const { execSync } = require('child_process');
+  try {
+    const tagMap = {};
+    try {
+      const tagsRaw = execSync('git tag -l --format="%(objectname)|%(refname:short)"', { cwd: __dirname }).toString().trim();
+      if (tagsRaw) {
+        tagsRaw.split('\n').forEach(tLine => {
+          const [tSha, tName] = tLine.split('|');
+          if (tSha && tName) {
+            tagMap[tSha.trim()] = tName.trim();
+          }
+        });
+      }
+    } catch (e) {}
+
+    let logCmd = '';
+    if (mode === 'main') {
+      logCmd = `git log origin/main --no-merges -n ${targetCommitCount} --date=short --format="%H|%ad|%an|%s"`;
+    } else {
+      logCmd = `git log origin/${targetBranch} -n ${targetCommitCount} --date=short --format="%H|%ad|%an|%s"`;
+    }
+
+    let logStdout = '';
+    try {
+      logStdout = execSync(logCmd, { cwd: __dirname }).toString().trim();
+    } catch (e) {
+      logStdout = execSync(`git log -n ${targetCommitCount} --date=short --format="%H|%ad|%an|%s"`, { cwd: __dirname }).toString().trim();
+    }
+
+    let commits = parseLogLines(logStdout, tagMap, targetBranch);
+
+    if (mode === 'main') {
+      commits = commits.filter(c => !c.isDev || tagMap[c.sha] || /^v?\d+\.\d+(\.\d+)?$/i.test(c.version));
+      if (commits.length === 0) {
+        commits = parseLogLines(logStdout, tagMap, targetBranch).slice(0, 15);
+      }
+    }
+
+    const panelData = getPanelVersionData();
+    const curPanelVer = panelData.version.startsWith('v') ? panelData.version : 'v' + panelData.version;
+
+    commits.forEach(c => {
+      c.current = (c.sha === currentHeadSha) || (c.version === curPanelVer);
+    });
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      success: true,
+      branch: currentBranch,
+      targetBranch,
+      mode,
+      currentVersion: curPanelVer,
+      currentSha: currentHeadSha,
+      commits
+    }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: 'processAndSendVersions error: ' + err.message }));
+  }
+}
+
+// GET /api/system/versions?mode=main|all
+function handleGetVersions(req, res, urlObj) {
+  const { exec, execSync } = require('child_process');
+  const mode = (urlObj && urlObj.searchParams && urlObj.searchParams.get('mode')) || 'main';
+
   exec('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }, (err, stdoutBranch) => {
     if (err) {
       if (err.message.includes('not found') || err.message.includes('ENOENT')) {
         console.log('[VPN Web Controller] Git not found. Installing git via opkg...');
-        exec('/opt/bin/opkg update && /opt/bin/opkg install git-http', (errInstall, stdoutInstall) => {
+        exec('/opt/bin/opkg update && /opt/bin/opkg install git-http', (errInstall) => {
           if (errInstall) {
             res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
             res.end(JSON.stringify({ success: false, error: 'Failed to auto-install git: ' + errInstall.message }));
             return;
           }
           console.log('[VPN Web Controller] Git installed successfully. Retrying versions request...');
-          handleGetVersions(req, res);
+          handleGetVersions(req, res, urlObj);
         });
         return;
       }
@@ -3454,137 +3611,20 @@ function handleGetVersions(req, res) {
       res.end(JSON.stringify({ success: false, error: err.message }));
       return;
     }
-    const currentBranch = stdoutBranch.trim();
-    
-    exec('git fetch origin ' + currentBranch, { cwd: __dirname }, (errFetch) => {
-      exec('git log origin/' + currentBranch + ' -n 60 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLog, stdoutLog) => {
-        if (errLog) {
-          exec('git log -n 60 --date=short --format="%H|%ad|%an|%s"', { cwd: __dirname }, (errLocalLog, stdoutLocalLog) => {
-            if (errLocalLog) {
-              res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-              res.end(JSON.stringify({ success: false, error: errLocalLog.message }));
-              return;
-            }
-            parseAndSendCommits(stdoutLocalLog, currentBranch, res);
-          });
-          return;
-        }
-        parseAndSendCommits(stdoutLog, currentBranch, res);
-      });
-    });
-  });
-}
 
-function parseAndSendCommits(logStdout, branch, res) {
-  try {
-    const { execSync } = require('child_process');
-    const lines = logStdout.split('\n').filter(line => line.trim().length > 0);
-    const commits = [];
-    
+    const currentBranch = stdoutBranch.trim() || 'main';
     let currentHeadSha = '';
     try {
       currentHeadSha = execSync('git rev-parse HEAD', { cwd: __dirname }).toString().trim();
     } catch (e) {}
 
-    // Хелпер для определения стабильной версии релиза
-    const isStableVersion = (verStr) => {
-      if (!verStr) return false;
-      const clean = verStr.startsWith('v') ? verStr.substring(1) : verStr;
-      return /^\d+\.\d+(\.\d+)?$/.test(clean);
-    };
+    const targetBranch = mode === 'main' ? 'main' : (currentBranch === 'main' ? 'Dev' : currentBranch);
+    const targetCommitCount = mode === 'main' ? 40 : 80;
 
-    for (const line of lines) {
-      const parts = line.split('|');
-      if (parts.length < 4) continue;
-      const sha = parts[0];
-      const date = parts[1];
-      const author = parts[2];
-      const message = parts[3];
-      
-      let versionNum = '';
-      let commitBranch = '';
-      
-      const releaseMsgMatch = message.match(/release:\s*v?(\d+\.\d+\.\d+)/i);
-      if (releaseMsgMatch) {
-        versionNum = releaseMsgMatch[1];
-      } else {
-        try {
-          const versionJsonStr = execSync('git show ' + sha + ':public/version.json', { cwd: __dirname, stdio: ['pipe', 'pipe', 'ignore'] }).toString().trim();
-          const versionData = JSON.parse(versionJsonStr);
-          versionNum = versionData.version || sha.substring(0, 7);
-          commitBranch = versionData.branch || '';
-        } catch (e) {
-          versionNum = sha.substring(0, 7);
-        }
-      }
-      
-      versionNum = String(versionNum);
-      const displayVersion = versionNum.startsWith('v') ? versionNum : 'v' + versionNum;
-      
-      commits.push({
-        sha,
-        version: displayVersion,
-        branch: commitBranch,
-        date,
-        author,
-        message,
-        current: sha === currentHeadSha
-      });
-    }
-
-    // Заполнение списков изменений для каждого коммита
-    for (let i = 0; i < commits.length; i++) {
-      const c = commits[i];
-      const isStable = isStableVersion(c.version);
-      
-      if (isStable) {
-        // Находим предыдущий стабильный релиз
-        let prevReleaseSha = '';
-        for (let j = i + 1; j < commits.length; j++) {
-          if (isStableVersion(commits[j].version)) {
-            prevReleaseSha = commits[j].sha;
-            break;
-          }
-        }
-        
-        let changes = [];
-        try {
-          let gitCmd = '';
-          if (prevReleaseSha) {
-            gitCmd = `git log ${prevReleaseSha}..${c.sha} --format="%s"`;
-          } else {
-            // Для самого первого релиза берем 10 предыдущих коммитов
-            gitCmd = `git log ${c.sha} -n 10 --format="%s"`;
-          }
-          const changesStr = execSync(gitCmd, { cwd: __dirname }).toString().trim();
-          changes = changesStr.split('\n')
-            .map(line => line.trim())
-            .filter(line => {
-              if (line.length === 0) return false;
-              const lower = line.toLowerCase();
-              return !lower.startsWith('release:') && !lower.includes('bump version') && !lower.startsWith('version') && !lower.startsWith('local:');
-            });
-        } catch (e) {
-          changes = [c.message];
-        }
-        c.changes = changes;
-      } else {
-        // Dev-коммиты просто показывают свое сообщение
-        const lower = c.message.toLowerCase();
-        if (lower.startsWith('release:') || lower.includes('bump version') || lower.startsWith('version') || lower.startsWith('local:')) {
-          c.changes = [];
-        } else {
-          c.changes = [c.message];
-        }
-      }
-    }
-    
-    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: true, branch, commits }));
-  } catch (err) {
-    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: false, error: 'parseAndSendCommits error: ' + err.message }));
-  }
+    exec(`git fetch origin ${targetBranch} --tags`, { cwd: __dirname }, () => {
+      processAndSendVersions(res, currentBranch, currentHeadSha, targetBranch, targetCommitCount, mode);
+    });
+  });
 }
 
 // POST /api/system/update
@@ -3831,92 +3871,272 @@ function downloadAndDecompress(url, destPath) {
 let cachedMihomoReleases = null;
 let cachedMihomoReleasesTime = 0;
 
+function getMihomoReleasesList() {
+  return new Promise((resolve, reject) => {
+    const now = Date.now();
+    if (cachedMihomoReleases && (now - cachedMihomoReleasesTime < 15 * 60 * 1000)) {
+      return resolve(cachedMihomoReleases);
+    }
+
+    const options = {
+      hostname: 'api.github.com',
+      path: '/repos/MetaCubeX/mihomo/releases?per_page=30',
+      method: 'GET',
+      headers: {
+        'User-Agent': 'Mihomo-Controller-Updater/1.0'
+      },
+      timeout: 8000
+    };
+
+    const githubReq = https.request(options, (githubRes) => {
+      let data = '';
+      githubRes.on('data', chunk => data += chunk);
+      githubRes.on('end', () => {
+        try {
+          if (githubRes.statusCode !== 200) {
+            throw new Error(`GitHub API returned status ${githubRes.statusCode}`);
+          }
+          const releasesList = JSON.parse(data);
+          const parsedReleases = [];
+          const sysArch = getCpuArchitecture();
+
+          for (const rel of releasesList) {
+            const bestAsset = findBestAsset(rel.assets || [], sysArch);
+            const isPre = Boolean(rel.prerelease || /alpha|beta|rc|dev/i.test(rel.tag_name));
+            parsedReleases.push({
+              tag_name: rel.tag_name,
+              name: rel.name || rel.tag_name,
+              prerelease: isPre,
+              published_at: rel.published_at,
+              body: rel.body,
+              changes: parseReleaseBody(rel.body),
+              download_url: bestAsset ? bestAsset.browser_download_url : null,
+              asset_name: bestAsset ? bestAsset.name : null
+            });
+          }
+
+          cachedMihomoReleases = parsedReleases;
+          cachedMihomoReleasesTime = now;
+          resolve(parsedReleases);
+        } catch (err) {
+          if (cachedMihomoReleases) resolve(cachedMihomoReleases);
+          else reject(err);
+        }
+      });
+    });
+
+    githubReq.on('error', (err) => {
+      if (cachedMihomoReleases) resolve(cachedMihomoReleases);
+      else reject(err);
+    });
+
+    githubReq.on('timeout', () => {
+      githubReq.destroy();
+      if (cachedMihomoReleases) resolve(cachedMihomoReleases);
+      else reject(new Error('GitHub API request timeout'));
+    });
+
+    githubReq.end();
+  });
+}
+
 // GET /api/mihomo/releases
-function handleGetMihomoReleases(req, res) {
-  const now = Date.now();
-  if (cachedMihomoReleases && (now - cachedMihomoReleasesTime < 15 * 60 * 1000)) {
+async function handleGetMihomoReleases(req, res) {
+  try {
+    const releases = await getMihomoReleasesList();
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases }));
-    return;
+    res.end(JSON.stringify({ success: true, releases }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
   }
+}
+
+// GET /api/system/check-updates?mode=main|all
+async function handleCheckUpdates(req, res, urlObj) {
+  const mode = (urlObj && urlObj.searchParams && urlObj.searchParams.get('mode')) || 'main';
+  const { execSync } = require('child_process');
+
+  const panelData = getPanelVersionData();
+  const currentPanelVersion = panelData.version.startsWith('v') ? panelData.version : 'v' + panelData.version;
   
-  const options = {
-    hostname: 'api.github.com',
-    path: '/repos/MetaCubeX/mihomo/releases?per_page=30',
-    method: 'GET',
-    headers: {
-      'User-Agent': 'Mihomo-Controller-Updater/1.0'
-    },
-    timeout: 8000
-  };
-  
-  const githubReq = https.request(options, (githubRes) => {
-    let data = '';
-    githubRes.on('data', chunk => data += chunk);
-    githubRes.on('end', () => {
+  let currentBranch = 'main';
+  let currentHeadSha = '';
+  try {
+    currentBranch = execSync('git rev-parse --abbrev-ref HEAD', { cwd: __dirname }).toString().trim();
+    currentHeadSha = execSync('git rev-parse HEAD', { cwd: __dirname }).toString().trim();
+  } catch (e) {}
+
+  // 1. Проверка панели
+  let panelUpdateAvailable = false;
+  let latestPanelVersion = currentPanelVersion;
+  let panelReleaseNotes = [];
+  let latestPanelSha = currentHeadSha;
+
+  try {
+    if (mode === 'main') {
+      let tags = [];
       try {
-        if (githubRes.statusCode !== 200) {
-          throw new Error(`GitHub API returned status ${githubRes.statusCode}`);
-        }
-        
-        const releasesList = JSON.parse(data);
-        const parsedReleases = [];
-        const sysArch = getCpuArchitecture();
-        
-        for (const rel of releasesList) {
-          const bestAsset = findBestAsset(rel.assets || [], sysArch);
-          
-          parsedReleases.push({
-            tag_name: rel.tag_name,
-            published_at: rel.published_at,
-            body: rel.body,
-            changes: parseReleaseBody(rel.body),
-            download_url: bestAsset ? bestAsset.browser_download_url : null,
-            asset_name: bestAsset ? bestAsset.name : null
-          });
-        }
-        
-        cachedMihomoReleases = parsedReleases;
-        cachedMihomoReleasesTime = now;
-        
-        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, releases: parsedReleases }));
-      } catch (err) {
-        console.error('Error parsing GitHub releases:', err.message);
-        if (cachedMihomoReleases) {
-          res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases, warning: 'Using stale cache due to error: ' + err.message }));
-        } else {
-          res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-          res.end(JSON.stringify({ success: false, error: err.message }));
+        const latestTagOutput = execSync('git tag -l --sort=-creatordate', { cwd: __dirname }).toString().trim();
+        tags = latestTagOutput.split('\n').map(t => t.trim()).filter(Boolean);
+      } catch (e) {}
+
+      let newestTag = tags[0] || '';
+      if (newestTag && !newestTag.startsWith('v')) newestTag = 'v' + newestTag;
+
+      if (newestTag && compareSemver(newestTag, currentPanelVersion) > 0) {
+        panelUpdateAvailable = true;
+        latestPanelVersion = newestTag;
+      } else {
+        let behindCount = 0;
+        try {
+          behindCount = parseInt(execSync('git rev-list --count HEAD..origin/main', { cwd: __dirname }).toString().trim(), 10) || 0;
+        } catch (e) {}
+        if (behindCount > 0) {
+          panelUpdateAvailable = true;
+          try {
+            latestPanelSha = execSync('git rev-parse origin/main', { cwd: __dirname }).toString().trim();
+            const topMsg = execSync('git log origin/main -n 1 --format="%s"', { cwd: __dirname }).toString().trim();
+            panelReleaseNotes = [topMsg];
+          } catch (e) {}
         }
       }
+    } else {
+      let behindCount = 0;
+      try {
+        behindCount = parseInt(execSync('git rev-list --count HEAD..origin/Dev', { cwd: __dirname }).toString().trim(), 10) || 0;
+      } catch (e) {}
+      if (behindCount > 0) {
+        panelUpdateAvailable = true;
+        try {
+          latestPanelSha = execSync('git rev-parse origin/Dev', { cwd: __dirname }).toString().trim();
+          latestPanelVersion = `Dev (${latestPanelSha.substring(0, 7)})`;
+          const topMsg = execSync('git log origin/Dev -n 1 --format="%s"', { cwd: __dirname }).toString().trim();
+          panelReleaseNotes = [topMsg];
+        } catch (e) {}
+      }
+    }
+  } catch (e) {
+    console.error('Error checking panel updates:', e.message);
+  }
+
+  // 2. Проверка ядра Mihomo
+  let coreUpdateAvailable = false;
+  const currentCoreVersion = getMihomoVersion();
+  let latestCoreVersion = currentCoreVersion;
+  let coreDownloadUrl = null;
+  let coreIsPrerelease = false;
+
+  try {
+    const releases = await getMihomoReleasesList();
+    if (releases && releases.length > 0) {
+      let targetRelease = null;
+      if (mode === 'main') {
+        targetRelease = releases.find(r => !r.prerelease);
+      } else {
+        targetRelease = releases[0];
+      }
+
+      if (targetRelease) {
+        latestCoreVersion = targetRelease.tag_name;
+        coreDownloadUrl = targetRelease.download_url;
+        coreIsPrerelease = targetRelease.prerelease;
+
+        if (currentCoreVersion && currentCoreVersion !== 'Не установлено') {
+          if (compareSemver(latestCoreVersion, currentCoreVersion) > 0) {
+            coreUpdateAvailable = true;
+          }
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error checking core updates:', e.message);
+  }
+
+  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+  res.end(JSON.stringify({
+    success: true,
+    mode,
+    panel: {
+      updateAvailable: panelUpdateAvailable,
+      currentVersion: currentPanelVersion,
+      latestVersion: latestPanelVersion,
+      latestSha: latestPanelSha,
+      channel: mode === 'main' ? 'main' : 'dev',
+      releaseNotes: panelReleaseNotes
+    },
+    core: {
+      updateAvailable: coreUpdateAvailable,
+      currentVersion: currentCoreVersion,
+      latestVersion: latestCoreVersion,
+      tag: latestCoreVersion,
+      isPrerelease: coreIsPrerelease,
+      downloadUrl: coreDownloadUrl
+    }
+  }));
+}
+
+// GET /api/system/panel-logs?tail=500&level=all&search=...
+function handleGetPanelLogs(req, res, urlObj) {
+  try {
+    const tail = urlObj.searchParams.get('tail') || 500;
+    const level = urlObj.searchParams.get('level') || 'all';
+    const search = urlObj.searchParams.get('search') || '';
+
+    const lines = panelLogger.getRecentLogs({ tail, level, search });
+    const stats = panelLogger.getLogStats();
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({
+      success: true,
+      stats,
+      lines
+    }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// GET /api/system/panel-logs/download
+function handleDownloadPanelLogs(req, res) {
+  try {
+    const logPath = panelLogger.LOG_FILE;
+    if (!fs.existsSync(logPath)) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      res.end('Файл логов панели пока не создан.');
+      return;
+    }
+
+    const stat = fs.statSync(logPath);
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const filename = `mihomo-controller-panel-${dateStr}.log`;
+
+    res.writeHead(200, {
+      'Content-Type': 'text/plain; charset=utf-8',
+      'Content-Length': stat.size,
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-cache'
     });
-  });
-  
-  githubReq.on('error', (err) => {
-    console.error('GitHub API request error:', err.message);
-    if (cachedMihomoReleases) {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases, warning: 'Using stale cache due to error: ' + err.message }));
-    } else {
-      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: err.message }));
-    }
-  });
-  
-  githubReq.on('timeout', () => {
-    githubReq.destroy();
-    if (cachedMihomoReleases) {
-      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: true, releases: cachedMihomoReleases, warning: 'Using stale cache due to timeout' }));
-    } else {
-      res.writeHead(504, { 'Content-Type': 'application/json; charset=utf-8' });
-      res.end(JSON.stringify({ success: false, error: 'GitHub API request timeout' }));
-    }
-  });
-  
-  githubReq.end();
+
+    const stream = fs.createReadStream(logPath);
+    stream.pipe(res);
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'text/plain; charset=utf-8' });
+    res.end('Ошибка скачивания лога: ' + err.message);
+  }
+}
+
+// POST /api/system/panel-logs/clear
+function handleClearPanelLogs(req, res) {
+  try {
+    const result = panelLogger.clearLogs();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
 }
 
 // POST /api/mihomo/update
@@ -4717,7 +4937,23 @@ const server = http.createServer(async (req, res) => {
   }
 
   if (req.method === 'GET' && pathname === '/api/system/versions') {
-    handleGetVersions(req, res);
+    handleGetVersions(req, res, urlObj);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/system/check-updates') {
+    handleCheckUpdates(req, res, urlObj);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/system/panel-logs') {
+    handleGetPanelLogs(req, res, urlObj);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/system/panel-logs/download') {
+    handleDownloadPanelLogs(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/system/panel-logs/clear') {
+    handleClearPanelLogs(req, res);
     return;
   }
   if (req.method === 'POST' && pathname === '/api/system/update') {
