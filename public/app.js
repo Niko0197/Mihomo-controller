@@ -2711,20 +2711,22 @@ async function checkForUpdates(isManual = false) {
     const coreBadge = document.getElementById('core-update-badge');
     const navDot = document.getElementById('nav-update-dot');
 
-    const panelHasUpdate = Boolean(data.panel && data.panel.has_update);
-    const coreHasUpdate = Boolean(data.core && data.core.has_update);
+    const panelHasUpdate = Boolean(data.panel && (data.panel.updateAvailable || data.panel.has_update));
+    const coreHasUpdate = Boolean(data.core && (data.core.updateAvailable || data.core.has_update));
+    const panelLatestVer = (data.panel && (data.panel.latestVersion || data.panel.latest_version)) || '';
+    const coreLatestVer = (data.core && (data.core.latestVersion || data.core.latest_version)) || '';
 
     if (panelBadge) {
       panelBadge.style.display = panelHasUpdate ? 'inline-flex' : 'none';
-      if (panelHasUpdate && data.panel.latest_version) {
-        panelBadge.title = `Доступна версия ${data.panel.latest_version}`;
+      if (panelHasUpdate && panelLatestVer) {
+        panelBadge.title = `Доступна версия ${panelLatestVer}`;
       }
     }
 
     if (coreBadge) {
       coreBadge.style.display = coreHasUpdate ? 'inline-flex' : 'none';
-      if (coreHasUpdate && data.core.latest_version) {
-        coreBadge.title = `Доступно ядро ${data.core.latest_version}`;
+      if (coreHasUpdate && coreLatestVer) {
+        coreBadge.title = `Доступно ядро ${coreLatestVer}`;
       }
     }
 
@@ -2734,11 +2736,11 @@ async function checkForUpdates(isManual = false) {
 
     if (isManual) {
       if (panelHasUpdate && coreHasUpdate) {
-        showToast(`Доступны обновления: Панель (${data.panel.latest_version}) и Ядро (${data.core.latest_version})!`, 'info');
+        showToast(`Доступны обновления: Панель (${panelLatestVer}) и Ядро (${coreLatestVer})!`, 'info');
       } else if (panelHasUpdate) {
-        showToast(`Доступно обновление панели до ${data.panel.latest_version}!`, 'info');
+        showToast(`Доступно обновление панели до ${panelLatestVer}!`, 'info');
       } else if (coreHasUpdate) {
-        showToast(`Доступно обновление ядра Mihomo до ${data.core.latest_version}!`, 'info');
+        showToast(`Доступно обновление ядра Mihomo до ${coreLatestVer}!`, 'info');
       } else {
         showToast('Установлены самые актуальные версии панели и ядра ✅', 'success');
       }

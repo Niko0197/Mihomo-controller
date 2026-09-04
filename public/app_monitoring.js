@@ -2052,11 +2052,15 @@ async function fetchAndRenderPanelLogs(isManual = false) {
     const smbPathEl = document.getElementById('txt-panel-log-smb-path');
     const fileSizeEl = document.getElementById('panel-log-file-size');
 
-    if (linuxPathEl && data.file_path) linuxPathEl.textContent = data.file_path;
-    if (smbPathEl && data.smb_path) smbPathEl.textContent = data.smb_path;
-    if (fileSizeEl && data.formatted_size) fileSizeEl.textContent = data.formatted_size;
+    const lPath = (data.stats && (data.stats.linuxPath || data.stats.filePath)) || data.file_path || '/opt/root/vpn_updater/logs/panel.log';
+    const sPath = (data.stats && data.stats.smbPath) || data.smb_path || '\\\\Netcraze-9884\\opkg\\root\\vpn_updater\\logs\\panel.log';
+    const fSize = (data.stats && data.stats.sizeFormatted) || data.formatted_size || '0 KB';
 
-    panelLogsCache = data.logs || [];
+    if (linuxPathEl) linuxPathEl.textContent = lPath;
+    if (smbPathEl) smbPathEl.textContent = sPath;
+    if (fileSizeEl) fileSizeEl.textContent = fSize;
+
+    panelLogsCache = data.lines || data.logs || [];
     renderPanelLogsList();
 
     if (isManual) {
@@ -2109,7 +2113,7 @@ function renderPanelLogsList() {
   const html = filtered.map(item => {
     const lvl = (item.level || 'INFO').toUpperCase();
     const lvlClass = lvl.toLowerCase();
-    const timeStr = item.timestamp || '';
+    const timeStr = item.time || item.timestamp || '';
     const safeMsg = escapePanelHtml(item.message || item.raw || '');
 
     return `<div class="panel-log-row log-${lvlClass}">` +

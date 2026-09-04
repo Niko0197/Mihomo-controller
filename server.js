@@ -3511,6 +3511,9 @@ function parseLogLines(logText, tagMap, branch) {
       version = 'v' + version;
     }
 
+    const isStableSemver = /^v?\d+\.\d+(\.\d+)?$/i.test(version) && !/alpha|beta|rc|dev/i.test(version);
+    const commitIsDev = isDev || !isStableSemver;
+
     commits.push({
       sha,
       version: version || sha.substring(0, 7),
@@ -3518,7 +3521,7 @@ function parseLogLines(logText, tagMap, branch) {
       date,
       author,
       message,
-      isDev: isDev || !tagMap[sha],
+      isDev: commitIsDev,
       changes: [message]
     });
   }
@@ -3570,6 +3573,21 @@ function processAndSendVersions(res, currentBranch, currentHeadSha, targetBranch
     commits.forEach(c => {
       c.current = (c.sha === currentHeadSha) || (c.version === curPanelVer);
     });
+
+    const hasCurrent = commits.some(c => c.sha === currentHeadSha || c.current);
+    if (!hasCurrent && currentHeadSha) {
+      commits.unshift({
+        sha: currentHeadSha,
+        version: curPanelVer,
+        branch: currentBranch,
+        date: new Date().toISOString().split('T')[0],
+        author: 'User',
+        message: `Текущая установленная версия (${curPanelVer})`,
+        isDev: false,
+        current: true,
+        changes: [`Текущая установленная версия (${curPanelVer})`]
+      });
+    }
 
     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({
@@ -4118,6 +4136,11 @@ function handleDownloadPanelLogs(req, res) {
       'Content-Disposition': `attachment; filename="${filename}"`,
       'Cache-Control': 'no-cache'
     });
+
+    if (req.method === 'HEAD') {
+      res.end();
+      return;
+    }
 
     const stream = fs.createReadStream(logPath);
     stream.pipe(res);
@@ -4948,7 +4971,7 @@ const server = http.createServer(async (req, res) => {
     handleGetPanelLogs(req, res, urlObj);
     return;
   }
-  if (req.method === 'GET' && pathname === '/api/system/panel-logs/download') {
+  if ((req.method === 'GET' || req.method === 'HEAD') && pathname === '/api/system/panel-logs/download') {
     handleDownloadPanelLogs(req, res);
     return;
   }
