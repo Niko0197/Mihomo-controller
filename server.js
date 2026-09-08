@@ -5,6 +5,15 @@ const zlib = require('zlib');
 const path = require('path');
 const panelLogger = require('./panel_logger');
 panelLogger.initLogger();
+
+// Глобальные перехватчики исключений для защиты от крашей и записи в panel.log
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL UNCAUGHT EXCEPTION]', err ? (err.stack || err.message) : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[CRITICAL UNHANDLED REJECTION]', reason ? (reason.stack || reason.message || reason) : reason);
+});
+
 const yamlUtils = require('./yaml_utils');
 const systemStats = require('./system_stats');
 const clientsManager = require('./clients_manager');
@@ -17,22 +26,19 @@ function getConfigFilePath() {
   if (fs.existsSync('/opt/etc/mihomo/config.yaml')) {
     return '/opt/etc/mihomo/config.yaml';
   }
-  if (fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
-    return '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
-  }
   return path.join(__dirname, 'config.yaml');
 }
 const configPath = getConfigFilePath();
 const logRuPath = path.join(__dirname, 'log_ru.txt');
 let directCachedDelay = 0;
-// Автоматическая ротация текстовых логов (защита флеш-памяти роутера, макс 500 КБ)
-function rotateLogFile(filePath, maxBytes = 500 * 1024) {
+// Автоматическая ротация текстовых логов (до 5 МБ для сохранения истории)
+function rotateLogFile(filePath, maxBytes = 5 * 1024 * 1024) {
   try {
     if (fs.existsSync(filePath)) {
       const stats = fs.statSync(filePath);
       if (stats.size > maxBytes) {
         const content = fs.readFileSync(filePath, 'utf8');
-        const trimmed = content.slice(-200 * 1024);
+        const trimmed = content.slice(-2 * 1024 * 1024);
         const firstNewline = trimmed.indexOf('\n');
         const cleanText = firstNewline !== -1 ? trimmed.slice(firstNewline + 1) : trimmed;
         fs.writeFileSync(filePath, `--- [Ротация лога: ${new Date().toLocaleString('ru-RU')}] ---\n` + cleanText, 'utf8');
@@ -338,21 +344,27 @@ function handleXkeenTraffic(req, res) {
   };
   
   const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    });
+    if (!res.headersSent) {
+      res.writeHead(proxyRes.statusCode, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+    }
     proxyRes.pipe(res);
   });
   
   proxyReq.on('error', (err) => {
-    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Сбой связи с API Mihomo (traffic): ' + err.message);
+    if (!res.headersSent) {
+      try {
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Сбой связи с API Mihomo (traffic): ' + err.message);
+      } catch (e) {}
+    }
   });
   
   req.on('close', () => {
-    proxyReq.destroy();
+    try { proxyReq.destroy(); } catch (e) {}
   });
   
   proxyReq.end();
@@ -371,21 +383,27 @@ function handleXkeenLogs(req, res) {
   };
   
   const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    });
+    if (!res.headersSent) {
+      res.writeHead(proxyRes.statusCode, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+    }
     proxyRes.pipe(res);
   });
   
   proxyReq.on('error', (err) => {
-    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Сбой связи с API Mihomo (logs): ' + err.message);
+    if (!res.headersSent) {
+      try {
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Сбой связи с API Mihomo (logs): ' + err.message);
+      } catch (e) {}
+    }
   });
   
   req.on('close', () => {
-    proxyReq.destroy();
+    try { proxyReq.destroy(); } catch (e) {}
   });
   
   proxyReq.end();
@@ -1713,7 +1731,25 @@ function getWifiInfo() {
   } catch (e) {
     console.error('Failed to read /etc/config/wireless:', e.message);
   }
-  return { success: true, ssid: 'Netcraze-9884', key: 'vPx8hr2A', encryption: 'WPA' };
+
+  // Попытка динамически получить Wi-Fi имя и ключ из Keenetic ndmq
+  try {
+    const { execSync } = require('child_process');
+    const xml = execSync('/opt/bin/ndmq -x -p "show interface WifiMaster0/AccessPoint0" 2>/dev/null || /bin/ndmq -x -p "show interface WifiMaster0/AccessPoint0" 2>/dev/null', { timeout: 2000 }).toString();
+    const ssidMatch = xml.match(/<ssid>([^<]+)<\/ssid>/i);
+    const keyMatch = xml.match(/<(?:wpa-psk|key)>([^<]+)<\/(?:wpa-psk|key)>/i);
+    if (ssidMatch) {
+      return {
+        success: true,
+        ssid: ssidMatch[1].trim(),
+        key: keyMatch ? keyMatch[1].trim() : '',
+        encryption: 'WPA'
+      };
+    }
+  } catch (e) {}
+
+  const os = require('os');
+  return { success: true, ssid: `${os.hostname() || 'Keenetic'}-WiFi`, key: '', encryption: 'WPA' };
 }
 
 function handleGetWifiInfo(req, res) {
@@ -3129,6 +3165,29 @@ function getLastDelayFromNode(nodeObj) {
   return 0;
 }
 
+const recentPingDelays = new Map();
+
+function recordPingDelay(name, delay) {
+  if (!name || typeof delay !== 'number' || delay <= 0) return;
+  const now = Date.now();
+  recentPingDelays.set(name, { delay, timestamp: now });
+  const trimmed = name.trim();
+  recentPingDelays.set(trimmed, { delay, timestamp: now });
+  const noSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+  recentPingDelays.set(noSpace, { delay, timestamp: now });
+  const withSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+  recentPingDelays.set(withSpace, { delay, timestamp: now });
+}
+
+function getRecordedPingDelay(name) {
+  if (!name) return 0;
+  const entry = recentPingDelays.get(name) || recentPingDelays.get(name.trim());
+  if (entry && (Date.now() - entry.timestamp < 15 * 60 * 1000)) {
+    return entry.delay;
+  }
+  return 0;
+}
+
 // POST /api/proxies/ping
 function handlePingProxy(req, res) {
   let body = '';
@@ -3156,13 +3215,81 @@ function handlePingProxy(req, res) {
 
       // 2. Прямой живой замер через ядро Mihomo (включая DIRECT, селекторы и прокси-группы)
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
+      if (mRes.statusCode !== 200) {
+        const noSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+        const withSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+        const altName = (name === noSpace) ? withSpace : noSpace;
+        if (altName !== name) {
+          const altRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(altName) + '/delay?url=' + url + '&timeout=' + timeout);
+          if (altRes.statusCode === 200) {
+            mRes = altRes;
+          }
+        }
+      }
+
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
+        const delay = parsed.delay || 0;
         if (name === 'DIRECT' || name === 'direct') {
-          directCachedDelay = parsed.delay || 0;
+          directCachedDelay = delay;
         }
+
+        let activeNode = null;
+        if (delay > 0) {
+          recordPingDelay(name, delay);
+
+          // Проверяем, является ли name группой/селектором с выбранным узлом, и рекурсивно разворачиваем до конечной ноды
+          try {
+            let grpRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name), null, 2000);
+            if (grpRes.statusCode !== 200) {
+              const noSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+              const withSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+              const altName = (name === noSpace) ? withSpace : noSpace;
+              grpRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(altName), null, 2000);
+            }
+            if (grpRes.statusCode === 200) {
+              const grpData = JSON.parse(grpRes.data);
+              let curr = grpData.now;
+              let depth = 5;
+              while (curr && depth > 0) {
+                recordPingDelay(curr, delay);
+                activeNode = curr;
+                depth--;
+                try {
+                  const subRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(curr), null, 1500);
+                  if (subRes.statusCode === 200) {
+                    const subData = JSON.parse(subRes.data);
+                    if (subData && subData.now && subData.now !== curr) {
+                      curr = subData.now;
+                    } else {
+                      break;
+                    }
+                  } else {
+                    break;
+                  }
+                } catch (e) {
+                  break;
+                }
+              }
+            }
+          } catch (e) {}
+
+          // Также синхронизируем задержку для любых групп, где name или activeNode является активным выбором (.now)
+          try {
+            const allRes = await makeMihomoRequest('GET', '/proxies', null, 2000);
+            if (allRes.statusCode === 200) {
+              const allData = JSON.parse(allRes.data);
+              for (const [gName, gObj] of Object.entries(allData.proxies || {})) {
+                if (gObj && (gObj.now === name || (activeNode && gObj.now === activeNode))) {
+                  recordPingDelay(gName, delay);
+                }
+              }
+            }
+          } catch (e) {}
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+        res.end(JSON.stringify({ success: true, delay, activeNode }));
         return;
       }
 
@@ -3185,8 +3312,23 @@ function handlePingProxy(req, res) {
                   const upNode = upProv.proxies.find(p => p.name === name || p.name.trim() === name.trim());
                   if (upNode) {
                     const freshDelay = getLastDelayFromNode(upNode);
+                    if (freshDelay > 0) {
+                      recordPingDelay(name, freshDelay);
+                      recordPingDelay(upNode.name, freshDelay);
+                      try {
+                        const allRes = await makeMihomoRequest('GET', '/proxies', null, 2000);
+                        if (allRes.statusCode === 200) {
+                          const allData = JSON.parse(allRes.data);
+                          for (const [gName, gObj] of Object.entries(allData.proxies || {})) {
+                            if (gObj && (gObj.now === name || gObj.now === upNode.name)) {
+                              recordPingDelay(gName, freshDelay);
+                            }
+                          }
+                        }
+                      } catch (e) {}
+                    }
                     res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-                    res.end(JSON.stringify({ success: true, delay: freshDelay }));
+                    res.end(JSON.stringify({ success: true, delay: freshDelay, activeNode: upNode.name }));
                     return;
                   }
                 }
@@ -4324,6 +4466,18 @@ async function handleGetXkeenProxies(req, res) {
             directProxy.history = [{ time: new Date().toISOString(), delay: directCachedDelay }];
           }
         }
+
+        // Внедряем актуальные замеры пинга для групп и узлов
+        for (const [pName, pObj] of Object.entries(parsed.proxies)) {
+          const cachedSelf = getRecordedPingDelay(pName);
+          const cachedNow = pObj.now ? getRecordedPingDelay(pObj.now) : 0;
+          const delayToInject = cachedSelf > 0 ? cachedSelf : cachedNow;
+          if (delayToInject > 0) {
+            if (!pObj.history) pObj.history = [];
+            pObj.history.push({ time: new Date().toISOString(), delay: delayToInject });
+          }
+        }
+
         dataStr = JSON.stringify(parsed);
       }
     } catch (e) {}
@@ -4357,8 +4511,28 @@ function handlePutXkeenProxy(req, res, name) {
 async function handleGetXkeenProviders(req, res) {
   try {
     const mRes = await makeMihomoRequest('GET', '/providers/proxies');
+    let dataStr = mRes.data;
+    try {
+      const parsed = JSON.parse(mRes.data);
+      const providers = parsed.providers || {};
+      for (const prov of Object.values(providers)) {
+        if (prov.proxies && Array.isArray(prov.proxies)) {
+          for (const px of prov.proxies) {
+            if (px && px.name) {
+              const cached = getRecordedPingDelay(px.name);
+              if (cached > 0) {
+                if (!px.history) px.history = [];
+                px.history.push({ time: new Date().toISOString(), delay: cached });
+              }
+            }
+          }
+        }
+      }
+      dataStr = JSON.stringify(parsed);
+    } catch (e) {}
+
     res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(mRes.data);
+    res.end(dataStr);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
@@ -5516,26 +5690,12 @@ function runMihomoMemoryOptimization() {
     }
 
     if (changed) {
-      // 4. Перезапускаем службу XKeen
-      const { exec } = require('child_process');
-      console.log('[Optimization] Перезапуск службы XKeen для применения оптимизаций...');
-      exec('/opt/etc/init.d/S99xkeen restart', (err, stdout, stderr) => {
-        if (err) {
-          console.error('[Optimization] Ошибка перезапуска XKeen:', err.message);
-        } else {
-          console.log('[Optimization] Служба XKeen успешно перезапущена.');
-        }
-      });
-    } else {
-      console.log('[Optimization] Оптимизация памяти уже была применена ранее.');
+      console.log('[Optimization] config.yaml оптимизирован в фоне.');
     }
   } catch (err) {
     console.error('[Optimization] Ошибка при выполнении оптимизации:', err);
   }
 }
-
-// Оптимизация памяти правил
-runMihomoMemoryOptimization();
 
 // Очистка порта перед запуском (убиваем старый процесс если есть)
 function killOldProcess() {
@@ -5586,7 +5746,6 @@ function startServer(attempt) {
       const mode = getStoredAppMode();
       applyAppModeToConfig(mode);
     } catch (e) {}
-    makeMihomoRequest('PUT', '/configs', { path: getConfigFilePath() }).catch(() => {});
   });
 
   server.once('error', (err) => {

@@ -13,9 +13,10 @@
 const fs = require('fs');
 const path = require('path');
 const util = require('util');
+const os = require('os');
 
-const MAX_FILE_SIZE = 2 * 1024 * 1024; // 2 MB
-const MAX_MEMORY_LINES = 1500;
+const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_MEMORY_LINES = 10000; // До 10 000 записей в кольцевом буфере ОЗУ
 
 const LOG_DIR = path.join(__dirname, 'logs');
 const LOG_FILE = path.join(LOG_DIR, 'panel.log');
@@ -204,7 +205,8 @@ function initLogger() {
 
 // Получение отфильтрованных логов
 function getRecentLogs(options = {}) {
-  const tail = Math.min(Math.max(parseInt(options.tail, 10) || 500, 1), MAX_MEMORY_LINES);
+  const requestedTail = parseInt(options.tail, 10) || 1000;
+  const tail = Math.min(Math.max(requestedTail, 1), MAX_MEMORY_LINES);
   const targetLevel = (options.level || 'all').toLowerCase();
   const search = (options.search || '').toLowerCase().trim();
 
@@ -251,9 +253,10 @@ function getLogStats() {
     }
   } catch (e) {}
 
-  // Путь для SMB и Linux
-  const linuxPath = '/opt/root/vpn_updater/logs/panel.log';
-  const smbPath = '\\\\Netcraze-9884\\opkg\\root\\vpn_updater\\logs\\panel.log';
+  // Путь для SMB и Linux (динамическое имя хоста роутера)
+  const linuxPath = LOG_FILE;
+  const routerHost = os.hostname() || 'Keenetic';
+  const smbPath = `\\\\${routerHost}\\opkg\\root\\vpn_updater\\logs\\panel.log`;
 
   return {
     filePath: LOG_FILE,

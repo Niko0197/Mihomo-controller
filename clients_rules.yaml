@@ -12,13 +12,13 @@
 # --- END CLIENTS BYPASS RULES ---
 
 # --- CLIENTS ZAPRET RULES ---
-- AND,((SRC-IP-CIDR,192.168.1.2/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
-- AND,((SRC-IP-CIDR,192.168.1.7/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
-- AND,((SRC-IP-CIDR,192.168.1.101/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)
-- AND,((SRC-IP-CIDR,192.168.1.10/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
-- AND,((SRC-IP-CIDR,192.168.1.100/32),(RULE-SET,youtube@domain)),⚡ NFQWS 1 (ТВ)
-- AND,((SRC-IP-CIDR,192.168.1.20/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
-- AND,((SRC-IP-CIDR,192.168.1.5/32),(RULE-SET,youtube@domain)),⚡ NFQWS 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.2/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.7/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.101/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 1 (ТВ)
+- AND,((SRC-IP-CIDR,192.168.1.10/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.100/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 1 (ТВ)
+- AND,((SRC-IP-CIDR,192.168.1.20/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 2 (Смартфон/ПК)
+- AND,((SRC-IP-CIDR,192.168.1.5/32),(RULE-SET,youtube@domain)),⚡ ByeDPI 2 (Смартфон/ПК)
 # --- END CLIENTS ZAPRET RULES ---
 
 # --- CLIENTS VPN RULES ---

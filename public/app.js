@@ -119,7 +119,6 @@ function switchTab(tabId) {
     'editor': '📝 Редактор YAML конфигураций',
     'dns': '🛡️ Настройка DNS и Резолвера',
     'updates': '🔄 Управление версиями и обновлениями',
-    'qr': '📱 QR-подключения клиентов',
     'leak': '🔍 Анализ утечек доменов'
   };
 
@@ -148,8 +147,6 @@ function switchTab(tabId) {
     loadDynamicRulesTab();
   } else if (tabId === 'updates') {
     loadVersionsList();
-  } else if (tabId === 'qr') {
-    loadQrConnections();
   } else if (tabId === 'connections') {
     if (typeof startConnectionsPolling === 'function') startConnectionsPolling(false);
     if (typeof loadConnections === 'function') loadConnections();
@@ -1005,7 +1002,17 @@ async function pingSingleProxy(name) {
     });
     if (!res.ok) return 0;
     const data = await res.json();
-    return data.delay || 0;
+    const delay = data.delay || 0;
+    if (delay > 0) {
+      if (window.setClientPing) {
+        window.setClientPing(name, delay);
+        if (data.activeNode) window.setClientPing(data.activeNode, delay);
+      }
+      if (window.updateLatencyInDOM) {
+        window.updateLatencyInDOM(name, delay, data.activeNode);
+      }
+    }
+    return delay;
   } catch (e) {
     return 0;
   }
@@ -2020,6 +2027,15 @@ function convertToCustomSelect(selectEl) {
         
         syncSelect();
         wrapper.classList.remove('open');
+        wrapper.classList.remove('open-up');
+        dropdown.style.position = '';
+        dropdown.style.zIndex = '';
+        dropdown.style.top = '';
+        dropdown.style.bottom = '';
+        dropdown.style.left = '';
+        dropdown.style.right = '';
+        dropdown.style.minWidth = '';
+        dropdown.style.maxWidth = '';
       });
       dropdown.appendChild(opt);
     });
@@ -2037,6 +2053,17 @@ function convertToCustomSelect(selectEl) {
       if (w !== wrapper) {
         w.classList.remove('open');
         w.classList.remove('open-up');
+        const otherDd = w.querySelector('.custom-select-dropdown');
+        if (otherDd) {
+          otherDd.style.position = '';
+          otherDd.style.zIndex = '';
+          otherDd.style.top = '';
+          otherDd.style.bottom = '';
+          otherDd.style.left = '';
+          otherDd.style.right = '';
+          otherDd.style.minWidth = '';
+          otherDd.style.maxWidth = '';
+        }
         const parentTr = w.closest('tr');
         if (parentTr) parentTr.style.zIndex = '';
       }
@@ -2044,17 +2071,40 @@ function convertToCustomSelect(selectEl) {
     
     const wasOpen = wrapper.classList.contains('open');
     if (!wasOpen) {
-      const rect = wrapper.getBoundingClientRect();
+      const rect = trigger.getBoundingClientRect();
       const dropdownHeight = dropdown.scrollHeight || (selectEl.options.length * 38 + 10);
       const spaceBelow = window.innerHeight - rect.bottom;
       
       // Open upwards ONLY when genuinely no space below for this specific dropdown
-      if (spaceBelow < dropdownHeight + 10 && rect.top > dropdownHeight + 10) {
+      const openUp = (spaceBelow < dropdownHeight + 10 && rect.top > dropdownHeight + 10);
+      if (openUp) {
         wrapper.classList.add('open-up');
       } else {
         wrapper.classList.remove('open-up');
       }
       wrapper.classList.add('open');
+
+      // Fixed positioning so dropdown floats over table without breaking table scroll/overflow
+      dropdown.style.position = 'fixed';
+      dropdown.style.zIndex = '9999999';
+
+      const minW = Math.max(rect.width, 140);
+      let left = rect.left;
+      if (left + minW > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - minW - 8);
+      }
+      dropdown.style.left = left + 'px';
+      dropdown.style.minWidth = minW + 'px';
+      dropdown.style.maxWidth = '95vw';
+
+      if (openUp) {
+        dropdown.style.top = 'auto';
+        dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+      } else {
+        dropdown.style.bottom = 'auto';
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+      }
+
       const tr = wrapper.closest('tr');
       if (tr) {
         tr.style.zIndex = '99999';
@@ -2067,6 +2117,15 @@ function convertToCustomSelect(selectEl) {
       }
     } else {
       wrapper.classList.remove('open');
+      wrapper.classList.remove('open-up');
+      dropdown.style.position = '';
+      dropdown.style.zIndex = '';
+      dropdown.style.top = '';
+      dropdown.style.bottom = '';
+      dropdown.style.left = '';
+      dropdown.style.right = '';
+      dropdown.style.minWidth = '';
+      dropdown.style.maxWidth = '';
       const tr = wrapper.closest('tr');
       if (tr) tr.style.zIndex = '';
     }
@@ -2118,6 +2177,18 @@ function initCustomSelects() {
 function closeAllCustomSelects() {
   document.querySelectorAll('.custom-select-wrapper.open').forEach(wrapper => {
     wrapper.classList.remove('open');
+    wrapper.classList.remove('open-up');
+    const dropdown = wrapper.querySelector('.custom-select-dropdown');
+    if (dropdown) {
+      dropdown.style.position = '';
+      dropdown.style.zIndex = '';
+      dropdown.style.top = '';
+      dropdown.style.bottom = '';
+      dropdown.style.left = '';
+      dropdown.style.right = '';
+      dropdown.style.minWidth = '';
+      dropdown.style.maxWidth = '';
+    }
     const parentTr = wrapper.closest('tr');
     if (parentTr) parentTr.style.zIndex = '';
   });
@@ -2125,6 +2196,12 @@ function closeAllCustomSelects() {
 
 document.addEventListener('click', closeAllCustomSelects);
 window.addEventListener('scroll', closeAllCustomSelects, { passive: true });
+document.addEventListener('scroll', (e) => {
+  if (e.target && e.target.classList && e.target.classList.contains('custom-select-dropdown')) {
+    return;
+  }
+  closeAllCustomSelects();
+}, true);
 window.addEventListener('resize', closeAllCustomSelects, { passive: true });
 
 // === ФУНКЦИОНАЛ УПРАВЛЕНИЯ ВЕРСИЯМИ И ОБНОВЛЕНИЯМИ ===
@@ -2296,7 +2373,7 @@ function updatePanelHeroBanner(isUpdateAvailable, currentCommit, latestCommit) {
     hero.className = 'update-hero-banner up-to-date';
     if (icon) icon.textContent = '✅';
     if (title) title.textContent = 'У вас установлена актуальная версия панели';
-    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.1'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
+    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.2'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
     if (actions) actions.style.display = 'none';
   }
 }
@@ -2776,145 +2853,6 @@ function hideMihomoDimmerOverlay() {
   }
 }
 
-async function loadQrConnections() {
-  const container = document.getElementById('qr-codes-container');
-  if (!container) return;
-  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">⏳ Загрузка параметров подключения...</div>';
-  
-  try {
-    const [wifiRes, providersRes] = await Promise.all([
-      fetch('/api/wifi/info'),
-      fetch('/api/providers')
-    ]);
-    
-    const wifiData = wifiRes.ok ? await wifiRes.json() : { success: false, ssid: 'Keenetic-WiFi', key: '12345678', encryption: 'WPA' };
-    const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
-    
-    const wifiString = `WIFI:S:${wifiData.ssid};T:${wifiData.encryption};P:${wifiData.key};;`;
-    const baseDomainHttps = 'https://admin:gricha0609@spyware.keenet9883.netcraze.link:8083';
-    const baseDomainHttp = 'http://spyware.keenet9883.netcraze.link:4000';
-    
-    const fullConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled`;
-    const fullConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled`;
-    
-    const noRoutingConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled&routing=false`;
-    const noRoutingConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled&routing=false`;
-    
-    const qrUrlHttpsFull = `${baseDomainHttps}/api/config/mihomo_full.yaml`;
-    const qrUrlHttpsLite = `${baseDomainHttps}/api/config/mihomo_lite.yaml`;
-
-    const clashFullUrl = `clash://install-config?url=${encodeURIComponent(qrUrlHttpsFull)}&name=${encodeURIComponent('Mihomo Router Full')}`;
-    const clashNoRoutingUrl = `clash://install-config?url=${encodeURIComponent(qrUrlHttpsLite)}&name=${encodeURIComponent('Mihomo Router Lite')}`;
-    
-    let html = '';
-    html += `<div class="qr-cards-grid">`;
-    
-    // --- 1. КАРТОЧКА WIFI ---
-    html += `
-      <div class="qr-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">📶</span>
-          <span class="qr-card-title">Подключение к Wi-Fi</span>
-        </div>
-        <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(wifiString)}" class="qr-image" alt="Wi-Fi QR" />
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-item"><strong>SSID:</strong> <span>${wifiData.ssid}</span> <button class="btn-copy-small" onclick="copyToClipboard('${wifiData.ssid.replace(/'/g, "\\'")}')">📋</button></div>
-          <div class="qr-detail-item"><strong>Пароль:</strong> <span>${wifiData.key}</span> <button class="btn-copy-small" onclick="copyToClipboard('${wifiData.key.replace(/'/g, "\\'")}')">📋</button></div>
-        </div>
-      </div>
-    `;
-    
-    // --- 2. КАРТОЧКА ПОЛНОГО КОНФИГА МИХОМО ---
-    html += `
-      <div class="qr-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">🚀</span>
-          <span class="qr-card-title">Подписка Mihomo (Полная)</span>
-        </div>
-        <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(clashFullUrl)}" class="qr-image" alt="Full Config QR" />
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-text">С полной маршрутизацией и встроенными правилами для роутера.</div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTPS (с паролем):</div>
-          <div class="qr-detail-url" style="margin-bottom: 6px;"><input type="text" readonly value="${fullConfigUrlHttps}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrlHttps}')">📋</button></div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTP (без пароля):</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrlHttp}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrlHttp}')">📋</button></div>
-        </div>
-      </div>
-    `;
-
-    // --- 3. КАРТОЧКА КОНФИГА БЕЗ МАРШРУТИЗАЦИИ (ОБНОВЛЯЕМАЯ ПОДПИСКА) ---
-    html += `
-      <div class="qr-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">🌐</span>
-          <span class="qr-card-title">Подписка Mihomo (Без правил)</span>
-        </div>
-        <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(clashNoRoutingUrl)}" class="qr-image" alt="No Routing QR" />
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-text">Все ваши VPN-узлы и группы. Идеально для импорта на телефон/ПК без засорения маршрутов.</div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTPS (с паролем):</div>
-          <div class="qr-detail-url" style="margin-bottom: 6px;"><input type="text" readonly value="${noRoutingConfigUrlHttps}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrlHttps}')">📋</button></div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTP (без пароля):</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrlHttp}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrlHttp}')">📋</button></div>
-        </div>
-      </div>
-    `;
-    
-    // --- 4. КАРТОЧКИ VPN ПОДПИСОК ---
-    const providers = providersData.list || [];
-    providers.forEach(p => {
-      if (p.url) {
-        html += `
-          <div class="qr-card">
-            <div class="qr-card-header">
-              <span class="qr-card-icon">📦</span>
-              <span class="qr-card-title">Вход подписки: ${p.name}</span>
-            </div>
-            <div class="qr-code-wrapper">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(p.url)}" class="qr-image" alt="Sub QR" />
-            </div>
-            <div class="qr-card-details">
-              <div class="qr-detail-text">Оригинальная ссылка провайдера VPN.</div>
-              <div class="qr-detail-url"><input type="text" readonly value="${p.url}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${p.url.replace(/'/g, "\\'")}')">📋</button></div>
-            </div>
-          </div>
-        `;
-      }
-    });
-
-    // --- 5. ЗАГЛУШКА ЛОКАЛЬНОГО VPN-СЕРВЕРА ---
-    html += `
-      <div class="qr-card wg-placeholder-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">🛡️</span>
-          <span class="qr-card-title">Внешний VPN-сервер роутера</span>
-        </div>
-        <div class="qr-code-wrapper placeholder-qr">
-          <div class="qr-placeholder-overlay">
-            <span>ЗАГЛУШКА</span>
-          </div>
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-text">Для подключения из внешней сети напрямую к домашнему роутеру.</div>
-          <div class="qr-detail-subnet"><strong>Пул IP-адресов:</strong> <code>192.168.2.x</code></div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Устройствам будут выделяться адреса 192.168.2.2 - 2.254 для интеграции в локальную сеть с полной маршрутизацией.</div>
-        </div>
-      </div>
-    `;
-
-    html += `</div>`;
-    container.innerHTML = html;
-  } catch (err) {
-    container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px 0;">Ошибка загрузки подключений: ${err.message}</div>`;
-  }
-}
-window.loadQrConnections = loadQrConnections;
 
 function copyToClipboard(text) {
   if (navigator.clipboard && window.isSecureContext) {

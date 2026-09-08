@@ -943,7 +943,7 @@ function startConnectionsPolling(silent = false) {
   }
   
   loadConnections();
-  connectionsInterval = setInterval(loadConnections, 2000);
+  connectionsInterval = setInterval(loadConnections, 3500);
 }
 
 function stopConnectionsPolling() {
@@ -1697,7 +1697,7 @@ function startLogsStream() {
           }
           
           logsCache.push(logObj);
-          if (logsCache.length > 1000) logsCache.shift(); // Keep cache up to 1000 lines
+          if (logsCache.length > 5000) logsCache.shift(); // Храним до 5000 событий ядра в памяти
           
           // Append to DOM immediately only if user is currently looking at the Logs tab
           if (currentTab === 'logs') {
@@ -1761,8 +1761,8 @@ function renderLogLine(logObj) {
     line.appendChild(payloadSpan);
     consoleEl.appendChild(line);
     
-    // Cap console DOM nodes
-    while (consoleEl.children.length > 1000) {
+    // Cap console DOM nodes up to 3000 lines
+    while (consoleEl.children.length > 3000) {
       consoleEl.removeChild(consoleEl.firstChild);
     }
     
@@ -2042,7 +2042,7 @@ function setPanelLogLevel(level) {
 async function fetchAndRenderPanelLogs(isManual = false) {
   const consoleEl = document.getElementById('panel-log-console');
   try {
-    const res = await fetch('/api/system/panel-logs?tail=800');
+    const res = await fetch('/api/system/panel-logs?tail=5000');
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();
     if (!data.success) throw new Error(data.error || 'Ошибка получения логов');
@@ -2052,8 +2052,9 @@ async function fetchAndRenderPanelLogs(isManual = false) {
     const smbPathEl = document.getElementById('txt-panel-log-smb-path');
     const fileSizeEl = document.getElementById('panel-log-file-size');
 
+    const fallbackHost = window.location.hostname || 'Keenetic';
     const lPath = (data.stats && (data.stats.linuxPath || data.stats.filePath)) || data.file_path || '/opt/root/vpn_updater/logs/panel.log';
-    const sPath = (data.stats && data.stats.smbPath) || data.smb_path || '\\\\Netcraze-9884\\opkg\\root\\vpn_updater\\logs\\panel.log';
+    const sPath = (data.stats && data.stats.smbPath) || data.smb_path || `\\\\${fallbackHost}\\opkg\\root\\vpn_updater\\logs\\panel.log`;
     const fSize = (data.stats && data.stats.sizeFormatted) || data.formatted_size || '0 KB';
 
     if (linuxPathEl) linuxPathEl.textContent = lPath;
@@ -2196,7 +2197,8 @@ function stopPanelLogAutoRefresh() {
 }
 
 function copyPanelLogPath() {
-  const smbPath = '\\\\Netcraze-9884\\opkg\\root\\vpn_updater\\logs\\panel.log';
+  const smbEl = document.getElementById('txt-panel-log-smb-path');
+  const smbPath = (smbEl && smbEl.textContent) ? smbEl.textContent : `\\\\${window.location.hostname || 'Keenetic'}\\opkg\\root\\vpn_updater\\logs\\panel.log`;
   if (navigator.clipboard && window.isSecureContext) {
     navigator.clipboard.writeText(smbPath).then(() => {
       showToast('Сетевой путь к panel.log скопирован в буфер обмена!', 'success');
@@ -2621,10 +2623,52 @@ function switchProxySubtab(subtab) {
 window.switchProxySubtab = switchProxySubtab;
 
 let directClientCachedDelay = 0;
+const clientPingCache = new Map();
+
+function setClientPing(name, delay) {
+  if (!name || typeof delay !== 'number' || delay <= 0) return;
+  clientPingCache.set(name, delay);
+  const trimmed = name.trim();
+  clientPingCache.set(trimmed, delay);
+  const noSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+  clientPingCache.set(noSpace, delay);
+  const withSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+  clientPingCache.set(withSpace, delay);
+}
+window.setClientPing = setClientPing;
+
+function getClientPing(name) {
+  if (!name) return 0;
+  if (clientPingCache.has(name)) return clientPingCache.get(name);
+  const trimmed = name.trim();
+  if (clientPingCache.has(trimmed)) return clientPingCache.get(trimmed);
+  const noSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+  if (clientPingCache.has(noSpace)) return clientPingCache.get(noSpace);
+  const withSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+  if (clientPingCache.has(withSpace)) return clientPingCache.get(withSpace);
+  return 0;
+}
+window.getClientPing = getClientPing;
+
+function findProxyInMap(map, name) {
+  if (!map || !name) return null;
+  if (map[name]) return map[name];
+  const trimmed = name.trim();
+  if (map[trimmed]) return map[trimmed];
+  const noSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+  if (map[noSpace]) return map[noSpace];
+  const withSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+  if (map[withSpace]) return map[withSpace];
+  return null;
+}
 
 function getLastDelay(proxy) {
   if (!proxy) return 0;
-  const isDirectNode = proxy.name === 'DIRECT' || proxy.name === 'direct';
+  const name = typeof proxy === 'string' ? proxy : (proxy.name || '');
+  const cached = getClientPing(name);
+  if (cached > 0) return cached;
+
+  const isDirectNode = name === 'DIRECT' || name === 'direct';
   if (Array.isArray(proxy.history) && proxy.history.length > 0) {
     const d = proxy.history[proxy.history.length - 1].delay || 0;
     if (d > 0) {
@@ -2650,17 +2694,34 @@ function getLastDelay(proxy) {
 }
 
 function resolveSelectedProxyDelay(proxyName, proxies) {
-  const current = proxies[proxyName];
-  if (!current) return 0;
+  const current = findProxyInMap(proxies, proxyName);
+  if (!current) {
+    return getClientPing(proxyName);
+  }
   
   let active = current;
+  let activeLeafName = current.now || null;
   let limit = 5;
   while (active && active.now && limit > 0) {
-    const next = proxies[active.now];
+    activeLeafName = active.now;
+    const next = findProxyInMap(proxies, active.now);
     if (!next) break;
     active = next;
     limit--;
   }
+  
+  // 1. Проверяем кэш прямого замера для активной конечной локации
+  if (activeLeafName) {
+    const leafNowPing = getClientPing(activeLeafName);
+    if (leafNowPing > 0) return leafNowPing;
+  }
+  if (active && active.name) {
+    const leafPing = getClientPing(active.name);
+    if (leafPing > 0) return leafPing;
+  }
+  // 2. Проверяем кэш для самой группы
+  const groupPing = getClientPing(proxyName);
+  if (groupPing > 0) return groupPing;
   
   const activeDelay = getLastDelay(active);
   if (activeDelay > 0) return activeDelay;
@@ -2675,6 +2736,72 @@ function getLatencyBgColor(delay) {
   return 'rgba(255, 138, 128, 0.15)';
 }
 
+function updateLatencyInDOM(targetName, delay, activeNode) {
+  if (!delay || delay <= 0) return;
+  const names = [targetName, activeNode].filter(Boolean);
+  
+  // 1. Обновляем бейджи на карточках групп
+  document.querySelectorAll('.pgc-card').forEach(card => {
+    const gName = card.dataset.groupName;
+    const selName = card.querySelector('.pgc-sel-name')?.textContent?.trim();
+    const isTarget = names.some(n => n === gName || n.trim() === gName || n === selName);
+    if (isTarget) {
+      const badge = card.querySelector('.pgc-count-badge');
+      if (badge) {
+        badge.textContent = `${delay} ms`;
+        badge.style.color = getLatencyColor(delay);
+        badge.style.background = getLatencyBgColor(delay);
+      }
+    }
+  });
+
+  // 2. Обновляем кнопки нод в панелях
+  document.querySelectorAll('.pgc-node-btn').forEach(btn => {
+    const nName = btn.querySelector('.pgc-nb-name')?.textContent?.trim();
+    if (names.some(n => n === nName || n.trim() === nName)) {
+      const dot = btn.querySelector('.pgc-nb-dot');
+      if (dot) dot.className = 'pgc-nb-dot ' + getLatencyDotClass(delay);
+      const delaySpan = btn.querySelector('.pgc-nb-delay');
+      if (delaySpan) {
+        delaySpan.textContent = `${delay}ms`;
+        delaySpan.style.color = getLatencyColor(delay);
+      } else {
+        const countSpan = btn.querySelector('.pgc-nb-count');
+        if (countSpan) {
+          countSpan.textContent = `${delay} ms`;
+          countSpan.style.color = getLatencyColor(delay);
+          countSpan.style.background = getLatencyBgColor(delay);
+        }
+      }
+    }
+  });
+
+  // 3. Обновляем ноды в панели провайдеров
+  document.querySelectorAll('.pgc-prov-node').forEach(pNode => {
+    const nName = pNode.querySelector('.pgc-nb-name')?.textContent?.trim();
+    if (names.some(n => n === nName || n.trim() === nName)) {
+      const dot = pNode.querySelector('.pgc-nb-dot');
+      if (dot) dot.className = 'pgc-nb-dot ' + getLatencyDotClass(delay);
+      const delaySpan = pNode.querySelector('.pgc-nb-delay');
+      if (delaySpan) {
+        delaySpan.textContent = `${delay}ms`;
+        delaySpan.style.color = getLatencyColor(delay);
+      }
+    }
+  });
+
+  // 4. Обновляем точки пинга
+  document.querySelectorAll('.pgc-dot').forEach(dot => {
+    names.forEach(n => {
+      if (dot.title && dot.title.startsWith(n + ':')) {
+        dot.className = 'pgc-dot ' + getLatencyDotClass(delay) + (dot.classList.contains('pgc-dot-active') ? ' pgc-dot-active' : '');
+        dot.title = `${n}: ${delay}ms`;
+      }
+    });
+  });
+}
+window.updateLatencyInDOM = updateLatencyInDOM;
+
 async function pingProxyNode(nodeName) {
   try {
     showToast(`⚡ Измеряем пинг для ${nodeName}...`);
@@ -2687,9 +2814,33 @@ async function pingProxyNode(nodeName) {
     const data = await res.json();
     if (data.success && data.delay > 0) {
       showToast(`✅ Пинг ${nodeName}: ${data.delay} ms`, 'success');
-      if (nodeName === 'DIRECT' || nodeName === 'direct') {
-        directClientCachedDelay = data.delay;
+      const d = data.delay;
+      setClientPing(nodeName, d);
+
+      if (data.activeNode) {
+        setClientPing(data.activeNode, d);
       }
+
+      // Кросс-синхронизация групп и выбранных локаций
+      if (proxyDashboardData && proxyDashboardData.proxies && proxyDashboardData.proxies.proxies) {
+        const allP = proxyDashboardData.proxies.proxies;
+        const targetNode = findProxyInMap(allP, nodeName);
+        if (targetNode && targetNode.now) {
+          setClientPing(targetNode.now, d);
+        }
+        for (const [gName, gObj] of Object.entries(allP)) {
+          if (gObj && (gObj.now === nodeName || (data.activeNode && gObj.now === data.activeNode) || (targetNode && targetNode.now && gObj.now === targetNode.now))) {
+            setClientPing(gName, d);
+          }
+        }
+      }
+
+      if (nodeName === 'DIRECT' || nodeName === 'direct') {
+        directClientCachedDelay = d;
+      }
+
+      // Мгновенное обновление DOM
+      updateLatencyInDOM(nodeName, d, data.activeNode);
     } else {
       showToast(`❌ Пинг ${nodeName}: таймаут или недоступен`, 'error');
     }
@@ -3268,6 +3419,12 @@ function renderProxyProviders(providersData, proxiesData) {
       const dot = document.createElement('span');
       dot.className = 'pgc-dot ' + getLatencyDotClass(d);
       dot.title = p.name + ': ' + (d > 0 ? d + 'ms' : 'N/A') + ' (' + p.type + ')';
+      dot.style.cursor = 'pointer';
+      dot.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pingProxyNode(p.name);
+      });
       dotsRow.appendChild(dot);
     });
 
@@ -3293,6 +3450,12 @@ function renderProxyProviders(providersData, proxiesData) {
         <span class="pgc-nb-type">${p.type}</span>
         ${d > 0 ? '<span class="pgc-nb-delay" style="color:' + getLatencyColor(d) + '">' + d + 'ms</span>' : '<span class="pgc-nb-delay" style="color:var(--text-muted)">—</span>'}
       `;
+      nodeDiv.style.cursor = 'pointer';
+      nodeDiv.addEventListener('contextmenu', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        pingProxyNode(p.name);
+      });
       nodesPanel.appendChild(nodeDiv);
     });
 
@@ -3310,6 +3473,11 @@ function renderProxyProviders(providersData, proxiesData) {
 }
 
 async function selectProxyInGroup(groupName, nodeName) {
+  const nodePing = getClientPing(nodeName);
+  if (nodePing > 0) {
+    setClientPing(groupName, nodePing);
+  }
+
   // 1. Мгновенное оптимистичное обновление элементов карточки в DOM (0ms UI latency)
   try {
     const cards = document.querySelectorAll('.pgc-card');
@@ -3317,6 +3485,14 @@ async function selectProxyInGroup(groupName, nodeName) {
       if (card.dataset.groupName === groupName) {
         const selName = card.querySelector('.pgc-sel-name');
         if (selName) selName.textContent = nodeName;
+
+        const badge = card.querySelector('.pgc-count-badge');
+        if (badge) {
+          const d = nodePing || (proxyDashboardData?.proxies?.proxies?.[nodeName] ? getLastDelay(proxyDashboardData.proxies.proxies[nodeName]) : 0);
+          badge.textContent = d > 0 ? `${d} ms` : '—';
+          badge.style.color = getLatencyColor(d);
+          badge.style.background = getLatencyBgColor(d);
+        }
 
         const btns = card.querySelectorAll('.pgc-node-btn');
         btns.forEach(btn => {
@@ -3358,18 +3534,7 @@ async function selectProxyInGroup(groupName, nodeName) {
   }
 }
 async function healthcheckGroup(groupName) {
-  try {
-    showToast(`⚡ Измеряем пинг группы: ${groupName}...`);
-    const res = await fetch(`/api/xkeen/proxies/${encodeURIComponent(groupName)}/delay?url=${encodeURIComponent('http://www.gstatic.com/generate_204')}&timeout=5000`);
-    if (res.ok) {
-      showToast(`✅ Пинг группы ${groupName} успешно проверен!`, 'success');
-      await loadProxiesDashboard();
-    } else {
-      showToast(`❌ Ошибка проверки пинга группы ${groupName}`, 'error');
-    }
-  } catch (err) {
-    showToast(`Ошибка сети при тесте пинга: ${err.message}`, 'error');
-  }
+  return pingProxyNode(groupName);
 }
 window.healthcheckGroup = healthcheckGroup;
 
@@ -3388,7 +3553,13 @@ async function healthcheckProvider(providerName) {
         if (prov && Array.isArray(prov.proxies)) {
           let alive = 0;
           prov.proxies.forEach(p => {
-            if (getLastDelay(p) > 0) alive++;
+            if (p.history && p.history.length > 0) {
+              const last = p.history[p.history.length - 1];
+              if (last.delay > 0) {
+                setClientPing(p.name, last.delay);
+                alive++;
+              }
+            }
           });
           if (alive > 0) {
             showToast(`✅ Тест пинга ${providerName} завершён. Доступно: ${alive}/${prov.proxies.length}`, 'success');
@@ -3650,7 +3821,7 @@ function startSystemStatsPolling() {
   };
   
   poll();
-  systemStatsInterval = setInterval(poll, 1000);
+  systemStatsInterval = setInterval(poll, 3000);
 }
 
 function setupSystemMonitorToggle() {
@@ -3736,7 +3907,7 @@ function startClientsPolling(silent = false) {
   }
   
   loadClients();
-  clientsInterval = setInterval(loadClients, silent ? 10000 : 1000);
+  clientsInterval = setInterval(loadClients, silent ? 15000 : 4000);
 }
 
 function stopClientsPolling() {
@@ -3873,8 +4044,7 @@ function renderClientsTable() {
       }
 
       // 5. VPN Toggle & Group dropdown select (Skip updating state if custom select dropdown is currently open)
-      const wrapper = tr.querySelector('.custom-select-wrapper');
-      const isDropdownOpen = wrapper && wrapper.classList.contains('open');
+      const isDropdownOpen = !!tr.querySelector('.custom-select-wrapper.open');
 
       if (!isDropdownOpen) {
         const realInput = tr.querySelector('input[type="checkbox"]');
@@ -3882,7 +4052,7 @@ function renderClientsTable() {
           realInput.checked = c.vpnEnabled;
         }
 
-        const select = tr.querySelector('.group-select');
+        const select = tr.querySelector('.group-select:not(.zapret-select)');
         if (select) {
           const expectedDisabled = !c.vpnEnabled;
           if (select.disabled !== expectedDisabled) {
@@ -3896,11 +4066,25 @@ function renderClientsTable() {
             select.syncCustomSelect();
           }
         }
+
+        const selectZapret = tr.querySelector('.zapret-select');
+        if (selectZapret) {
+          const currentZapret = c.zapretMode || 'default';
+          if (selectZapret.value !== currentZapret) {
+            selectZapret.value = currentZapret;
+          }
+          if (typeof selectZapret.syncCustomSelect === 'function') {
+            selectZapret.syncCustomSelect();
+          }
+        }
       }
     });
     return;
   }
   
+  const tableWrapper = document.getElementById('clients-table-wrapper');
+  const savedScrollLeft = tableWrapper ? tableWrapper.scrollLeft : 0;
+
   tbody.innerHTML = '';
   
   if (filtered.length === 0) {
@@ -4085,6 +4269,12 @@ function renderClientsTable() {
   });
   if (typeof initCustomSelects === 'function') {
     initCustomSelects();
+  }
+  if (tableWrapper && savedScrollLeft > 0) {
+    tableWrapper.scrollLeft = savedScrollLeft;
+    requestAnimationFrame(() => {
+      if (tableWrapper) tableWrapper.scrollLeft = savedScrollLeft;
+    });
   }
 }
 

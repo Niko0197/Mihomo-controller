@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.9.1">
+  <link rel="stylesheet" href="/app.css?v=1.9.2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.9.1" defer></script>
-  <script src="/app_monitoring.js?v=1.9.1" defer></script>
+  <script src="/app.js?v=1.9.2" defer></script>
+  <script src="/app_monitoring.js?v=1.9.2" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -127,9 +127,6 @@
         <button class="tab-btn" id="tab-btn-dpi" onclick="switchTab('dpi')">⚡ Тюнер DPI (ByeDPI)</button>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
-        <button class="tab-btn" id="tab-btn-updates" onclick="switchTab('updates')">🔄 Обновления <span class="nav-update-dot" id="nav-update-dot" style="display: none;"></span></button>
-
-        <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
         <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
       </nav>
     </aside>
@@ -187,18 +184,6 @@
       </div>
     </div>
 
-    <!-- Вкладка: QR-подключения -->
-    <div id="tab-content-qr" class="tab-content">
-      <div class="card">
-        <div class="card-title" style="margin-bottom: 20px;">
-          <span>📱 Быстрые подключения (QR-коды)</span>
-        </div>
-        
-        <div class="qr-grid" id="qr-codes-container">
-          <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка подключений...</div>
-        </div>
-      </div>
-    </div>
 
     <!-- Вкладка 1: Утекшие домены -->
     <div id="tab-content-leak" class="tab-content">
@@ -707,7 +692,7 @@
             </div>
             <div>
               <span style="color: var(--text-muted);">📂 Сетевой доступ (SMB):</span>
-              <code id="txt-panel-log-smb-path" style="color: #a5d6a7; user-select: all; font-weight: 500;">\\Netcraze-9884\opkg\root\vpn_updater\logs\panel.log</code>
+              <code id="txt-panel-log-smb-path" style="color: #a5d6a7; user-select: all; font-weight: 500;">\\Keenetic\opkg\root\vpn_updater\logs\panel.log</code>
             </div>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
@@ -1279,7 +1264,7 @@
             <div class="update-hero-icon" id="panel-hero-icon">✅</div>
             <div class="update-hero-info">
               <div class="update-hero-title" id="panel-hero-title">У вас установлена актуальная версия панели</div>
-              <div class="update-hero-desc" id="panel-hero-desc">Текущая версия: v1.9.1 • Система не требует обновления</div>
+              <div class="update-hero-desc" id="panel-hero-desc">Текущая версия: v1.9.2 • Система не требует обновления</div>
             </div>
             <div class="update-hero-actions" id="panel-hero-actions" style="display: none;">
               <button class="btn btn-primary btn-glow" id="btn-hero-update-panel" onclick="installLatestAvailable()">🚀 Обновить в 1 клик</button>

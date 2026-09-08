@@ -100,9 +100,7 @@ async function setMihomoMode(mode) {
   try {
     await makeRequest('PATCH', '/configs', JSON.stringify({ mode }));
     let altConfigPath = '/opt/etc/mihomo/config.yaml';
-    if (!fs.existsSync(altConfigPath) && fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
-      altConfigPath = '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
-    } else if (!fs.existsSync(altConfigPath)) {
+    if (!fs.existsSync(altConfigPath)) {
       altConfigPath = path.join(__dirname, 'config.yaml');
     }
     if (fs.existsSync(altConfigPath)) {
@@ -306,45 +304,65 @@ async function main() {
     }
   }
 
-  // 2. Измерение пинга для всех трех групп на каждой минуте (для Failover)
+  // 2. Измерение пинга для групп (для Failover)
   const url = encodeURIComponent('http://www.gstatic.com/generate_204');
   const timeout = 3000;
   
+  let availableProxies = [];
+  try {
+    const pRes = await makeRequest('GET', '/proxies');
+    if (pRes.statusCode === 200) {
+      const pData = JSON.parse(pRes.data);
+      availableProxies = Object.keys(pData.proxies || {});
+    }
+  } catch (e) {}
+
+  const hasStealth1 = availableProxies.includes('💎 StealthSurf');
+  const hasStealth2 = availableProxies.includes('💎 StealthSurf 2');
+  const hasGithub = availableProxies.includes('🎱 GitHub');
+  const hasFailoverTargets = hasStealth1 || hasStealth2 || hasGithub;
+
   let stealth1Delay = 0;
   let stealth2Delay = 0;
   let githubDelay = 0;
 
-  try {
-    const res1 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf')}/delay?url=${url}&timeout=${timeout}`);
-    if (res1.statusCode === 200) {
-      stealth1Delay = JSON.parse(res1.data).delay || 0;
-    }
-  } catch (e) {}
+  if (hasStealth1) {
+    try {
+      const res1 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf')}/delay?url=${url}&timeout=${timeout}`);
+      if (res1.statusCode === 200) {
+        stealth1Delay = JSON.parse(res1.data).delay || 0;
+      }
+    } catch (e) {}
+  }
 
-  try {
-    const res2 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf 2')}/delay?url=${url}&timeout=${timeout}`);
-    if (res2.statusCode === 200) {
-      stealth2Delay = JSON.parse(res2.data).delay || 0;
-    }
-  } catch (e) {}
+  if (hasStealth2) {
+    try {
+      const res2 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf 2')}/delay?url=${url}&timeout=${timeout}`);
+      if (res2.statusCode === 200) {
+        stealth2Delay = JSON.parse(res2.data).delay || 0;
+      }
+    } catch (e) {}
+  }
 
-  try {
-    const res3 = await makeRequest('GET', `/proxies/${encodeURIComponent('🎱 GitHub')}/delay?url=${url}&timeout=${timeout}`);
-    if (res3.statusCode === 200) {
-      githubDelay = JSON.parse(res3.data).delay || 0;
-    }
-  } catch (e) {}
+  if (hasGithub) {
+    try {
+      const res3 = await makeRequest('GET', `/proxies/${encodeURIComponent('🎱 GitHub')}/delay?url=${url}&timeout=${timeout}`);
+      if (res3.statusCode === 200) {
+        githubDelay = JSON.parse(res3.data).delay || 0;
+      }
+    } catch (e) {}
+  }
 
   const isStealth1Alive = stealth1Delay > 0;
   const isStealth2Alive = stealth2Delay > 0;
   const isGithubAlive = githubDelay > 0;
 
   // Логирование пингов по расписанию для отчетов в консоли
-  if (runStealthSurfPing) {
+  if (runStealthSurfPing && (hasStealth1 || hasStealth2)) {
     console.log(`[${getTimestamp()}] Фоновый опрос пинга StealthSurf: 1-й: ${stealth1Delay} ms | 2-й: ${stealth2Delay} ms`);
     state.lastStealthSurfPing = now;
   }
-  if (runGithubPing) {
+  if (runGithubPing && hasGithub) {
     console.log(`[${getTimestamp()}] Фоновый опрос пинга GitHub: ${githubDelay} ms`);
     state.lastGithubPing = now;
   }
@@ -352,9 +370,9 @@ async function main() {
   // --- Логика Failover ---
   // Проверяем, управляет ли пользователь режимом вручную (например, включен DIRECT или ZAPRET)
   const currentAppMode = getAppMode();
-  if (currentAppMode === 'rule') {
-    // Проверка падения основного StealthSurf
-    const isStealthBothDown = !isStealth1Alive && !isStealth2Alive;
+  if (hasFailoverTargets && currentAppMode === 'rule') {
+    // Проверка падения основного StealthSurf (если они настроены)
+    const isStealthBothDown = (!hasStealth1 || !isStealth1Alive) && (!hasStealth2 || !isStealth2Alive);
     if (isStealthBothDown && isGithubAlive) {
       if (!state.stealthWasDown) {
         console.log(`[${getTimestamp()}] ВНИМАНИЕ: Оба прокси StealthSurf недоступны. Резервный канал GitHub активен.`);
@@ -368,7 +386,7 @@ async function main() {
     }
 
     // Проверка полного падения всех каналов
-    const isAllDown = isStealthBothDown && !isGithubAlive;
+    const isAllDown = isStealthBothDown && (!hasGithub || !isGithubAlive);
     if (isAllDown) {
       if (state.allDownSince === 0) {
         state.allDownSince = now;
@@ -474,7 +492,7 @@ function ensureServerRunning() {
     port: 4000,
     path: '/api/data',
     method: 'GET',
-    timeout: 2000
+    timeout: 6000
   };
 
   const req = http.request(options, (res) => {
@@ -482,11 +500,11 @@ function ensureServerRunning() {
   });
 
   req.on('error', (err) => {
-    // Check if server.js process is already running to avoid runaway process duplication
+    // Надежная проверка наличия работающего процесса server.js через ps
     try {
       const { execSync } = require('child_process');
-      const pids = execSync('pgrep -f "server.js"', { timeout: 1000 }).toString().trim();
-      if (pids) {
+      const psOut = execSync('ps w 2>/dev/null || ps 2>/dev/null', { timeout: 1500 }).toString();
+      if (psOut.includes('server.js')) {
         return;
       }
     } catch (e) {}
