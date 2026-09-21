@@ -255,15 +255,41 @@ echo "  ✓ Службы YouTube DPI-Bypass настроены и запущен
 
 # 6. Развертывание базовой конфигурации config.yaml
 echo "→ Шаг 5: Проверка и развертывание конфигурации Mihomo..."
-mkdir -p /opt/etc/mihomo/proxy_providers
-if [ ! -f "/opt/etc/mihomo/config.yaml" ]; then
+mkdir -p /opt/etc/mihomo/proxy_providers /opt/etc/mihomo/rules
+
+if [ "$MODE" = "install" ]; then
+    # При чистой установке развертываем готовый базовый config.yaml
+    if [ -f "/opt/etc/mihomo/config.yaml" ]; then
+        cp -f "/opt/etc/mihomo/config.yaml" "/opt/etc/mihomo/config.yaml.bak"
+        echo "  • Предыдущий config.yaml сохранен в /opt/etc/mihomo/config.yaml.bak"
+    fi
     if [ -f "$INSTALL_DIR/config.yaml" ]; then
-        cp "$INSTALL_DIR/config.yaml" /opt/etc/mihomo/config.yaml
-        echo "  ✓ Развернут базовый config.yaml"
+        cp -f "$INSTALL_DIR/config.yaml" /opt/etc/mihomo/config.yaml
+        chmod 644 /opt/etc/mihomo/config.yaml
+        echo "  ✓ Развернут готовый базовый config.yaml в /opt/etc/mihomo/config.yaml"
     elif [ -f "$INSTALL_DIR/config.example.yaml" ]; then
-        cp "$INSTALL_DIR/config.example.yaml" /opt/etc/mihomo/config.yaml
+        cp -f "$INSTALL_DIR/config.example.yaml" /opt/etc/mihomo/config.yaml
+        chmod 644 /opt/etc/mihomo/config.yaml
         echo "  ✓ Развернут базовый config.yaml из шаблона config.example.yaml"
     fi
+else
+    # При обновлении не перезаписываем уже настроенный рабочий config.yaml
+    if [ ! -f "/opt/etc/mihomo/config.yaml" ]; then
+        if [ -f "$INSTALL_DIR/config.yaml" ]; then
+            cp -f "$INSTALL_DIR/config.yaml" /opt/etc/mihomo/config.yaml
+            chmod 644 /opt/etc/mihomo/config.yaml
+            echo "  ✓ Развернут базовый config.yaml в /opt/etc/mihomo/config.yaml"
+        fi
+    else
+        echo "  • Текущая конфигурация /opt/etc/mihomo/config.yaml сохранена без изменений"
+    fi
+fi
+
+# Развертывание clients_rules.yaml при его отсутствии
+if [ -f "$INSTALL_DIR/clients_rules.yaml" ] && [ ! -f "/opt/etc/mihomo/clients_rules.yaml" ]; then
+    cp -f "$INSTALL_DIR/clients_rules.yaml" /opt/etc/mihomo/clients_rules.yaml
+    chmod 644 /opt/etc/mihomo/clients_rules.yaml
+    echo "  ✓ Развернут файл правил клиентов /opt/etc/mihomo/clients_rules.yaml"
 fi
 
 # Перезапуск службы Mihomo (если установлена), чтобы подхватить конфиг

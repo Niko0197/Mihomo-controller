@@ -19,10 +19,10 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.13/addon/search/jump-to-line.min.js"></script>
  
   <!-- Подключаем внешние стили и логику -->
-  <link rel="stylesheet" href="/app.css?v=1.9.1">
+  <link rel="stylesheet" href="/app.css?v=1.10.0">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-  <script src="/app.js?v=1.9.1" defer></script>
-  <script src="/app_monitoring.js?v=1.9.1" defer></script>
+  <script src="/app.js?v=1.10.0" defer></script>
+  <script src="/app_monitoring.js?v=1.10.0" defer></script>
 </head>
 <body>
   <div class="app-layout">
@@ -127,9 +127,6 @@
         <button class="tab-btn" id="tab-btn-dpi" onclick="switchTab('dpi')">⚡ Тюнер DPI (ByeDPI)</button>
         <button class="tab-btn" id="tab-btn-rules" onclick="switchTab('rules')">🛠️ Быстрые правила</button>
         <button class="tab-btn" id="tab-btn-editor" onclick="switchTab('editor')">📝 Редактор YAML</button>
-        <button class="tab-btn" id="tab-btn-updates" onclick="switchTab('updates')">🔄 Обновления <span class="nav-update-dot" id="nav-update-dot" style="display: none;"></span></button>
-
-        <button class="tab-btn" id="tab-btn-qr" onclick="switchTab('qr')">📱 QR-подключения</button>
         <button class="tab-btn" id="tab-btn-leak" onclick="switchTab('leak')">🔍 Утекшие домены</button>
       </nav>
     </aside>
@@ -187,18 +184,6 @@
       </div>
     </div>
 
-    <!-- Вкладка: QR-подключения -->
-    <div id="tab-content-qr" class="tab-content">
-      <div class="card">
-        <div class="card-title" style="margin-bottom: 20px;">
-          <span>📱 Быстрые подключения (QR-коды)</span>
-        </div>
-        
-        <div class="qr-grid" id="qr-codes-container">
-          <div style="text-align: center; color: var(--text-muted); padding: 40px 0;">Загрузка подключений...</div>
-        </div>
-      </div>
-    </div>
 
     <!-- Вкладка 1: Утекшие домены -->
     <div id="tab-content-leak" class="tab-content">
@@ -268,20 +253,24 @@
           🔌 Импорт прокси по ссылкам
         </div>
         <p class="timestamp" style="margin-bottom: 20px; font-size: 0.95rem;">
-          Вставьте ссылки (одна на строку) форматов <code>vless://</code>, <code>ss://</code> или <code>trojan://</code>. Они добавятся в конфиг в раздел proxies и будут привязаны к выбранным группам.
+          Вставьте ссылки (одна на строку) форматов <code>vless://</code>, <code>ss://</code>, <code>trojan://</code> или зашифрованные ссылки <code>happ://crypt...</code>, <code>incy://crypt1/...</code>. Они добавятся в конфиг в раздел proxies и будут привязаны к выбранным группам.
         </p>
         <div style="margin-bottom: 20px;">
-          <textarea id="import-links-textarea" placeholder="Вставьте vless://, ss:// или trojan:// ссылки (каждая с новой строки)..."></textarea>
+          <textarea id="import-links-textarea" placeholder="Вставьте vless://, ss://, trojan:// или happ:// / incy:// зашифрованные ссылки (каждая с новой строки)..."></textarea>
         </div>
         
+        <div style="display: flex; gap: 10px; margin-bottom: 20px; align-items: center; flex-wrap: wrap;">
+          <button class="btn btn-primary" id="btn-import-links">📥 Импортировать прокси</button>
+          <button type="button" class="btn" id="btn-decode-happ-import" onclick="decodeHappInTextarea()" style="font-size: 0.85rem;" title="Расшифровать Happ и INCY ссылки в VLESS прямо в поле ввода">🔓 Расшифровать Happ / INCY</button>
+          <span id="happ-decode-status" style="font-size: 0.8rem; color: #34d399; display: none;"></span>
+        </div>
+
         <div style="margin-bottom: 25px;">
           <h4 style="font-family: var(--font-outfit); font-weight: 600; margin-bottom: 12px;">Выберите группы прокси для привязки узлов:</h4>
           <div id="import-groups-checkboxes" class="checkbox-grid">
             <!-- Группы подгрузятся динамически -->
           </div>
         </div>
-
-        <button class="btn btn-primary" id="btn-import-links">📥 Импортировать прокси</button>
       </div>
     </div>
 
@@ -297,25 +286,196 @@
         <div id="add-sub-modal" style="display: none;">
           <h3 style="font-family: var(--font-outfit); margin-bottom: 10px;" id="sub-modal-title">Добавить новую подписку</h3>
           <p style="font-size: 0.85rem; color: #a0aec0; margin-bottom: 15px;">
-            💡 Поддерживаются любые подписки: ссылки на YAML, Base64 и **прямые .txt файлы со списками vless/vmess/trojan** (например с GitHub). Подписка автоматически получит авто-группу <span style="color: #48bb78; font-weight: 600;">URLTest</span> с 1-часовым обновлением и исключит нерабочие ноды.
+            💡 Поддерживаются любые подписки: ссылки на YAML, Base64, **прямые .txt списки**, а также зашифрованные **happ://crypt...** и **incy://crypt1/...** (автоматически декодируются ядром панели). Подписка автоматически получит авто-группу <span style="color: #48bb78; font-weight: 600;">URLTest</span> с 1-часовым обновлением и исключит нерабочие ноды.
           </p>
           <input type="hidden" id="edit-sub-old-name">
+          <input type="hidden" id="sub-client-preset" value="happ_android">
+
           <div class="sub-grid-container">
             <div>
               <label class="modal-label">Название подписки (латиницей, без пробелов)</label>
               <input type="text" id="sub-name" class="search-input" placeholder="например: goida_vpn">
             </div>
             <div>
-              <label class="modal-label">Ссылка на подписку (URL или .txt)</label>
-              <input type="text" id="sub-url" class="search-input" placeholder="https://... или https://.../1.txt">
-            </div>
-            <div>
-              <label class="modal-label">Имя устройства / HWID (Device Name)</label>
-              <input type="text" id="sub-device-name" class="search-input" placeholder="например: Keenetic-Giga или KN-Titan">
+              <label class="modal-label">Ссылка на подписку (URL, .txt, happ:// или incy://)</label>
+              <input type="text" id="sub-url" class="search-input" placeholder="https://... , happ://crypt5/... или incy://crypt1/..." oninput="onSubUrlInput(this.value)">
+              <div id="sub-url-happ-hint" style="display: none; font-size: 0.78rem; color: #34d399; margin-top: 4px;">
+                🔐 Зашифрованная ссылка: будет расшифрована автоматически!
+              </div>
             </div>
             <div>
               <label class="modal-label">Интервал обновления (в секундах)</label>
               <input type="number" id="sub-interval" class="search-input" value="3600">
+            </div>
+          </div>
+
+          <!-- Секция: Тип группы и проверка доступности (Group Type & Health Check) -->
+          <div class="sub-group-section" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px 18px; margin-top: 15px; margin-bottom: 18px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.15rem;">🎛️</span>
+                <span style="font-family: var(--font-outfit); font-weight: 600; font-size: 0.95rem; color: #ffffff;">
+                  Тип авто-группы подписки и проверка доступности
+                </span>
+              </div>
+              <span style="font-size: 0.78rem; color: var(--text-muted);">При смене типа недействующие параметры автоматически удаляются</span>
+            </div>
+
+            <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">
+              Выберите тип поведения группы:
+            </div>
+            
+            <input type="hidden" id="sub-group-type" value="url-test">
+            
+            <div class="sub-group-type-container" style="display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px;">
+              <button type="button" class="sub-group-type-btn active-preset" data-type="url-test" onclick="selectSubGroupType('url-test')">
+                <span>🔄</span>
+                <span>URL-Test (Автовыбор лучшего)</span>
+              </button>
+              <button type="button" class="sub-group-type-btn" data-type="fallback" onclick="selectSubGroupType('fallback')">
+                <span>🛡️</span>
+                <span>Fallback (Резервный переключатель)</span>
+              </button>
+              <button type="button" class="sub-group-type-btn" data-type="load-balance" onclick="selectSubGroupType('load-balance')">
+                <span>⚖️</span>
+                <span>Load-Balance (Балансировка)</span>
+              </button>
+              <button type="button" class="sub-group-type-btn" data-type="select" onclick="selectSubGroupType('select')">
+                <span>👆</span>
+                <span>Select (Ручной выбор)</span>
+              </button>
+            </div>
+
+            <!-- Динамическое пояснение к выбранному типу группы -->
+            <div id="sub-group-type-hint" style="font-size: 0.82rem; color: #93c5fd; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 8px; padding: 8px 12px; margin-bottom: 14px; line-height: 1.45;">
+              🔄 <strong>URL-Test</strong>: ядро периодически пингует ноды и автоматически направляет трафик на сервер с наименьшей задержкой.
+            </div>
+
+            <!-- Блок параметров группы (скрывается полностью для 'select') -->
+            <div id="sub-group-params-box">
+              <div class="sub-grid-container" style="margin-bottom: 10px;">
+                <div style="grid-column: span 2;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                    <label class="modal-label" style="margin: 0;">URL проверки доступности (Health Check URL)</label>
+                    <div style="display: flex; gap: 6px;">
+                      <button type="button" class="btn" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;" onclick="setGroupUrlPreset('http://www.gstatic.com/generate_204')">Google 204</button>
+                      <button type="button" class="btn" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;" onclick="setGroupUrlPreset('https://cp.cloudflare.com/generate_204')">Cloudflare 204</button>
+                    </div>
+                  </div>
+                  <input type="text" id="sub-group-url" class="search-input" value="http://www.gstatic.com/generate_204" placeholder="http://www.gstatic.com/generate_204">
+                </div>
+
+                <div>
+                  <label class="modal-label">Интервал проверки (сек)</label>
+                  <input type="number" id="sub-group-interval" class="search-input" value="300" min="10" max="86400">
+                </div>
+
+                <!-- Порог переключения: ТОЛЬКО для url-test -->
+                <div id="field-group-tolerance">
+                  <label class="modal-label">Порог переключения (tolerance, мс)</label>
+                  <input type="number" id="sub-group-tolerance" class="search-input" value="50" min="0" max="5000">
+                  <div style="font-size: 0.74rem; color: var(--text-muted); margin-top: 2px;">Переключит ноду, только если разница пинга больше этого значения</div>
+                </div>
+
+                <!-- Алгоритм балансировки: ТОЛЬКО для load-balance -->
+                <div id="field-group-strategy" style="display: none;">
+                  <label class="modal-label">Алгоритм распределения (strategy)</label>
+                  <select id="sub-group-strategy" style="width: 100%; height: 38px; background: var(--bg-card); color: var(--text); border: 1px solid var(--border-color); border-radius: 6px; padding: 0 10px; font-size: 0.88rem; outline: none;">
+                    <option value="consistent-hashing">consistent-hashing (Привязка к источнику, рекомендуется)</option>
+                    <option value="round-robin">round-robin (Поочередный циклический опрос)</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label class="modal-label">Ожидаемый HTTP статус (expected-status)</label>
+                  <input type="text" id="sub-group-expected-status" class="search-input" placeholder="например: 204 (опционально)">
+                </div>
+              </div>
+
+              <div style="display: flex; align-items: center; gap: 8px; margin-top: 8px;">
+                <input type="checkbox" id="sub-group-lazy" checked style="accent-color: var(--accent); width: 16px; height: 16px; cursor: pointer;">
+                <label for="sub-group-lazy" style="font-size: 0.85rem; color: var(--text); cursor: pointer;">
+                  Ленивая проверка (lazy): не отправлять проверочные запросы, если трафик через группу не идёт
+                </label>
+              </div>
+            </div>
+          </div>
+
+          <!-- Секция: Идентификация устройства и мимикрия (HWID & Client Spoofing) -->
+          <div class="sub-mimicry-section" style="background: rgba(255, 255, 255, 0.02); border: 1px solid var(--border-color); border-radius: 12px; padding: 16px 18px; margin-top: 15px; margin-bottom: 18px;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
+              <div style="display: flex; align-items: center; gap: 8px;">
+                <span style="font-size: 1.15rem;">🛡️</span>
+                <span style="font-family: var(--font-outfit); font-weight: 600; font-size: 0.95rem; color: #ffffff;">
+                  Идентификация устройства и мимикрия (HWID & Spoofing)
+                </span>
+              </div>
+              <span style="font-size: 0.78rem; color: var(--text-muted);">Для обхода Remnawave HWID-лимитов и маскировки под приложения</span>
+            </div>
+
+            <div style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 8px; font-weight: 500;">
+              Быстрый выбор клиента (пресеты по аналогии с DNS):
+            </div>
+            <div id="hwid-presets-list" class="hwid-presets-container" style="display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 14px;">
+              <!-- Пресеты подгружаются динамически -->
+            </div>
+
+            <!-- Поле ввода HWID -->
+            <div style="margin-bottom: 12px;">
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+                <label class="modal-label" style="margin: 0;">Уникальный HWID (Идентификатор устройства)</label>
+                <div style="display: flex; gap: 6px;">
+                  <button type="button" class="btn" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;" onclick="generateSubRandomHwid()" title="Сгенерировать случайный уникальный 16-значный HWID">🎲 Сгенерировать</button>
+                  <button type="button" class="btn" style="font-size: 0.75rem; padding: 2px 8px; border-radius: 4px;" onclick="useRouterMacHwid()" title="Использовать аппаратный MAC-адрес роутера">🏠 MAC роутера</button>
+                </div>
+              </div>
+              <input type="text" id="sub-hwid" class="search-input" placeholder="например: 50FF2014A8BC или keenetic-4426">
+              <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 3px;">
+                💡 Должен быть постоянным для этого роутера (10–64 симв., буквы/цифры/дефис). Без него сервер с HWID-лимитом отдаст <code>404</code>.
+              </div>
+            </div>
+
+            <!-- Тонкая настройка заголовков клиента -->
+            <details id="sub-mimicry-details" style="margin-top: 8px;">
+              <summary style="font-size: 0.82rem; color: #60a5fa; cursor: pointer; user-select: none; font-weight: 500;">
+                ⚙️ Тонкая настройка заголовков (User-Agent, ОС, модель устройства)
+              </summary>
+              <div class="sub-grid-container" style="margin-top: 10px;">
+                <div style="grid-column: span 2;">
+                  <label class="modal-label">User-Agent подписки</label>
+                  <input type="text" id="sub-user-agent" class="search-input" placeholder="например: Happ/1.2.0 или mihomo/v1.18.10">
+                </div>
+                <div>
+                  <label class="modal-label">ОС устройства (x-device-os)</label>
+                  <input type="text" id="sub-device-os" class="search-input" placeholder="Android, iOS, KeeneticOS, Windows">
+                </div>
+                <div>
+                  <label class="modal-label">Версия ОС (x-ver-os)</label>
+                  <input type="text" id="sub-ver-os" class="search-input" placeholder="14, 18.3, 5.0.4">
+                </div>
+                <div>
+                  <label class="modal-label">Модель устройства (x-device-model)</label>
+                  <input type="text" id="sub-device-model" class="search-input" placeholder="Samsung Galaxy S24, iPhone 15 Pro, Keenetic Giga">
+                </div>
+                <div>
+                  <label class="modal-label">Имя устройства (Device-Name, legacy)</label>
+                  <input type="text" id="sub-device-name" class="search-input" placeholder="KN-Giga">
+                </div>
+              </div>
+            </details>
+
+            <!-- Кнопка и блок интерактивной проверки HWID и статуса подписки -->
+            <div style="margin-top: 14px; padding-top: 12px; border-top: 1px dashed rgba(255,255,255,0.08); display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px;">
+              <button type="button" class="btn" id="btn-probe-sub" onclick="probeCurrentSub()" style="background: rgba(59, 130, 246, 0.15); border-color: rgba(59, 130, 246, 0.3); color: #60a5fa; font-size: 0.85rem; font-weight: 500;">
+                🔍 Проверить HWID и доступность подписки
+              </button>
+              <span id="sub-probe-spinner" style="display: none; font-size: 0.82rem; color: var(--text-muted);">
+                <span class="spinner" style="width: 14px; height: 14px; display: inline-block; vertical-align: middle; margin-right: 6px;"></span>Опрашиваем сервер подписки...
+              </span>
+            </div>
+
+            <!-- Результат проверки HWID -->
+            <div id="sub-probe-result" style="display: none; margin-top: 12px; padding: 12px 14px; border-radius: 8px; background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.08); font-size: 0.84rem;">
             </div>
           </div>
           
@@ -352,10 +512,6 @@
         </div>
       </div>
     </div>
-
-
-
-
 
     <!-- Вкладка 8: График трафика -->
     <div id="tab-content-traffic" class="tab-content">
@@ -707,7 +863,7 @@
             </div>
             <div>
               <span style="color: var(--text-muted);">📂 Сетевой доступ (SMB):</span>
-              <code id="txt-panel-log-smb-path" style="color: #a5d6a7; user-select: all; font-weight: 500;">\\Netcraze-9884\opkg\root\vpn_updater\logs\panel.log</code>
+              <code id="txt-panel-log-smb-path" style="color: #a5d6a7; user-select: all; font-weight: 500;">\\Keenetic\opkg\root\vpn_updater\logs\panel.log</code>
             </div>
           </div>
           <div style="display: flex; gap: 8px; align-items: center;">
@@ -1279,7 +1435,7 @@
             <div class="update-hero-icon" id="panel-hero-icon">✅</div>
             <div class="update-hero-info">
               <div class="update-hero-title" id="panel-hero-title">У вас установлена актуальная версия панели</div>
-              <div class="update-hero-desc" id="panel-hero-desc">Текущая версия: v1.9.1 • Система не требует обновления</div>
+              <div class="update-hero-desc" id="panel-hero-desc">Текущая версия: v1.9.5 • Система не требует обновления</div>
             </div>
             <div class="update-hero-actions" id="panel-hero-actions" style="display: none;">
               <button class="btn btn-primary btn-glow" id="btn-hero-update-panel" onclick="installLatestAvailable()">🚀 Обновить в 1 клик</button>

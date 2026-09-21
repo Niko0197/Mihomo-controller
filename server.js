@@ -3,8 +3,18 @@ const https = require('https');
 const fs = require('fs');
 const zlib = require('zlib');
 const path = require('path');
+const crypto = require('crypto');
 const panelLogger = require('./panel_logger');
 panelLogger.initLogger();
+
+// Глобальные перехватчики исключений для защиты от крашей и записи в panel.log
+process.on('uncaughtException', (err) => {
+  console.error('[CRITICAL UNCAUGHT EXCEPTION]', err ? (err.stack || err.message) : err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[CRITICAL UNHANDLED REJECTION]', reason ? (reason.stack || reason.message || reason) : reason);
+});
+
 const yamlUtils = require('./yaml_utils');
 const systemStats = require('./system_stats');
 const clientsManager = require('./clients_manager');
@@ -17,22 +27,19 @@ function getConfigFilePath() {
   if (fs.existsSync('/opt/etc/mihomo/config.yaml')) {
     return '/opt/etc/mihomo/config.yaml';
   }
-  if (fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
-    return '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
-  }
   return path.join(__dirname, 'config.yaml');
 }
 const configPath = getConfigFilePath();
 const logRuPath = path.join(__dirname, 'log_ru.txt');
 let directCachedDelay = 0;
-// Автоматическая ротация текстовых логов (защита флеш-памяти роутера, макс 500 КБ)
-function rotateLogFile(filePath, maxBytes = 500 * 1024) {
+// Автоматическая ротация текстовых логов (до 5 МБ для сохранения истории)
+function rotateLogFile(filePath, maxBytes = 5 * 1024 * 1024) {
   try {
     if (fs.existsSync(filePath)) {
       const stats = fs.statSync(filePath);
       if (stats.size > maxBytes) {
         const content = fs.readFileSync(filePath, 'utf8');
-        const trimmed = content.slice(-200 * 1024);
+        const trimmed = content.slice(-2 * 1024 * 1024);
         const firstNewline = trimmed.indexOf('\n');
         const cleanText = firstNewline !== -1 ? trimmed.slice(firstNewline + 1) : trimmed;
         fs.writeFileSync(filePath, `--- [Ротация лога: ${new Date().toLocaleString('ru-RU')}] ---\n` + cleanText, 'utf8');
@@ -90,7 +97,7 @@ function makeMihomoRequest(method, endpoint, body = null, timeoutMs = 15000) {
     });
 
     if (body) {
-      req.write(JSON.stringify(body));
+      req.write(typeof body === 'string' ? body : JSON.stringify(body));
     }
     req.end();
   });
@@ -338,21 +345,27 @@ function handleXkeenTraffic(req, res) {
   };
   
   const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    });
+    if (!res.headersSent) {
+      res.writeHead(proxyRes.statusCode, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+    }
     proxyRes.pipe(res);
   });
   
   proxyReq.on('error', (err) => {
-    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Сбой связи с API Mihomo (traffic): ' + err.message);
+    if (!res.headersSent) {
+      try {
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Сбой связи с API Mihomo (traffic): ' + err.message);
+      } catch (e) {}
+    }
   });
   
   req.on('close', () => {
-    proxyReq.destroy();
+    try { proxyReq.destroy(); } catch (e) {}
   });
   
   proxyReq.end();
@@ -371,21 +384,27 @@ function handleXkeenLogs(req, res) {
   };
   
   const proxyReq = http.request(options, (proxyRes) => {
-    res.writeHead(proxyRes.statusCode, {
-      'Content-Type': 'application/json',
-      'Cache-Control': 'no-cache',
-      'Connection': 'keep-alive'
-    });
+    if (!res.headersSent) {
+      res.writeHead(proxyRes.statusCode, {
+        'Content-Type': 'application/json',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive'
+      });
+    }
     proxyRes.pipe(res);
   });
   
   proxyReq.on('error', (err) => {
-    res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
-    res.end('Сбой связи с API Mihomo (logs): ' + err.message);
+    if (!res.headersSent) {
+      try {
+        res.writeHead(502, { 'Content-Type': 'text/plain; charset=utf-8' });
+        res.end('Сбой связи с API Mihomo (logs): ' + err.message);
+      } catch (e) {}
+    }
   });
   
   req.on('close', () => {
-    proxyReq.destroy();
+    try { proxyReq.destroy(); } catch (e) {}
   });
   
   proxyReq.end();
@@ -1713,7 +1732,25 @@ function getWifiInfo() {
   } catch (e) {
     console.error('Failed to read /etc/config/wireless:', e.message);
   }
-  return { success: true, ssid: 'Netcraze-9884', key: 'vPx8hr2A', encryption: 'WPA' };
+
+  // Попытка динамически получить Wi-Fi имя и ключ из Keenetic ndmq
+  try {
+    const { execSync } = require('child_process');
+    const xml = execSync('/opt/bin/ndmq -x -p "show interface WifiMaster0/AccessPoint0" 2>/dev/null || /bin/ndmq -x -p "show interface WifiMaster0/AccessPoint0" 2>/dev/null', { timeout: 2000 }).toString();
+    const ssidMatch = xml.match(/<ssid>([^<]+)<\/ssid>/i);
+    const keyMatch = xml.match(/<(?:wpa-psk|key)>([^<]+)<\/(?:wpa-psk|key)>/i);
+    if (ssidMatch) {
+      return {
+        success: true,
+        ssid: ssidMatch[1].trim(),
+        key: keyMatch ? keyMatch[1].trim() : '',
+        encryption: 'WPA'
+      };
+    }
+  } catch (e) {}
+
+  const os = require('os');
+  return { success: true, ssid: `${os.hostname() || 'Keenetic'}-WiFi`, key: '', encryption: 'WPA' };
 }
 
 function handleGetWifiInfo(req, res) {
@@ -2188,6 +2225,20 @@ async function handleGetProviders(req, res) {
         url: p.url,
         interval: p.interval,
         deviceName: p.deviceName || '',
+        hwid: p.hwid || '',
+        userAgent: p.userAgent || '',
+        deviceOs: p.deviceOs || '',
+        verOs: p.verOs || '',
+        deviceModel: p.deviceModel || '',
+        clientPreset: p.clientPreset || '',
+        headers: p.headers || {},
+        groupType: p.groupType || 'url-test',
+        groupUrl: p.groupUrl || 'http://www.gstatic.com/generate_204',
+        groupInterval: p.groupInterval !== undefined ? p.groupInterval : 300,
+        groupTolerance: p.groupTolerance !== undefined ? p.groupTolerance : 50,
+        groupStrategy: p.groupStrategy || 'consistent-hashing',
+        groupLazy: p.groupLazy !== undefined ? p.groupLazy : true,
+        groupExpectedStatus: p.groupExpectedStatus || '',
         count: Array.isArray(m.proxies) ? m.proxies.length : undefined,
         updatedAt: finalUpdatedAt
       };
@@ -2203,9 +2254,49 @@ async function handleGetProviders(req, res) {
   }
 }
 
+const INCY_KEY_B64 = '9tQOoMioiZ18aC0Jug1BZd/is91F5rs+JcsjPPAMJGI=';
+
+function decryptIncyLink(link) {
+  if (!link || typeof link !== 'string') return null;
+  const clean = link.trim();
+  const prefix = 'incy://crypt1/';
+  if (!clean.startsWith(prefix)) return null;
+  
+  try {
+    let b64 = clean.slice(prefix.length).replace(/-/g, '+').replace(/_/g, '/');
+    while (b64.length % 4) b64 += '=';
+    const buf = Buffer.from(b64, 'base64');
+    
+    if (buf.length < 28) return null; // 12 iv + 16 tag minimum
+    const iv = buf.subarray(0, 12);
+    const tag = buf.subarray(buf.length - 16);
+    const ciphertext = buf.subarray(12, buf.length - 16);
+    
+    const key = Buffer.from(INCY_KEY_B64, 'base64');
+    const decipher = crypto.createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(tag);
+    let decrypted = decipher.update(ciphertext, null, 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return JSON.parse(decrypted);
+  } catch (err) {
+    console.error('[Incy Decrypt] Ошибка расшифровки ссылки:', err.message);
+    return null;
+  }
+}
+
 function normalizeSubscriptionUrl(url) {
   if (!url) return url;
   let cleanUrl = String(url).trim();
+  if (cleanUrl.startsWith('incy://crypt1/')) {
+    const incyPayload = decryptIncyLink(cleanUrl);
+    if (incyPayload && incyPayload.url) {
+      return incyPayload.url;
+    }
+  }
+  if (cleanUrl.startsWith('happ://') || cleanUrl.startsWith('v2raytun://')) {
+    return `https://happy-decoder.cc/p/mihomo/${cleanUrl}`;
+  }
   if (cleanUrl.includes('github.com') || cleanUrl.includes('raw.githubusercontent.com')) {
     cleanUrl = cleanUrl
       .replace('https://github.com/', 'https://raw.githubusercontent.com/')
@@ -2544,6 +2635,443 @@ function handleExportSubscription(req, res, urlObj) {
   }
 }
 
+// Определение аппаратной информации роутера (MAC) и генерация стойкого HWID
+function getSystemHardwareInfo() {
+  let mac = '';
+  // 1. Попытка прочитать MAC-адрес сетевых интерфейсов роутера Keenetic (Linux/Entware)
+  const macPaths = [
+    '/sys/class/net/br0/address',
+    '/sys/class/net/eth0/address',
+    '/sys/class/net/ra0/address',
+    '/sys/class/net/rai0/address'
+  ];
+  for (const mp of macPaths) {
+    if (fs.existsSync(mp)) {
+      try {
+        const raw = fs.readFileSync(mp, 'utf8').trim();
+        if (raw && raw !== '00:00:00:00:00:00') {
+          mac = raw.replace(/[:-]/g, '').toUpperCase();
+          break;
+        }
+      } catch (e) {}
+    }
+  }
+
+  // 2. Если файл не найден (например при локальной разработке или Windows), опрашиваем os.networkInterfaces
+  if (!mac) {
+    try {
+      const os = require('os');
+      const ifaces = os.networkInterfaces();
+      for (const name of Object.keys(ifaces)) {
+        if (/^(lo|docker|veth|tun|tap|br-|virbr|dummy|wg)/i.test(name)) continue;
+        const list = ifaces[name];
+        for (const item of list) {
+          if (item && item.mac && item.mac !== '00:00:00:00:00:00' && !item.internal) {
+            mac = item.mac.replace(/[:-]/g, '').toUpperCase();
+            break;
+          }
+        }
+        if (mac) break;
+      }
+    } catch (e) {}
+  }
+
+  // Fallback MAC если не удалось определить
+  if (!mac) {
+    mac = '9D4B2C81E70F';
+  }
+
+  let deviceOs = 'KeeneticOS';
+  let verOs = '5.0.4';
+  let deviceModel = 'Keenetic Giga KN-1012';
+  let mihomoVersion = 'v1.18.10';
+
+  // Попытка получить реальные данные роутера через ndmq / ndmc
+  try {
+    const { execSync } = require('child_process');
+    const ndmCmd = '/opt/bin/ndmq -p "show version" 2>/dev/null || /bin/ndmq -p "show version" 2>/dev/null || ndmc -c "show version" 2>/dev/null';
+    const ndmOut = execSync(ndmCmd, { timeout: 1500 }).toString();
+    if (ndmOut) {
+      const titleMatch = ndmOut.match(/title:\s*([^\r\n]+)/i);
+      if (titleMatch && titleMatch[1]) {
+        verOs = titleMatch[1].trim();
+      }
+      const modelMatch = ndmOut.match(/model:\s*([^\r\n]+)/i);
+      if (modelMatch && modelMatch[1]) {
+        deviceModel = modelMatch[1].trim();
+      }
+    }
+  } catch (e) {}
+
+  // Попытка получить точную версию Mihomo ядра
+  try {
+    const { execSync } = require('child_process');
+    const mOut = execSync('/opt/sbin/mihomo -v 2>/dev/null || mihomo -v 2>/dev/null', { timeout: 1500 }).toString();
+    const vMatch = mOut.match(/v[0-9]+(\.[0-9]+){1,2}/);
+    if (vMatch && vMatch[0]) {
+      mihomoVersion = vMatch[0];
+    }
+  } catch (e) {}
+
+  const crypto = require('crypto');
+  const generatedHwid = crypto.randomBytes(8).toString('hex').toUpperCase();
+
+  return {
+    routerMac: mac,
+    generatedHwid,
+    deviceOs,
+    verOs,
+    deviceModel,
+    mihomoVersion
+  };
+}
+
+// GET /api/system/hwid
+function handleGetSystemHwid(req, res) {
+  try {
+    const info = getSystemHardwareInfo();
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, ...info }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, message: err.message }));
+  }
+}
+
+// Вспомогательные функции для зондирования подписки с поддержкой редиректов и прокси
+function probeUrlDirect(targetUrl, customHeaders, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    if (maxRedirects < 0) return reject(new Error('Слишком много редиректов (Too many redirects)'));
+    let u;
+    try {
+      u = new URL(targetUrl);
+    } catch (e) {
+      return reject(new Error('Некорректный URL подписки: ' + targetUrl));
+    }
+
+    const lib = u.protocol === 'https:' ? https : http;
+    const reqHeaders = {
+      'Accept': '*/*',
+      ...customHeaders
+    };
+
+    const req = lib.get(u, {
+      headers: reqHeaders,
+      timeout: 8000
+    }, (res) => {
+      if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+        res.resume();
+        let nextUrl = res.headers.location;
+        if (!nextUrl.startsWith('http')) {
+          nextUrl = new URL(nextUrl, targetUrl).href;
+        }
+        return resolve(probeUrlDirect(nextUrl, customHeaders, maxRedirects - 1));
+      }
+
+      let chunks = [];
+      let total = 0;
+      res.on('data', c => {
+        if (total < 32768) {
+          chunks.push(c);
+          total += c.length;
+        }
+      });
+      res.on('end', () => {
+        resolve({
+          statusCode: res.statusCode,
+          headers: res.headers,
+          finalUrl: targetUrl,
+          bodySnippet: Buffer.concat(chunks).toString('utf8', 0, Math.min(total, 2048))
+        });
+      });
+    });
+
+    req.on('error', reject);
+    req.on('timeout', () => {
+      req.destroy();
+      reject(new Error('Превышено время ожидания ответа сервера (8с)'));
+    });
+  });
+}
+
+function probeUrlViaProxy(targetUrl, customHeaders, maxRedirects = 5) {
+  return new Promise((resolve, reject) => {
+    try {
+      if (maxRedirects < 0) return reject(new Error('Слишком много редиректов'));
+      const u = new URL(targetUrl);
+      const isHttps = u.protocol === 'https:';
+
+      const connectReq = http.request({
+        host: '127.0.0.1',
+        port: 7890,
+        method: 'CONNECT',
+        path: u.hostname + ':' + (u.port || (isHttps ? '443' : '80')),
+        timeout: 6000
+      });
+
+      connectReq.on('connect', (cRes, socket) => {
+        if (cRes.statusCode !== 200) {
+          return reject(new Error('Прокси вернул код ' + cRes.statusCode));
+        }
+
+        const client = isHttps ? https : http;
+        const reqHeaders = {
+          'Host': u.host,
+          'Accept': '*/*',
+          ...customHeaders
+        };
+
+        const req = client.get({
+          host: u.hostname,
+          path: u.pathname + u.search,
+          socket: socket,
+          agent: false,
+          headers: reqHeaders,
+          timeout: 8000
+        }, (res) => {
+          if (res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+            res.resume();
+            let nextUrl = res.headers.location;
+            if (!nextUrl.startsWith('http')) {
+              nextUrl = new URL(nextUrl, targetUrl).href;
+            }
+            return resolve(probeUrlViaProxy(nextUrl, customHeaders, maxRedirects - 1));
+          }
+
+          let chunks = [];
+          let total = 0;
+          res.on('data', c => {
+            if (total < 32768) {
+              chunks.push(c);
+              total += c.length;
+            }
+          });
+          res.on('end', () => {
+            resolve({
+              statusCode: res.statusCode,
+              headers: res.headers,
+              finalUrl: targetUrl,
+              bodySnippet: Buffer.concat(chunks).toString('utf8', 0, Math.min(total, 2048))
+            });
+          });
+        });
+
+        req.on('error', reject);
+        req.on('timeout', () => {
+          req.destroy();
+          reject(new Error('Таймаут скачивания через локальный прокси'));
+        });
+      });
+
+      connectReq.on('error', reject);
+      connectReq.on('timeout', () => {
+        connectReq.destroy();
+        reject(new Error('Таймаут подключения к локальному прокси 127.0.0.1:7890'));
+      });
+
+      connectReq.end();
+    } catch (e) {
+      reject(e);
+    }
+  });
+}
+
+async function probeUrlWithRedirects(targetUrl, headersToSend, maxRedirects = 5) {
+  try {
+    return await probeUrlDirect(targetUrl, headersToSend, maxRedirects);
+  } catch (directErr) {
+    console.log(`[probeUrl] Прямая проверка ${targetUrl} не удалась (${directErr.message}). Пробуем через локальный прокси...`);
+    try {
+      return await probeUrlViaProxy(targetUrl, headersToSend, maxRedirects);
+    } catch (proxyErr) {
+      throw new Error(`Ошибка подключения: ${directErr.message}`);
+    }
+  }
+}
+
+// POST /api/providers/probe - интерактивная проверка подписки и Remnawave HWID
+async function handleProbeProvider(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const { url, hwid, userAgent, deviceOs, verOs, deviceModel } = JSON.parse(body || '{}');
+      if (!url) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: 'URL подписки не указан' }));
+        return;
+      }
+
+      let cleanUrl = String(url).trim();
+      let targetUrl = cleanUrl;
+
+      // Если передана зашифрованная ссылка INCY, расшифровываем её для прямого зондирования сервера
+      if (cleanUrl.startsWith('incy://crypt1/')) {
+        const incyPayload = decryptIncyLink(cleanUrl);
+        if (incyPayload && incyPayload.url) {
+          targetUrl = incyPayload.url;
+        }
+      } else if (cleanUrl.startsWith('happ://') || cleanUrl.startsWith('v2raytun://')) {
+        targetUrl = `https://happy-decoder.cc/p/txt/${cleanUrl}`;
+      } else {
+        targetUrl = normalizeSubscriptionUrl(cleanUrl);
+      }
+
+      const headersToSend = {
+        'User-Agent': userAgent || 'Happ/1.2.0 (Linux; Android 14; SM-S928B)',
+        'Accept': '*/*'
+      };
+      if (hwid) headersToSend['x-hwid'] = hwid;
+      headersToSend['x-device-os'] = deviceOs || 'Android';
+      headersToSend['x-ver-os'] = verOs || '14';
+      const finalModel = deviceModel || 'Samsung Galaxy S24 Ultra';
+      headersToSend['x-device-model'] = finalModel;
+      headersToSend['Device-Name'] = finalModel;
+
+      const probeRes = await probeUrlWithRedirects(targetUrl, headersToSend, 5);
+
+      let profileTitle = '';
+      const rawTitle = probeRes.headers['profile-title'] || probeRes.headers['profile-title'.toLowerCase()];
+      if (rawTitle) {
+        if (rawTitle.startsWith('base64:')) {
+          try {
+            profileTitle = Buffer.from(rawTitle.substring(7), 'base64').toString('utf8');
+          } catch (e) {
+            profileTitle = rawTitle;
+          }
+        } else {
+          profileTitle = rawTitle;
+        }
+      }
+
+      let userInfo = null;
+      const rawUserInfo = probeRes.headers['subscription-userinfo'] || probeRes.headers['subscription-userinfo'.toLowerCase()];
+      if (rawUserInfo) {
+        userInfo = {};
+        const parts = rawUserInfo.split(';');
+        for (const p of parts) {
+          const [k, v] = p.trim().split('=');
+          if (k && v) userInfo[k.trim()] = parseInt(v.trim(), 10) || v.trim();
+        }
+      }
+
+      const hwidActive = probeRes.headers['x-hwid-active'] === 'true';
+      const hwidMaxReached = Boolean(probeRes.headers['x-hwid-max-devices-reached']);
+      const hwidNotSupported = Boolean(probeRes.headers['x-hwid-not-supported']);
+      const updateInterval = probeRes.headers['profile-update-interval'] || null;
+      const deviceError = probeRes.headers['x-device-error'] || probeRes.headers['x-hwid-error'] || null;
+
+      let announce = '';
+      const rawAnnounce = probeRes.headers['announce'];
+      if (rawAnnounce) {
+        if (rawAnnounce.startsWith('base64:')) {
+          try {
+            announce = Buffer.from(rawAnnounce.substring(7), 'base64').toString('utf8');
+          } catch (e) {
+            announce = rawAnnounce;
+          }
+        } else {
+          announce = rawAnnounce;
+        }
+      }
+
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        success: true,
+        statusCode: probeRes.statusCode,
+        profileTitle,
+        userInfo,
+        hwidActive,
+        hwidMaxReached,
+        hwidNotSupported,
+        updateInterval,
+        deviceError,
+        announce,
+        finalUrl: probeRes.finalUrl
+      }));
+    } catch (err) {
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        success: false,
+        message: err.message
+      }));
+    }
+  });
+}
+
+// POST /api/decode-happ or /api/decode-crypto-link
+async function handleDecodeHapp(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const { url } = JSON.parse(body || '{}');
+      const cleanUrl = String(url || '').trim();
+      if (!cleanUrl || (!cleanUrl.startsWith('happ://') && !cleanUrl.startsWith('v2raytun://') && !cleanUrl.startsWith('incy://crypt1/'))) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, message: 'Укажите ссылку happ://, v2raytun:// или incy://crypt1/' }));
+        return;
+      }
+
+      if (cleanUrl.startsWith('incy://crypt1/')) {
+        const payload = decryptIncyLink(cleanUrl);
+        if (!payload || !payload.url) {
+          throw new Error('Не удалось расшифровать ссылку INCY (неверный ключ или повреждённые данные)');
+        }
+        console.log(`[Decode INCY] Расшифрована ссылка INCY (${payload.n || 'без имени'}): ${payload.url}`);
+        let decodedText = '';
+        let lines = [];
+        try {
+          decodedText = await fetchUrlText(payload.url, 5);
+          let raw = decodedText.trim();
+          if (!raw.includes('://') && raw.length > 20) {
+            try {
+              raw = Buffer.from(raw, 'base64').toString('utf8');
+            } catch (b64Err) {}
+          }
+          lines = raw.split(/\r?\n/).map(l => l.trim()).filter(l => l.includes('://'));
+        } catch (fetchErr) {
+          console.warn('[Decode INCY] Ошибка загрузки целевого URL:', fetchErr.message);
+        }
+
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({
+          success: true,
+          providerName: payload.n || '',
+          url: payload.url,
+          text: decodedText || payload.url,
+          links: lines.length > 0 ? lines : [payload.url],
+          count: lines.length > 0 ? lines.length : 1
+        }));
+        return;
+      }
+
+      const decodeTarget = `https://happy-decoder.cc/p/txt/${cleanUrl}`;
+      console.log(`[Decode Happ] Расшифровка через Happy Decoder: ${cleanUrl.substring(0, 40)}...`);
+      let decodedText = '';
+      try {
+        decodedText = await fetchUrlText(decodeTarget, 5);
+      } catch (hdErr) {
+        throw new Error(`Не удалось загрузить данные из Happy Decoder (${hdErr.message})`);
+      }
+      
+      const lines = decodedText.split(/\r?\n/).map(l => l.trim()).filter(l => l.includes('://'));
+      
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({
+        success: true,
+        text: decodedText,
+        links: lines,
+        count: lines.length
+      }));
+    } catch (err) {
+      console.error('[Decode Link] Ошибка расшифровки:', err.message);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, message: 'Ошибка расшифровки: ' + err.message }));
+    }
+  });
+}
+
 function handleAddProvider(req, res) {
   let body = '';
   req.on('data', chunk => body += chunk);
@@ -2551,7 +3079,8 @@ function handleAddProvider(req, res) {
     const backupPath = configPath + '.tmp_bak';
     try {
       const payload = JSON.parse(body);
-      const { name, url, interval, groups, deviceName } = payload;
+      const { name, url, interval, groups, deviceName, hwid, clientPreset, userAgent, deviceOs, verOs, deviceModel, headers,
+              groupType, groupUrl, groupInterval, groupTolerance, groupStrategy, groupLazy, groupExpectedStatus } = payload;
       const parsedInterval = parseInt(interval, 10);
       const finalInterval = isNaN(parsedInterval) || parsedInterval <= 0 ? 3600 : parsedInterval;
       
@@ -2565,8 +3094,26 @@ function handleAddProvider(req, res) {
       
       fs.copyFileSync(configPath, backupPath);
       
+      const providerOptions = {
+        deviceName: deviceName || deviceModel || '',
+        hwid: hwid || '',
+        clientPreset: clientPreset || '',
+        userAgent: userAgent || '',
+        deviceOs: deviceOs || '',
+        verOs: verOs || '',
+        deviceModel: deviceModel || deviceName || '',
+        headers: headers || {},
+        groupType: groupType || 'url-test',
+        groupUrl: groupUrl || 'http://www.gstatic.com/generate_204',
+        groupInterval: groupInterval !== undefined ? parseInt(groupInterval, 10) : 300,
+        groupTolerance: groupTolerance !== undefined ? parseInt(groupTolerance, 10) : 50,
+        groupStrategy: groupStrategy || 'consistent-hashing',
+        groupLazy: groupLazy !== undefined ? Boolean(groupLazy) : true,
+        groupExpectedStatus: groupExpectedStatus || ''
+      };
+      
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.addProviderToConfig(yamlText, name, normalizedUrl, finalInterval, deviceName);
+      yamlText = yamlUtils.addProviderToConfig(yamlText, name, normalizedUrl, finalInterval, providerOptions);
       yamlText = yamlUtils.syncAllProviderGroupsInConfig(yamlText);
       
       let lines = yamlText.split(/\r?\n/);
@@ -2579,14 +3126,13 @@ function handleAddProvider(req, res) {
       
       fs.writeFileSync(configPath, lines.join('\n'), 'utf8');
       
-      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
-      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
-        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
-        try {
-          const parsedError = JSON.parse(reloadRes.data);
-          if (parsedError.message) errorMsg = parsedError.message;
-        } catch (e) {}
-        throw new Error(errorMsg);
+      try {
+        const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+        if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+          console.warn('[handleAddProvider] Предупреждение Mihomo API при перезагрузке конфига:', reloadRes.statusCode);
+        }
+      } catch (reloadErr) {
+        console.warn('[handleAddProvider] Не удалось перезагрузить Mihomo API напрямую (возможно, ядро перезапускается):', reloadErr.message);
       }
       
       fs.copyFileSync(backupPath, configPath + '.bak');
@@ -2663,29 +3209,50 @@ function handleEditProvider(req, res) {
     const backupPath = configPath + '.tmp_bak';
     try {
       const payload = JSON.parse(body);
-      const { name, url, interval, deviceName } = payload;
+      const { name, oldName, url, interval, deviceName, hwid, clientPreset, userAgent, deviceOs, verOs, deviceModel, headers,
+              groupType, groupUrl, groupInterval, groupTolerance, groupStrategy, groupLazy, groupExpectedStatus } = payload;
+      const targetName = oldName || name;
       
-      if (!name || !url || isNaN(interval)) {
+      if (!targetName || !url || isNaN(interval)) {
         res.writeHead(400, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ success: false, message: 'Неполные параметры' }));
         return;
       }
       
+      const normalizedUrl = normalizeSubscriptionUrl(url);
+      
       fs.copyFileSync(configPath, backupPath);
       
+      const providerOptions = {
+        deviceName: deviceName || deviceModel || '',
+        hwid: hwid || '',
+        clientPreset: clientPreset || '',
+        userAgent: userAgent || '',
+        deviceOs: deviceOs || '',
+        verOs: verOs || '',
+        deviceModel: deviceModel || deviceName || '',
+        headers: headers || {},
+        groupType: groupType || 'url-test',
+        groupUrl: groupUrl || 'http://www.gstatic.com/generate_204',
+        groupInterval: groupInterval !== undefined ? parseInt(groupInterval, 10) : 300,
+        groupTolerance: groupTolerance !== undefined ? parseInt(groupTolerance, 10) : 50,
+        groupStrategy: groupStrategy || 'consistent-hashing',
+        groupLazy: groupLazy !== undefined ? Boolean(groupLazy) : true,
+        groupExpectedStatus: groupExpectedStatus || ''
+      };
+      
       let yamlText = fs.readFileSync(configPath, 'utf8');
-      yamlText = yamlUtils.updateProviderInConfig(yamlText, name, url, interval, deviceName);
+      yamlText = yamlUtils.updateProviderInConfig(yamlText, targetName, normalizedUrl, interval, providerOptions);
       
       fs.writeFileSync(configPath, yamlText, 'utf8');
       
-      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
-      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
-        let errorMsg = 'Mihomo API вернул код ' + reloadRes.statusCode;
-        try {
-          const parsedError = JSON.parse(reloadRes.data);
-          if (parsedError.message) errorMsg = parsedError.message;
-        } catch (e) {}
-        throw new Error(errorMsg);
+      try {
+        const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: configPath });
+        if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+          console.warn('[handleEditProvider] Предупреждение Mihomo API при перезагрузке конфига:', reloadRes.statusCode);
+        }
+      } catch (reloadErr) {
+        console.warn('[handleEditProvider] Не удалось перезагрузить Mihomo API напрямую (возможно, ядро перезапускается):', reloadErr.message);
       }
       
       fs.copyFileSync(backupPath, configPath + '.bak');
@@ -2949,6 +3516,20 @@ async function updateProviderFileManually(providerName) {
     } catch (e) {}
   }
   
+  // 1. Проверяем, не является ли ответ JSON (Happ / V2Ray / Sing-box)
+  const jsonProxies = yamlUtils.parseV2RayOrSingboxJson(textToParse);
+  if (jsonProxies && jsonProxies.length > 0) {
+    console.log(`[Manual Update] Распарсено ${jsonProxies.length} нод из JSON (Happ/Sing-box) для ${providerName}`);
+    let yamlContent = 'proxies:\n';
+    for (const proxy of jsonProxies) {
+      const pYaml = yamlUtils.serializeProxyToYaml(proxy);
+      yamlContent += pYaml + '\n';
+    }
+    fs.writeFileSync(absPath, yamlContent, 'utf8');
+    console.log(`[Manual Update] Успешно сохранен файл ${absPath}`);
+    return;
+  }
+  
   const lines = textToParse.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0 && !l.startsWith('#'));
   const parsedProxies = [];
   
@@ -3129,6 +3710,127 @@ function getLastDelayFromNode(nodeObj) {
   return 0;
 }
 
+const recentPingDelays = new Map();
+
+function recordPingDelay(name, delay) {
+  if (!name || typeof delay !== 'number' || delay <= 0) return;
+  const now = Date.now();
+  recentPingDelays.set(name, { delay, timestamp: now });
+  const trimmed = name.trim();
+  recentPingDelays.set(trimmed, { delay, timestamp: now });
+  const noSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+  recentPingDelays.set(noSpace, { delay, timestamp: now });
+  const withSpace = trimmed.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+  recentPingDelays.set(withSpace, { delay, timestamp: now });
+}
+
+function getRecordedPingDelay(name) {
+  if (!name) return 0;
+  const entry = recentPingDelays.get(name) || recentPingDelays.get(name.trim());
+  if (entry && (Date.now() - entry.timestamp < 15 * 60 * 1000)) {
+    return entry.delay;
+  }
+  return 0;
+}
+
+let probeLock = Promise.resolve();
+function withProbeLock(fn) {
+  const next = probeLock.then(fn, fn);
+  probeLock = next.catch(() => {});
+  return next;
+}
+
+function syncActiveNodeGroupDelays(name, activeNode, delay) {
+  if (!delay || delay <= 0) return;
+  setImmediate(async () => {
+    try {
+      const allRes = await makeMihomoRequest('GET', '/proxies', null, 2000);
+      if (allRes.statusCode === 200) {
+        const allData = JSON.parse(allRes.data);
+        for (const [gName, gObj] of Object.entries(allData.proxies || {})) {
+          if (gObj && (gObj.now === name || (activeNode && gObj.now === activeNode))) {
+            recordPingDelay(gName, delay);
+          }
+        }
+      }
+    } catch (e) {}
+  });
+}
+
+async function probeProxyDelayViaGroup(name, timeoutMs = 2500) {
+  return withProbeLock(async () => {
+    const url = encodeURIComponent('http://www.gstatic.com/generate_204');
+
+    const proxiesRes = await makeMihomoRequest('GET', '/proxies', null, 2000);
+    if (proxiesRes.statusCode !== 200) return 0;
+
+    const allProxies = JSON.parse(proxiesRes.data).proxies || {};
+    const candidateGroups = ['⚙️Manual 3', '⚙️Manual 2', '⚙️Manual 1'];
+
+    const noSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+    const withSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+
+    const matchProxy = (list) => {
+      if (!Array.isArray(list)) return null;
+      return list.find(item => 
+        item === name || 
+        item.trim() === name.trim() || 
+        item === noSpace || 
+        item === withSpace
+      ) || null;
+    };
+
+    let targetGroup = null;
+    let matchedName = null;
+
+    for (const gName of candidateGroups) {
+      const g = allProxies[gName];
+      if (g) {
+        const match = matchProxy(g.all);
+        if (match) {
+          targetGroup = gName;
+          matchedName = match;
+          break;
+        }
+      }
+    }
+
+    if (!targetGroup) {
+      for (const [gName, g] of Object.entries(allProxies)) {
+        if (g && g.type === 'Selector') {
+          const match = matchProxy(g.all);
+          if (match) {
+            targetGroup = gName;
+            matchedName = match;
+            break;
+          }
+        }
+      }
+    }
+
+    if (!targetGroup || !matchedName) return 0;
+
+    const origNow = allProxies[targetGroup].now;
+    try {
+      await makeMihomoRequest('PUT', '/proxies/' + encodeURIComponent(targetGroup), JSON.stringify({ name: matchedName }), 1500);
+      const pRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(targetGroup) + '/delay?url=' + url + '&timeout=' + timeoutMs, null, timeoutMs + 1000);
+      if (pRes.statusCode === 200) {
+        const parsed = JSON.parse(pRes.data);
+        return parsed.delay || 0;
+      }
+    } catch (e) {
+      return 0;
+    } finally {
+      if (origNow && origNow !== matchedName) {
+        try {
+          await makeMihomoRequest('PUT', '/proxies/' + encodeURIComponent(targetGroup), JSON.stringify({ name: origNow }), 1500);
+        } catch (e) {}
+      }
+    }
+    return 0;
+  });
+}
+
 // POST /api/proxies/ping
 function handlePingProxy(req, res) {
   let body = '';
@@ -3151,50 +3853,114 @@ function handlePingProxy(req, res) {
         return;
       }
 
-      const timeout = 3500;
+      const timeout = 2500;
       const url = encodeURIComponent('http://www.gstatic.com/generate_204');
 
       // 2. Прямой живой замер через ядро Mihomo (включая DIRECT, селекторы и прокси-группы)
       let mRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name) + '/delay?url=' + url + '&timeout=' + timeout);
+      if (mRes.statusCode !== 200) {
+        const noSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+        const withSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+        const altName = (name === noSpace) ? withSpace : noSpace;
+        if (altName !== name) {
+          const altRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(altName) + '/delay?url=' + url + '&timeout=' + timeout);
+          if (altRes.statusCode === 200) {
+            mRes = altRes;
+          }
+        }
+      }
+
       if (mRes.statusCode === 200) {
         const parsed = JSON.parse(mRes.data);
+        const delay = parsed.delay || 0;
         if (name === 'DIRECT' || name === 'direct') {
-          directCachedDelay = parsed.delay || 0;
+          directCachedDelay = delay;
         }
+
+        let activeNode = null;
+        if (delay > 0) {
+          recordPingDelay(name, delay);
+
+          // Проверяем, является ли name группой/селектором с выбранным узлом, и рекурсивно разворачиваем до конечной ноды
+          try {
+            let grpRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(name), null, 1500);
+            if (grpRes.statusCode !== 200) {
+              const noSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)\s+/u, '$1');
+              const withSpace = name.replace(/([\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE00}-\u{FE0F}]+)(?!\s)/u, '$1 ');
+              const altName = (name === noSpace) ? withSpace : noSpace;
+              grpRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(altName), null, 1500);
+            }
+            if (grpRes.statusCode === 200) {
+              const grpData = JSON.parse(grpRes.data);
+              let curr = grpData.now;
+              let depth = 5;
+              while (curr && depth > 0) {
+                recordPingDelay(curr, delay);
+                activeNode = curr;
+                depth--;
+                try {
+                  const subRes = await makeMihomoRequest('GET', '/proxies/' + encodeURIComponent(curr), null, 1000);
+                  if (subRes.statusCode === 200) {
+                    const subData = JSON.parse(subRes.data);
+                    if (subData && subData.now && subData.now !== curr) {
+                      curr = subData.now;
+                    } else {
+                      break;
+                    }
+                  } else {
+                    break;
+                  }
+                } catch (e) {
+                  break;
+                }
+              }
+            }
+          } catch (e) {}
+
+          // Фоновая синхронизация связанных групп (не блокирует ответ клиенту)
+          syncActiveNodeGroupDelays(name, activeNode, delay);
+        }
+
         res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-        res.end(JSON.stringify({ success: true, delay: parsed.delay || 0 }));
+        res.end(JSON.stringify({ success: true, delay, activeNode }));
         return;
       }
 
-      // 3. Если 404 (нода внутри провайдера подписки), запускаем healthcheck провайдера и ждем результат
-      const providersRes = await makeMihomoRequest('GET', '/providers/proxies');
-      if (providersRes.statusCode === 200) {
-        const providers = JSON.parse(providersRes.data).providers || {};
-        for (const [provName, provObj] of Object.entries(providers)) {
-          if (provObj.proxies && Array.isArray(provObj.proxies)) {
-            const node = provObj.proxies.find(p => p.name === name || p.name.trim() === name.trim());
-            if (node) {
-              await makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck');
-              await new Promise(r => setTimeout(r, 1200));
+      // 3. Если узел находится внутри proxy-provider (подписка), проводим быстрый точечный замер через селектор
+      const probeDelay = await probeProxyDelayViaGroup(name, timeout);
+      if (probeDelay > 0) {
+        recordPingDelay(name, probeDelay);
+        syncActiveNodeGroupDelays(name, name, probeDelay);
+        res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: true, delay: probeDelay, activeNode: name }));
+        return;
+      }
 
-              const updatedProvRes = await makeMihomoRequest('GET', '/providers/proxies');
-              if (updatedProvRes.statusCode === 200) {
-                const upData = JSON.parse(updatedProvRes.data).providers || {};
-                const upProv = upData[provName];
-                if (upProv && Array.isArray(upProv.proxies)) {
-                  const upNode = upProv.proxies.find(p => p.name === name || p.name.trim() === name.trim());
-                  if (upNode) {
-                    const freshDelay = getLastDelayFromNode(upNode);
-                    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
-                    res.end(JSON.stringify({ success: true, delay: freshDelay }));
-                    return;
-                  }
+      // 4. Запасной вариант: проверяем историю узла из /providers/proxies без запуска тяжелого healthcheck
+      try {
+        const providersRes = await makeMihomoRequest('GET', '/providers/proxies', null, 2000);
+        if (providersRes.statusCode === 200) {
+          const providers = JSON.parse(providersRes.data).providers || {};
+          for (const [provName, provObj] of Object.entries(providers)) {
+            if (provObj.proxies && Array.isArray(provObj.proxies)) {
+              const node = provObj.proxies.find(p => p.name === name || p.name.trim() === name.trim());
+              if (node) {
+                const freshDelay = getLastDelayFromNode(node);
+                if (freshDelay > 0) {
+                  recordPingDelay(name, freshDelay);
+                  syncActiveNodeGroupDelays(name, node.name, freshDelay);
+                  res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+                  res.end(JSON.stringify({ success: true, delay: freshDelay, activeNode: node.name }));
+                  return;
+                } else {
+                  // Фоновый разовый опрос провайдера без блокировки ответа клиенту
+                  makeMihomoRequest('GET', '/providers/proxies/' + encodeURIComponent(provName) + '/healthcheck').catch(() => {});
                 }
               }
             }
           }
         }
-      }
+      } catch (e) {}
 
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ success: true, delay: 0 }));
@@ -3328,7 +4094,8 @@ function applyAppModeToConfig(mode) {
       text = text.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,DIRECT');
     } else if (mode === 'rule') {
       text = text.replace(/^mode:\s*(rule|direct|global)/m, 'mode: rule');
-      text = text.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,🚀Auto-Best');
+      const target = (lastSyncedGlobalProxy && lastSyncedGlobalProxy !== 'DIRECT' && lastSyncedGlobalProxy !== 'GLOBAL' && lastSyncedGlobalProxy !== 'MATCH') ? lastSyncedGlobalProxy : '🚀Auto-Best';
+      text = text.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, `- MATCH,${target}`);
     }
 
     fs.writeFileSync(activeCfg, text, 'utf8');
@@ -3343,7 +4110,8 @@ function applyAppModeToConfig(mode) {
         localText = localText.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,DIRECT');
       } else if (mode === 'rule') {
         localText = localText.replace(/^mode:\s*(rule|direct|global)/m, 'mode: rule');
-        localText = localText.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, '- MATCH,🚀Auto-Best');
+        const target = (lastSyncedGlobalProxy && lastSyncedGlobalProxy !== 'DIRECT' && lastSyncedGlobalProxy !== 'GLOBAL' && lastSyncedGlobalProxy !== 'MATCH') ? lastSyncedGlobalProxy : '🚀Auto-Best';
+        localText = localText.replace(/-\s*MATCH,\s*['"]?.*['"]?$/m, `- MATCH,${target}`);
       }
       fs.writeFileSync(localCfg, localText, 'utf8');
     }
@@ -3351,6 +4119,83 @@ function applyAppModeToConfig(mode) {
     console.error('Ошибка применения режима в config.yaml:', err.message);
   }
 }
+
+// Автоматическая двусторонняя синхронизация переключателя с правилом MATCH в config.yaml
+let lastSyncedGlobalProxy = null;
+let isSyncingMatchRule = false;
+
+async function syncGlobalSwitcherWithMatchRule() {
+  if (isSyncingMatchRule) return;
+  try {
+    isSyncingMatchRule = true;
+    const cfgPath = getConfigFilePath();
+    if (!fs.existsSync(cfgPath)) return;
+
+    // Читаем текущее правило MATCH из config.yaml
+    const yamlText = fs.readFileSync(cfgPath, 'utf8');
+    const matchRegex = /^(\s*-\s*MATCH,\s*)([^\r\n#]+)(.*)$/m;
+    const matchMatch = yamlText.match(matchRegex);
+    if (!matchMatch) return;
+
+    const currentMatchInConfig = matchMatch[2].trim();
+
+    // Запрашиваем состояние переключателя GLOBAL у API ядра Mihomo
+    const mRes = await makeMihomoRequest('GET', '/proxies/GLOBAL', null, 3000);
+    if (mRes.statusCode !== 200) return;
+
+    let globalData;
+    try {
+      globalData = JSON.parse(mRes.data);
+    } catch (e) {
+      return;
+    }
+
+    const currentSelected = globalData.now;
+    if (!currentSelected) return;
+
+    // Первоначальная инициализация при старте
+    if (!lastSyncedGlobalProxy) {
+      lastSyncedGlobalProxy = currentSelected;
+      if (currentSelected !== currentMatchInConfig && currentMatchInConfig !== 'GLOBAL' && currentMatchInConfig !== 'MATCH') {
+        await makeMihomoRequest('PUT', '/proxies/GLOBAL', { name: currentMatchInConfig }, 3000).catch(() => {});
+        lastSyncedGlobalProxy = currentMatchInConfig;
+        return;
+      }
+    }
+
+    // Если пользователь переключил вариант в переключателе
+    if (currentSelected !== lastSyncedGlobalProxy) {
+      console.log(`[MATCH Switcher] Обнаружено переключение в селекторе: "${lastSyncedGlobalProxy}" -> "${currentSelected}"`);
+      lastSyncedGlobalProxy = currentSelected;
+
+      // Обновляем параметр MATCH в config.yaml на выбранный вариант
+      if (currentMatchInConfig !== currentSelected) {
+        const newYamlText = yamlText.replace(matchRegex, `$1${currentSelected}$3`);
+        fs.writeFileSync(cfgPath, newYamlText, 'utf8');
+
+        const localCfg = path.join(__dirname, 'config.yaml');
+        if (cfgPath !== localCfg && fs.existsSync(localCfg)) {
+          try {
+            let localText = fs.readFileSync(localCfg, 'utf8');
+            localText = localText.replace(matchRegex, `$1${currentSelected}$3`);
+            fs.writeFileSync(localCfg, localText, 'utf8');
+          } catch (e) {}
+        }
+
+        console.log(`[MATCH Switcher] Параметр MATCH в config.yaml успешно обновлен на: ${currentSelected}`);
+
+        // Мгновенно перезагружаем конфигурацию в ядре Mihomo
+        await makeMihomoRequest('PUT', '/configs', { path: cfgPath }, 5000).catch(() => {});
+      }
+    }
+  } catch (err) {
+    // Безопасный перехват
+  } finally {
+    isSyncingMatchRule = false;
+  }
+}
+setInterval(syncGlobalSwitcherWithMatchRule, 2000);
+
 
 // GET /api/mihomo/mode
 async function handleGetMihomoMode(req, res) {
@@ -4005,7 +4850,7 @@ async function handleCheckUpdates(req, res, urlObj) {
       if (newestTag && compareSemver(newestTag, currentPanelVersion) > 0) {
         panelUpdateAvailable = true;
         latestPanelVersion = newestTag;
-      } else {
+      } else if (currentBranch === 'main') {
         let behindCount = 0;
         try {
           behindCount = parseInt(execSync('git rev-list --count HEAD..origin/main', { cwd: __dirname }).toString().trim(), 10) || 0;
@@ -4015,6 +4860,7 @@ async function handleCheckUpdates(req, res, urlObj) {
           try {
             latestPanelSha = execSync('git rev-parse origin/main', { cwd: __dirname }).toString().trim();
             const topMsg = execSync('git log origin/main -n 1 --format="%s"', { cwd: __dirname }).toString().trim();
+            latestPanelVersion = `Main (${latestPanelSha.substring(0, 7)})`;
             panelReleaseNotes = [topMsg];
           } catch (e) {}
         }
@@ -4324,6 +5170,18 @@ async function handleGetXkeenProxies(req, res) {
             directProxy.history = [{ time: new Date().toISOString(), delay: directCachedDelay }];
           }
         }
+
+        // Внедряем актуальные замеры пинга для групп и узлов
+        for (const [pName, pObj] of Object.entries(parsed.proxies)) {
+          const cachedSelf = getRecordedPingDelay(pName);
+          const cachedNow = pObj.now ? getRecordedPingDelay(pObj.now) : 0;
+          const delayToInject = cachedSelf > 0 ? cachedSelf : cachedNow;
+          if (delayToInject > 0) {
+            if (!pObj.history) pObj.history = [];
+            pObj.history.push({ time: new Date().toISOString(), delay: delayToInject });
+          }
+        }
+
         dataStr = JSON.stringify(parsed);
       }
     } catch (e) {}
@@ -4357,8 +5215,28 @@ function handlePutXkeenProxy(req, res, name) {
 async function handleGetXkeenProviders(req, res) {
   try {
     const mRes = await makeMihomoRequest('GET', '/providers/proxies');
+    let dataStr = mRes.data;
+    try {
+      const parsed = JSON.parse(mRes.data);
+      const providers = parsed.providers || {};
+      for (const prov of Object.values(providers)) {
+        if (prov.proxies && Array.isArray(prov.proxies)) {
+          for (const px of prov.proxies) {
+            if (px && px.name) {
+              const cached = getRecordedPingDelay(px.name);
+              if (cached > 0) {
+                if (!px.history) px.history = [];
+                px.history.push({ time: new Date().toISOString(), delay: cached });
+              }
+            }
+          }
+        }
+      }
+      dataStr = JSON.stringify(parsed);
+    } catch (e) {}
+
     res.writeHead(mRes.statusCode, { 'Content-Type': 'application/json; charset=utf-8' });
-    res.end(mRes.data);
+    res.end(dataStr);
   } catch (err) {
     res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
     res.end(JSON.stringify({ success: false, error: err.message }));
@@ -4508,7 +5386,10 @@ function parseAllRules(yamlText) {
           let noResolve = false;
           let value = '';
           
-          if (target === 'no-resolve') {
+          if (type === 'MATCH') {
+            value = '';
+            target = parts[1] || '';
+          } else if (target === 'no-resolve') {
             noResolve = true;
             target = parts[parts.length - 2];
             value = parts.slice(1, parts.length - 2).join(',');
@@ -4518,8 +5399,8 @@ function parseAllRules(yamlText) {
 
           rules.push({
             type,
-            value: value || parts[1] || '',
-            target: target || parts[2] || '',
+            value: type === 'MATCH' ? '' : (value || parts[1] || ''),
+            target: type === 'MATCH' ? target : (target || parts[2] || ''),
             noResolve,
             dynamic: inDynamicBlock,
             lineIndex: i,
@@ -4892,6 +5773,94 @@ function handleReorderDynamicRules(req, res) {
   });
 }
 
+// GET /api/config/match-target
+function handleGetMatchTarget(req, res) {
+  try {
+    const cfgPath = getConfigFilePath();
+    if (!fs.existsSync(cfgPath)) {
+      throw new Error('Config file config.yaml not found');
+    }
+    const yamlText = fs.readFileSync(cfgPath, 'utf8');
+    const matchRegex = /^(\s*-\s*MATCH,\s*)([^\r\n#]+)(.*)$/m;
+    const matchMatch = yamlText.match(matchRegex);
+    const target = matchMatch ? matchMatch[2].trim() : (lastSyncedGlobalProxy || '🚀Auto-Best');
+    
+    const groups = getGlobalGroupsFromConfig() || [];
+    const validGroups = groups.filter(g => g && g !== 'GLOBAL' && g !== 'MATCH');
+    const options = validGroups.length > 0
+      ? Array.from(new Set([...validGroups, 'DIRECT', 'REJECT']))
+      : ['🚀Auto-Best', '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3', 'DIRECT', 'REJECT'];
+
+    res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: true, target, options }));
+  } catch (err) {
+    res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+    res.end(JSON.stringify({ success: false, error: err.message }));
+  }
+}
+
+// POST /api/config/match-target
+function handleSetMatchTarget(req, res) {
+  let body = '';
+  req.on('data', chunk => body += chunk);
+  req.on('end', async () => {
+    try {
+      const payload = JSON.parse(body || '{}');
+      const { target } = payload;
+      if (!target) {
+        res.writeHead(400, { 'Content-Type': 'application/json; charset=utf-8' });
+        res.end(JSON.stringify({ success: false, error: 'Параметр target обязателен' }));
+        return;
+      }
+
+      const cfgPath = getConfigFilePath();
+      if (!fs.existsSync(cfgPath)) {
+        throw new Error('Config file config.yaml not found');
+      }
+
+      const matchRegex = /^(\s*-\s*MATCH,\s*)([^\r\n#]+)(.*)$/m;
+      let yamlText = fs.readFileSync(cfgPath, 'utf8');
+      if (matchRegex.test(yamlText)) {
+        yamlText = yamlText.replace(matchRegex, `$1${target}$3`);
+      } else {
+        yamlText += `\n  - MATCH,${target}\n`;
+      }
+      fs.writeFileSync(cfgPath, yamlText, 'utf8');
+
+      const localCfg = path.join(__dirname, 'config.yaml');
+      if (cfgPath !== localCfg && fs.existsSync(localCfg)) {
+        try {
+          let localText = fs.readFileSync(localCfg, 'utf8');
+          if (matchRegex.test(localText)) {
+            localText = localText.replace(matchRegex, `$1${target}$3`);
+          } else {
+            localText += `\n  - MATCH,${target}\n`;
+          }
+          fs.writeFileSync(localCfg, localText, 'utf8');
+        } catch (e) {}
+      }
+
+      lastSyncedGlobalProxy = target;
+
+      // Синхронизируем с селектором GLOBAL в API ядра
+      await makeMihomoRequest('PUT', '/proxies/GLOBAL', { name: target }, 3000).catch(() => {});
+
+      // Перезагружаем конфигурацию ядра
+      const reloadRes = await makeMihomoRequest('PUT', '/configs', { path: cfgPath }, 5000);
+      if (reloadRes.statusCode !== 200 && reloadRes.statusCode !== 204) {
+        console.warn('Mihomo reload returned status:', reloadRes.statusCode);
+      }
+
+      console.log(`[MATCH Switcher] Финальный маршрут MATCH успешно изменен на: ${target}`);
+      res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: true, target }));
+    } catch (err) {
+      res.writeHead(500, { 'Content-Type': 'application/json; charset=utf-8' });
+      res.end(JSON.stringify({ success: false, error: err.message }));
+    }
+  });
+}
+
 // Создаем HTTP сервер
 const server = http.createServer(async (req, res) => {
   const urlObj = new URL(req.url, 'http://' + req.headers.host);
@@ -5070,6 +6039,14 @@ const server = http.createServer(async (req, res) => {
     handleImportProxies(req, res);
     return;
   }
+  if (req.method === 'GET' && pathname === '/api/system/hwid') {
+    handleGetSystemHwid(req, res);
+    return;
+  }
+  if (req.method === 'POST' && (pathname === '/api/decode-happ' || pathname === '/api/decode-crypto-link')) {
+    await handleDecodeHapp(req, res);
+    return;
+  }
   if (req.method === 'GET' && pathname === '/api/providers') {
     await handleGetProviders(req, res);
     return;
@@ -5088,6 +6065,10 @@ const server = http.createServer(async (req, res) => {
   }
   if (req.method === 'POST' && pathname === '/api/providers/reorder') {
     handleReorderProviders(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/providers/probe') {
+    await handleProbeProvider(req, res);
     return;
   }
   if (req.method === 'POST' && pathname === '/api/providers/update') {
@@ -5186,6 +6167,14 @@ const server = http.createServer(async (req, res) => {
   }
   if ((req.method === 'POST' || req.method === 'PUT') && (pathname === '/api/config/dynamic-rules/reorder' || pathname === '/api/config/rules/reorder')) {
     handleReorderDynamicRules(req, res);
+    return;
+  }
+  if (req.method === 'GET' && pathname === '/api/config/match-target') {
+    handleGetMatchTarget(req, res);
+    return;
+  }
+  if (req.method === 'POST' && pathname === '/api/config/match-target') {
+    handleSetMatchTarget(req, res);
     return;
   }
 
@@ -5516,45 +6505,49 @@ function runMihomoMemoryOptimization() {
     }
 
     if (changed) {
-      // 4. Перезапускаем службу XKeen
-      const { exec } = require('child_process');
-      console.log('[Optimization] Перезапуск службы XKeen для применения оптимизаций...');
-      exec('/opt/etc/init.d/S99xkeen restart', (err, stdout, stderr) => {
-        if (err) {
-          console.error('[Optimization] Ошибка перезапуска XKeen:', err.message);
-        } else {
-          console.log('[Optimization] Служба XKeen успешно перезапущена.');
-        }
-      });
-    } else {
-      console.log('[Optimization] Оптимизация памяти уже была применена ранее.');
+      console.log('[Optimization] config.yaml оптимизирован в фоне.');
     }
   } catch (err) {
     console.error('[Optimization] Ошибка при выполнении оптимизации:', err);
   }
 }
 
-// Оптимизация памяти правил
-runMihomoMemoryOptimization();
-
 // Очистка порта перед запуском (убиваем старый процесс если есть)
 function killOldProcess() {
   try {
     const { execSync } = require('child_process');
-    const result = execSync(`fuser ${PORT}/tcp 2>/dev/null || true`).toString().trim();
-    if (result) {
-      const pids = result.split(/\s+/).filter(p => p && p !== String(process.pid));
-      for (const pid of pids) {
-        console.log(`[VPN Web Controller] Завершаем старый процесс на порту ${PORT}: PID=${pid}`);
-        try { execSync(`kill -9 ${pid}`); } catch(e) {}
+    let killed = false;
+
+    // 1. Попытка через fuser
+    try {
+      const result = execSync(`fuser ${PORT}/tcp 2>/dev/null || true`).toString().trim();
+      if (result) {
+        const pids = result.split(/\s+/).filter(p => p && p !== String(process.pid));
+        for (const pid of pids) {
+          console.log(`[VPN Web Controller] Завершаем старый процесс на порту ${PORT}: PID=${pid}`);
+          try { execSync(`kill -9 ${pid}`); killed = true; } catch(e) {}
+        }
       }
-      if (pids.length > 0) {
-        // Ждём пока ОС освободит порт
-        execSync('sleep 1');
+    } catch (e) {}
+
+    // 2. Попытка через pgrep для server.js (Entware/Keenetic)
+    try {
+      const pgrepOut = execSync(`pgrep -f "server.js" 2>/dev/null || true`).toString().trim();
+      if (pgrepOut) {
+        const pids = pgrepOut.split(/\s+/).filter(p => p && p !== String(process.pid));
+        for (const pid of pids) {
+          console.log(`[VPN Web Controller] Завершаем дубликат server.js: PID=${pid}`);
+          try { execSync(`kill -9 ${pid}`); killed = true; } catch(e) {}
+        }
       }
+    } catch (e) {}
+
+    if (killed) {
+      // Ждём освобождения порта
+      try { execSync('sleep 1'); } catch(e) {}
     }
   } catch (e) {
-    // fuser может не быть - это нормально
+    // Безопасный перехват
   }
 }
 
@@ -5586,7 +6579,6 @@ function startServer(attempt) {
       const mode = getStoredAppMode();
       applyAppModeToConfig(mode);
     } catch (e) {}
-    makeMihomoRequest('PUT', '/configs', { path: getConfigFilePath() }).catch(() => {});
   });
 
   server.once('error', (err) => {

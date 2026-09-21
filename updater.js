@@ -16,10 +16,7 @@ function readState() {
   } catch (e) {}
   return {
     lastSubscriptionUpdate: 0,
-    lastGithubPing: 0,
-    lastStealthSurfPing: 0,
-    allDownSince: 0,
-    stealthWasDown: false
+    lastProxyPing: 0
   };
 }
 
@@ -83,37 +80,6 @@ function makeRequest(method, endpoint, body = null) {
 
     req.end();
   });
-}
-
-function getAppMode() {
-  try {
-    const appModePath = path.join(__dirname, 'app_mode.json');
-    if (fs.existsSync(appModePath)) {
-      const data = JSON.parse(fs.readFileSync(appModePath, 'utf8'));
-      if (data && data.mode) return data.mode;
-    }
-  } catch (e) {}
-  return 'rule';
-}
-
-async function setMihomoMode(mode) {
-  try {
-    await makeRequest('PATCH', '/configs', JSON.stringify({ mode }));
-    let altConfigPath = '/opt/etc/mihomo/config.yaml';
-    if (!fs.existsSync(altConfigPath) && fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
-      altConfigPath = '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
-    } else if (!fs.existsSync(altConfigPath)) {
-      altConfigPath = path.join(__dirname, 'config.yaml');
-    }
-    if (fs.existsSync(altConfigPath)) {
-      let content = fs.readFileSync(altConfigPath, 'utf8');
-      content = content.replace(/^mode:\s*(rule|direct|global)/m, `mode: ${mode}`);
-      fs.writeFileSync(altConfigPath, content, 'utf8');
-    }
-    console.log(`[${getTimestamp()}] Режим ядра Mihomo успешно переключен в: ${mode}`);
-  } catch (err) {
-    console.error(`[${getTimestamp()}] Ошибка переключения режима ядра на ${mode}: ${err.message}`);
-  }
 }
 
 // Проверка соответствия домена ключевым словам (должны ходить напрямую)
@@ -261,8 +227,7 @@ async function main() {
   const now = Date.now();
 
   const runSubscriptionUpdate = (now - (state.lastSubscriptionUpdate || 0)) >= (3 * 3600 * 1000 - 30 * 1000);
-  const runGithubPing = (now - (state.lastGithubPing || 0)) >= (1 * 3600 * 1000 - 30 * 1000);
-  const runStealthSurfPing = (now - (state.lastStealthSurfPing || 0)) >= (5 * 60 * 1000 - 30 * 1000);
+  const runProxyPing = (now - (state.lastProxyPing || 0)) >= (5 * 60 * 1000 - 30 * 1000);
 
   const updateResults = [];
 
@@ -306,94 +271,56 @@ async function main() {
     }
   }
 
-  // 2. Измерение пинга для всех трех групп на каждой минуте (для Failover)
-  const url = encodeURIComponent('http://www.gstatic.com/generate_204');
-  const timeout = 3000;
-  
-  let stealth1Delay = 0;
-  let stealth2Delay = 0;
-  let githubDelay = 0;
+  // 2. Фоновый диагностический опрос пинга прокси-групп (интервал 5 минут)
+  if (runProxyPing) {
+    const url = encodeURIComponent('http://www.gstatic.com/generate_204');
+    const timeout = 3000;
 
-  try {
-    const res1 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf')}/delay?url=${url}&timeout=${timeout}`);
-    if (res1.statusCode === 200) {
-      stealth1Delay = JSON.parse(res1.data).delay || 0;
-    }
-  } catch (e) {}
+    try {
+      const pRes = await makeRequest('GET', '/proxies');
+      if (pRes.statusCode === 200) {
+        const pData = JSON.parse(pRes.data);
+        const proxies = pData.proxies || {};
 
-  try {
-    const res2 = await makeRequest('GET', `/proxies/${encodeURIComponent('💎 StealthSurf 2')}/delay?url=${url}&timeout=${timeout}`);
-    if (res2.statusCode === 200) {
-      stealth2Delay = JSON.parse(res2.data).delay || 0;
-    }
-  } catch (e) {}
-
-  try {
-    const res3 = await makeRequest('GET', `/proxies/${encodeURIComponent('🎱 GitHub')}/delay?url=${url}&timeout=${timeout}`);
-    if (res3.statusCode === 200) {
-      githubDelay = JSON.parse(res3.data).delay || 0;
-    }
-  } catch (e) {}
-
-  const isStealth1Alive = stealth1Delay > 0;
-  const isStealth2Alive = stealth2Delay > 0;
-  const isGithubAlive = githubDelay > 0;
-
-  // Логирование пингов по расписанию для отчетов в консоли
-  if (runStealthSurfPing) {
-    console.log(`[${getTimestamp()}] Фоновый опрос пинга StealthSurf: 1-й: ${stealth1Delay} ms | 2-й: ${stealth2Delay} ms`);
-    state.lastStealthSurfPing = now;
-  }
-  if (runGithubPing) {
-    console.log(`[${getTimestamp()}] Фоновый опрос пинга GitHub: ${githubDelay} ms`);
-    state.lastGithubPing = now;
-  }
-
-  // --- Логика Failover ---
-  // Проверяем, управляет ли пользователь режимом вручную (например, включен DIRECT или ZAPRET)
-  const currentAppMode = getAppMode();
-  if (currentAppMode === 'rule') {
-    // Проверка падения основного StealthSurf
-    const isStealthBothDown = !isStealth1Alive && !isStealth2Alive;
-    if (isStealthBothDown && isGithubAlive) {
-      if (!state.stealthWasDown) {
-        console.log(`[${getTimestamp()}] ВНИМАНИЕ: Оба прокси StealthSurf недоступны. Резервный канал GitHub активен.`);
-        state.stealthWasDown = true;
-      }
-    } else if (!isStealthBothDown) {
-      if (state.stealthWasDown) {
-        console.log(`[${getTimestamp()}] ИНФО: Основной прокси-канал StealthSurf восстановлен.`);
-        state.stealthWasDown = false;
-      }
-    }
-
-    // Проверка полного падения всех каналов
-    const isAllDown = isStealthBothDown && !isGithubAlive;
-    if (isAllDown) {
-      if (state.allDownSince === 0) {
-        state.allDownSince = now;
-        console.log(`[${getTimestamp()}] ВНИМАНИЕ: Все VPN-каналы недоступны. Отсчёт 30 секунд до аварийного переключения режима в DIRECT...`);
-      } else if (state.allDownSince !== -1 && (now - state.allDownSince) >= 30 * 1000) {
-        console.log(`[${getTimestamp()}] КРИТИЧЕСКАЯ ОШИБКА: Все VPN-каналы недоступны > 30 сек. Автоматическое переключение общего режима ядра в DIRECT!`);
-        await setMihomoMode('direct');
-        state.allDownSince = -1;
-      }
-    } else {
-      // Если хотя бы один канал поднялся
-      if (state.allDownSince !== 0) {
-        if (state.allDownSince === -1) {
-          console.log(`[${getTimestamp()}] ИНФО: VPN-каналы восстановили работу! Автоматический возврат общего режима ядра в RULE (Маршруты).`);
-          await setMihomoMode('rule');
-        } else {
-          console.log(`[${getTimestamp()}] ИНФО: Угроза отключения снята, каналы частично доступны.`);
+        // Динамически получаем целевые группы прокси из группы 🚀Auto-Best
+        let targets = [];
+        if (proxies['🚀Auto-Best'] && Array.isArray(proxies['🚀Auto-Best'].all)) {
+          targets = proxies['🚀Auto-Best'].all.filter(name => name !== 'DIRECT' && name !== 'REJECT');
         }
-        state.allDownSince = 0;
+
+        // Если Auto-Best пуст или не найден, собираем группы типа URLTest / Fallback
+        if (targets.length === 0) {
+          const skipGroups = ['GLOBAL', 'DIRECT', 'REJECT', 'COMPATIBLE'];
+          targets = Object.keys(proxies).filter(name => {
+            const p = proxies[name];
+            return p && (p.type === 'URLTest' || p.type === 'Fallback') && !skipGroups.includes(name);
+          });
+        }
+
+        if (targets.length > 0) {
+          const pingResults = [];
+          for (const target of targets) {
+            try {
+              const pingRes = await makeRequest('GET', `/proxies/${encodeURIComponent(target)}/delay?url=${url}&timeout=${timeout}`);
+              if (pingRes.statusCode === 200) {
+                const parsed = JSON.parse(pingRes.data);
+                const delay = parsed.delay || 0;
+                pingResults.push(`${target}: ${delay > 0 ? delay + ' ms' : 'таймаут'}`);
+              } else {
+                pingResults.push(`${target}: ошибка (${pingRes.statusCode})`);
+              }
+            } catch (err) {
+              pingResults.push(`${target}: таймаут`);
+            }
+          }
+          console.log(`[${getTimestamp()}] Фоновый опрос пинга прокси: ${pingResults.join(' | ')}`);
+        }
       }
+    } catch (e) {
+      // Ошибка подключения к API для опроса пингов
     }
-  } else {
-    // В ручном режиме DIRECT или ZAPRET сбрасываем счетчик failover
-    state.allDownSince = 0;
-    state.stealthWasDown = false;
+
+    state.lastProxyPing = now;
   }
 
   writeState(state);
@@ -419,18 +346,12 @@ async function main() {
 
           if (host && chains.length > 0) {
             const mainChain = chains[0];
-            const generalGroups = [
-              'GLOBAL',
-              '🚀Auto-Best',
-              '⚙️Manual 1',
-              '⚙️Manual 2',
-              '⚙️Manual 3',
-              '💎 StealthSurf',
-              '💎 StealthSurf 2',
-              '🎱 GitHub'
-            ];
-            
-            if (generalGroups.includes(mainChain)) {
+            const isVpnChain = mainChain !== 'DIRECT' && 
+                               mainChain !== 'REJECT' && 
+                               !mainChain.startsWith('⚡ ByeDPI') && 
+                               !mainChain.startsWith('⚡ NFQWS');
+
+            if (isVpnChain) {
               if (isRussianDomain(host)) {
                 if (!existingLogs.includes(host)) {
                   const chainStr = chains.join(' -> ');
@@ -474,7 +395,7 @@ function ensureServerRunning() {
     port: 4000,
     path: '/api/data',
     method: 'GET',
-    timeout: 2000
+    timeout: 6000
   };
 
   const req = http.request(options, (res) => {
@@ -482,11 +403,11 @@ function ensureServerRunning() {
   });
 
   req.on('error', (err) => {
-    // Check if server.js process is already running to avoid runaway process duplication
+    // Надежная проверка наличия работающего процесса server.js через ps
     try {
       const { execSync } = require('child_process');
-      const pids = execSync('pgrep -f "server.js"', { timeout: 1000 }).toString().trim();
-      if (pids) {
+      const psOut = execSync('ps w 2>/dev/null || ps 2>/dev/null', { timeout: 1500 }).toString();
+      if (psOut.includes('server.js')) {
         return;
       }
     } catch (e) {}

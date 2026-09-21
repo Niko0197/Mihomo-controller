@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/version-1.9.2-orange?style=for-the-badge" alt="Version">
+  <img src="https://img.shields.io/badge/version-1.10.0-orange?style=for-the-badge" alt="Version">
   <img src="https://img.shields.io/badge/platform-Keenetic%20%2B%20Entware-blue?style=for-the-badge" alt="Platform">
   <img src="https://img.shields.io/badge/runtime-Node.js%20(Zero--deps)-green?style=for-the-badge&logo=node.js" alt="Node.js">
   <img src="https://img.shields.io/badge/UI-Material%203%20Dark-purple?style=for-the-badge" alt="Material 3">
@@ -278,7 +278,28 @@ sh -c "$(curl -fsSL https://raw.githubusercontent.com/Niko0197/Mihomo-controller
 
 ## 📝 История изменений (Changelog)
 
-### Новые возможности и улучшения
+### Версия 1.10.0
+- 🎯 **Интерактивный переключатель финального правила `MATCH`**:
+  - На дашборд прокси добавлена отдельная карточка **MATCH** для управления глобальным финальным маршрутом (fallback трафика) на лету.
+  - Поддержка мгновенного выбора любого целевого направления: `DIRECT`, `🚀Auto-Best`, `⚡ StealthSurf2`, `⚙️Manual 1–3`, `REJECT` с 0 мс задержкой интерфейса и живым замером пинга.
+  - Прямая запись правила `- MATCH,<target>` в конфигурационный файл `config.yaml` с мягким релоадом ядра (`PUT /configs`) и двухсторонней синхронизацией с `GLOBAL`.
+  - Умная фильтрация: исключены фантомные дубликаты и несуществующие группы.
+- 📐 **Чистый шаблон архитектуры маршрутизации (`config.yaml`)**:
+  - Конфигурация приведена к универсальному скелету с сохранением полной базы правил сервисов (YouTube, Telegram, OpenAI/Claude, Steam, Spotify, CDN, GeoIP и др.).
+  - Выделено чистое поле для добавления одной пользовательской подписки без лишних хардкодов.
+  - Изоляция секций клиентских правил устройств (`Clients Zapret / Bypass / VPN`) для чистого старта из коробки.
+- ⚡ **Стабильность воспроизведения YouTube и Google Video**:
+  - Добавлены явные суффиксы для видеосервисов: `googlevideo.com`, `youtube.com`, `ytimg.com`, `youtu.be`, `ggpht.com` перед общими наборами правил для предотвращения буферизации.
+  - Добавлен геосайт `google-deepmind@domain` в общую маршрутизацию сервисов.
+- 🛡️ **Оптимизация производительности и Failover**:
+  - Исправлена проблема цикличного переподключения VPN из-за некорректного срабатывания Failover в `updater.js`.
+  - Сквозная синхронизация сетевых пингов между провайдерами, группами и узлами без дополнительной нагрузки на CPU роутера.
+  - Надежная очистка старых и дублирующих процессов Node.js при перезапуске сервера (`killOldProcess`).
+- 🌐 **Интеграция и декодирование подписок**:
+  - Поддержка импорта зашифрованных и обфусцированных ссылок подписок (Hiddify / Happ / Base64).
+  - Бесшовное переключение веток (`Main` / `Dev`) прямо через интерфейс панели.
+
+### Новые возможности и улучшения (v1.9.x)
 - 🛡️ **Полноценный модуль управления DNS и Резолвером**:
   - Интерактивная настройка основных DNS (`nameserver`) и резервных серверов (`fallback`) с мгновенной валидацией и горячим применением в ядро Mihomo без разрыва соединений.
   - Быстрые безопасные пресеты: `🛡️ AdGuard DNS (DoH + AdBlock)`, `⚡ Cloudflare (1.1.1.1 DoH)`, `🔒 Quad9 (DoH)`, `🌿 OpenDNS`, `🌐 Google (8.8.8.8)`, `🇷🇺 Yandex DNS (RU)` и `🏠 Локальный (127.0.0.1)`.

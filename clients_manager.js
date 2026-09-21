@@ -11,9 +11,6 @@ function getActiveConfigPath() {
   if (fs.existsSync('/opt/etc/mihomo/config.yaml')) {
     return '/opt/etc/mihomo/config.yaml';
   }
-  if (fs.existsSync('\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml')) {
-    return '\\\\Netcraze-9884\\opkg\\etc\\mihomo\\config.yaml';
-  }
   return path.join(__dirname, 'config.yaml');
 }
 
@@ -359,6 +356,26 @@ function getHotspotHosts() {
   return cachedHotspotHosts;
 }
 
+// Кэширование ARP-таблицы (ip neigh show) для устранения нагрузки на процессор
+let cachedNeighLines = [];
+let lastNeighFetchTime = 0;
+const NEIGH_CACHE_TTL_MS = 15000; // 15 секунд
+
+function getNeighLines() {
+  const now = Date.now();
+  if (now - lastNeighFetchTime < NEIGH_CACHE_TTL_MS && cachedNeighLines.length > 0) {
+    return cachedNeighLines;
+  }
+  try {
+    const neighOutput = execSync('ip neigh show', { timeout: 2000 }).toString();
+    cachedNeighLines = neighOutput.split('\n');
+    lastNeighFetchTime = now;
+  } catch (err) {
+    console.error('Ошибка выполнения ip neigh:', err.message);
+  }
+  return cachedNeighLines;
+}
+
 // Приоритетное разрешение имени устройства
 function resolveClientName(ip, mac, hostByMac, hostByIp) {
   const normMac = mac ? mac.toUpperCase() : '';
@@ -601,11 +618,37 @@ function syncClientsRulesToConfig() {
       const configText = fs.readFileSync(activeCfg, 'utf8');
       const lines = configText.split(/\r?\n/);
 
-      updateConfigRulesBlock(lines, '# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---', bypassRules, '# --- DYNAMIC RULES ---');
-      updateConfigRulesBlock(lines, '# --- CLIENTS ZAPRET RULES ---', '# --- END CLIENTS ZAPRET RULES ---', zapretRules, 'RULE-SET,youtube@domain');
-      updateConfigRulesBlock(lines, '# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---', vpnRules, 'MATCH,');
+      // Сбор доступных групп и прокси для валидации правил (защита от краша Mihomo при отсутствующих группах)
+      const availableTargets = new Set(['DIRECT', 'REJECT', 'GLOBAL']);
+      for (const l of lines) {
+        const tr = l.trim();
+        if (tr.startsWith('- name:')) {
+          const nm = tr.replace(/^- name:\s*['"]?/, '').replace(/['"]?\s*$/, '');
+          if (nm) availableTargets.add(nm);
+        }
+      }
 
-      fs.writeFileSync(activeCfg, lines.join('\n'), 'utf8');
+      // Фильтруем правила, чтобы в конфиг не попали правила с несуществующими группами
+      const safeVpnRules = vpnRules.filter(r => {
+        const parts = r.trim().split(',');
+        const target = parts[parts.length - 1] ? parts[parts.length - 1].trim().replace(/^['"]|['"]$/g, '') : '';
+        return !target || availableTargets.has(target);
+      });
+
+      const safeZapretRules = zapretRules.filter(r => {
+        const parts = r.trim().split(',');
+        const target = parts[parts.length - 1] ? parts[parts.length - 1].trim().replace(/^['"]|['"]$/g, '') : '';
+        return !target || availableTargets.has(target);
+      });
+
+      updateConfigRulesBlock(lines, '# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---', bypassRules, '# --- DYNAMIC RULES ---');
+      updateConfigRulesBlock(lines, '# --- CLIENTS ZAPRET RULES ---', '# --- END CLIENTS ZAPRET RULES ---', safeZapretRules, 'RULE-SET,youtube@domain');
+      updateConfigRulesBlock(lines, '# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---', safeVpnRules, 'MATCH,');
+
+      const newConfigText = lines.join('\n');
+      if (newConfigText !== configText) {
+        fs.writeFileSync(activeCfg, newConfigText, 'utf8');
+      }
     } catch (err) {
       console.error('Ошибка записи правил клиентов в активный config.yaml:', err.message);
     }
@@ -618,11 +661,35 @@ function syncClientsRulesToConfig() {
       const localText = fs.readFileSync(localCfg, 'utf8');
       const localLines = localText.split(/\r?\n/);
 
-      updateConfigRulesBlock(localLines, '# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---', bypassRules, '# --- DYNAMIC RULES ---');
-      updateConfigRulesBlock(localLines, '# --- CLIENTS ZAPRET RULES ---', '# --- END CLIENTS ZAPRET RULES ---', zapretRules, 'RULE-SET,youtube@domain');
-      updateConfigRulesBlock(localLines, '# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---', vpnRules, 'MATCH,');
+      const availableTargetsLocal = new Set(['DIRECT', 'REJECT', 'GLOBAL']);
+      for (const l of localLines) {
+        const tr = l.trim();
+        if (tr.startsWith('- name:')) {
+          const nm = tr.replace(/^- name:\s*['"]?/, '').replace(/['"]?\s*$/, '');
+          if (nm) availableTargetsLocal.add(nm);
+        }
+      }
 
-      fs.writeFileSync(localCfg, localLines.join('\n'), 'utf8');
+      const safeVpnLocal = vpnRules.filter(r => {
+        const parts = r.trim().split(',');
+        const target = parts[parts.length - 1] ? parts[parts.length - 1].trim().replace(/^['"]|['"]$/g, '') : '';
+        return !target || availableTargetsLocal.has(target);
+      });
+
+      const safeZapretLocal = zapretRules.filter(r => {
+        const parts = r.trim().split(',');
+        const target = parts[parts.length - 1] ? parts[parts.length - 1].trim().replace(/^['"]|['"]$/g, '') : '';
+        return !target || availableTargetsLocal.has(target);
+      });
+
+      updateConfigRulesBlock(localLines, '# --- CLIENTS BYPASS RULES ---', '# --- END CLIENTS BYPASS RULES ---', bypassRules, '# --- DYNAMIC RULES ---');
+      updateConfigRulesBlock(localLines, '# --- CLIENTS ZAPRET RULES ---', '# --- END CLIENTS ZAPRET RULES ---', safeZapretLocal, 'RULE-SET,youtube@domain');
+      updateConfigRulesBlock(localLines, '# --- CLIENTS VPN RULES ---', '# --- END CLIENTS VPN RULES ---', safeVpnLocal, 'MATCH,');
+
+      const newLocalText = localLines.join('\n');
+      if (newLocalText !== localText) {
+        fs.writeFileSync(localCfg, newLocalText, 'utf8');
+      }
     } catch (err) {}
   }
 
@@ -1034,7 +1101,7 @@ function startTrafficTracker() {
     } catch (err) {
       // Игнорируем временные ошибки API при перезапуске Mihomo
     }
-  }, 1000);
+  }, 3000);
 }
 
 // Запуск трекера
@@ -1100,8 +1167,7 @@ function getClientsList() {
 
   // 2. Сканируем таблицу ARP (ip neigh) для обнаружения активных хостов в локальной сети
   try {
-    const neighOutput = execSync('ip neigh show', { timeout: 2000 }).toString();
-    const lines = neighOutput.split('\n');
+    const lines = getNeighLines();
 
     lines.forEach(line => {
       // Ищем только REACHABLE и STALE IPv4 хосты

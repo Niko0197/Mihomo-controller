@@ -118,6 +118,113 @@ function decodedIncludesHost(decodedStr) {
   return decodedStr.includes('@') && decodedStr.includes(':');
 }
 
+// Разбор подписок в формате V2Ray / Sing-box / Xray JSON в список объектов Mihomo
+function parseV2RayOrSingboxJson(text) {
+  if (!text || typeof text !== 'string') return [];
+  const trimmed = text.trim();
+  if (!trimmed.startsWith('[') && !trimmed.startsWith('{')) return [];
+  
+  let data;
+  try {
+    data = JSON.parse(trimmed);
+  } catch (e) {
+    return [];
+  }
+
+  const result = [];
+
+  function convertOutboundToMihomo(ob, fallbackName) {
+    if (!ob) return null;
+    const protocol = (ob.protocol || ob.type || '').toLowerCase();
+    const name = ob.tag && ob.tag !== 'proxy' && ob.tag !== 'config' ? ob.tag : (fallbackName || 'Proxy');
+
+    if (protocol === 'vless') {
+      let server = '';
+      let port = 443;
+      let uuid = '';
+      let flow = '';
+
+      if (ob.settings && Array.isArray(ob.settings.vnext) && ob.settings.vnext.length > 0) {
+        const vn = ob.settings.vnext[0];
+        server = vn.address;
+        port = vn.port;
+        if (Array.isArray(vn.users) && vn.users.length > 0) {
+          uuid = vn.users[0].id;
+          flow = vn.users[0].flow || '';
+        }
+      } else if (ob.server) {
+        server = ob.server;
+        port = ob.server_port || ob.port || 443;
+        uuid = ob.uuid;
+        flow = ob.flow || '';
+      }
+
+      if (!server || !port || !uuid) return null;
+
+      const stream = ob.streamSettings || {};
+      const network = stream.network || ob.network || 'tcp';
+      const security = stream.security || (ob.tls && ob.tls.enabled ? (ob.tls.reality && ob.tls.reality.enabled ? 'reality' : 'tls') : 'none');
+      const isReality = security === 'reality';
+      const isTls = security === 'tls' || isReality;
+
+      const proxy = {
+        name,
+        type: 'vless',
+        server,
+        port: parseInt(port, 10),
+        uuid,
+        network,
+        udp: true
+      };
+
+      if (flow) proxy.flow = flow;
+      if (isTls) proxy.tls = true;
+
+      if (isReality) {
+        const r = stream.realitySettings || (ob.tls && ob.tls.reality) || {};
+        proxy['reality-opts'] = {
+          'public-key': r.publicKey || r.public_key || '',
+          'short-id': r.shortId || r.short_id || ''
+        };
+        if (r.serverName || r.server_name) proxy.servername = r.serverName || r.server_name;
+        if (r.fingerprint) proxy['client-fingerprint'] = r.fingerprint;
+      } else if (isTls) {
+        const t = stream.tlsSettings || ob.tls || {};
+        if (t.serverName || t.server_name) proxy.servername = t.serverName || t.server_name;
+        if (t.fingerprint) proxy['client-fingerprint'] = t.fingerprint;
+      }
+
+      return proxy;
+    }
+    return null;
+  }
+
+  if (Array.isArray(data)) {
+    for (let i = 0; i < data.length; i++) {
+      const item = data[i];
+      if (!item) continue;
+      const groupRemarks = item.remarks || ('Node ' + (i + 1));
+      const outbounds = Array.isArray(item.outbounds) ? item.outbounds : (item.outbound ? [item.outbound] : []);
+      
+      for (const ob of outbounds) {
+        if (!ob || !ob.protocol || ['freedom', 'blackhole', 'dns', 'loopback'].includes(ob.protocol)) continue;
+        const proxy = convertOutboundToMihomo(ob, groupRemarks);
+        if (proxy) result.push(proxy);
+      }
+    }
+  } else if (typeof data === 'object' && data !== null) {
+    const outbounds = Array.isArray(data.outbounds) ? data.outbounds : [];
+    for (const ob of outbounds) {
+      const proto = ob.type || ob.protocol;
+      if (!proto || ['direct', 'block', 'dns', 'selector', 'urltest'].includes(proto)) continue;
+      const proxy = convertOutboundToMihomo(ob, ob.tag || ob.remarks || 'Proxy');
+      if (proxy) result.push(proxy);
+    }
+  }
+
+  return result;
+}
+
 // Сериализация JSON-прокси в формат YAML Mihomo
 function serializeProxyToYaml(proxy) {
   let yaml = `  - name: "${proxy.name.replace(/"/g, '\\"')}"\n`;
@@ -225,12 +332,240 @@ function injectProxyIntoGroup(lines, groupName, proxyName) {
   return false;
 }
 
+// Автоматическое определение пресета клиента по заголовкам
+function detectClientPreset(userAgent, deviceOs) {
+  const ua = (userAgent || '').toLowerCase();
+  const os = (deviceOs || '').toLowerCase();
+  if (ua.includes('happ')) {
+    return (os.includes('ios') || ua.includes('ios')) ? 'happ_ios' : 'happ_android';
+  } else if (ua.includes('v2rayng')) {
+    return 'v2rayng';
+  } else if (ua.includes('v2rayn')) {
+    return 'v2rayn';
+  } else if (ua.includes('sfa') || (ua.includes('sing-box') && os.includes('android'))) {
+    return 'singbox_android';
+  } else if (ua.includes('sfi') || (ua.includes('sing-box') && os.includes('ios'))) {
+    return 'singbox_ios';
+  } else if (ua.includes('shadowrocket')) {
+    return 'shadowrocket';
+  } else if (ua.includes('streisand')) {
+    return 'streisand';
+  } else if (ua.includes('foxray')) {
+    return 'foxray';
+  } else if (ua.includes('nekobox')) {
+    return 'nekobox';
+  } else if (ua.includes('hiddify')) {
+    return 'hiddify';
+  } else if (ua.includes('clashverge') || ua.includes('clash-verge')) {
+    return 'clash_verge';
+  } else if (ua.includes('incy')) {
+    return (os.includes('ios') || ua.includes('ios')) ? 'incy_ios' : 'incy_android';
+  } else if (ua.includes('mihomo')) {
+    return 'mihomo';
+  } else if (ua) {
+    return 'custom';
+  }
+  return '';
+}
+
+const IGNORE_SYSTEM_GROUP_NAMES = [
+  'GLOBAL', 'DIRECT', 'REJECT', '🚀Auto-Best',
+  '⚙️Manual 1', '⚙️Manual 2', '⚙️Manual 3',
+  '18+', 'YouTube', 'Telegram', 'OpenAI', 'Discord'
+];
+
+function getGroupCardNameForProvider(providerName) {
+  if (providerName === 'stealthsurf') return '💎 StealthSurf';
+  if (providerName === 'Igareck_Black_VPN') return '🎱 GitHub';
+  return `⚡ ${providerName}`;
+}
+
+function isMatchingGroup(group, providerName, cardName) {
+  if (!group || !group.name) return false;
+  if (IGNORE_SYSTEM_GROUP_NAMES.includes(group.name)) return false;
+  if (group.name.toLowerCase() === cardName.toLowerCase()) return true;
+  if (group.use && group.use.length === 1 && group.use[0].toLowerCase() === providerName.toLowerCase()) return true;
+  return false;
+}
+
+function getGroupForProviderInLines(lines, providerName) {
+  const cardName = getGroupCardNameForProvider(providerName);
+  let inGroups = false;
+  let currentGroup = null;
+  let foundGroup = null;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+
+    if (trimmed === 'proxy-groups:') {
+      inGroups = true;
+      continue;
+    }
+
+    if (inGroups) {
+      if (line.length > 0 && !line.startsWith(' ') && !line.startsWith('-')) {
+        break;
+      }
+
+      if (trimmed.startsWith('- name:')) {
+        if (currentGroup) {
+          currentGroup.endIndex = i;
+          if (isMatchingGroup(currentGroup, providerName, cardName)) {
+            foundGroup = currentGroup;
+            break;
+          }
+        }
+        const gName = trimmed.replace(/- name:\s*/, '').replace(/['"]/g, '').trim();
+        currentGroup = {
+          name: gName,
+          type: 'url-test',
+          use: [],
+          url: '',
+          interval: 300,
+          tolerance: 50,
+          strategy: '',
+          lazy: true,
+          expectedStatus: '',
+          startIndex: i,
+          endIndex: -1
+        };
+        continue;
+      }
+
+      if (currentGroup) {
+        const colonIdx = trimmed.indexOf(':');
+        if (colonIdx !== -1) {
+          const k = trimmed.substring(0, colonIdx).trim();
+          const v = trimmed.substring(colonIdx + 1).trim().replace(/^['"]|['"]$/g, '');
+          if (k === 'type') currentGroup.type = v;
+          if (k === 'url') currentGroup.url = v;
+          if (k === 'interval') currentGroup.interval = parseInt(v, 10) || 300;
+          if (k === 'tolerance') currentGroup.tolerance = parseInt(v, 10) || 50;
+          if (k === 'strategy') currentGroup.strategy = v;
+          if (k === 'lazy') currentGroup.lazy = v === 'true';
+          if (k === 'expected-status') currentGroup.expectedStatus = v;
+        }
+
+        if (trimmed.startsWith('use:')) {
+          let j = i + 1;
+          while (j < lines.length) {
+            const uLine = lines[j].trim();
+            if (uLine.startsWith('-')) {
+              const uName = uLine.substring(1).trim().replace(/['"]/g, '');
+              currentGroup.use.push(uName);
+            } else {
+              break;
+            }
+            j++;
+          }
+        }
+      }
+    }
+  }
+
+  if (currentGroup && !foundGroup && isMatchingGroup(currentGroup, providerName, cardName)) {
+    foundGroup = currentGroup;
+    foundGroup.endIndex = lines.length;
+  }
+
+  return foundGroup;
+}
+
+// Генерация блока health-check: для proxy-providers с удалением неприменимых параметров
+function buildProviderHealthCheckLines(groupOptions) {
+  const groupType = (groupOptions && groupOptions.groupType) || 'url-test';
+  const groupUrl = (groupOptions && groupOptions.groupUrl) || 'http://www.gstatic.com/generate_204';
+  const groupInterval = (groupOptions && groupOptions.groupInterval !== undefined) ? (parseInt(groupOptions.groupInterval, 10) || 300) : 300;
+  const groupTolerance = (groupOptions && groupOptions.groupTolerance !== undefined) ? (parseInt(groupOptions.groupTolerance, 10) || 50) : 50;
+  const groupLazy = (groupOptions && groupOptions.groupLazy !== undefined) ? Boolean(groupOptions.groupLazy) : true;
+
+  if (groupType === 'select') {
+    return [
+      `    health-check:`,
+      `      enable: false`
+    ];
+  }
+
+  const lines = [
+    `    health-check:`,
+    `      enable: true`,
+    `      url: ${groupUrl}`,
+    `      interval: ${groupInterval}`
+  ];
+
+  if (groupType === 'url-test') {
+    lines.push(`      tolerance: ${groupTolerance}`);
+  }
+  if (groupLazy !== undefined) {
+    lines.push(`      lazy: ${groupLazy}`);
+  }
+
+  return lines;
+}
+
+// Обновление/создание привязанной группы подписки в proxy-groups: с удалением недействующих параметров
+function updateProviderGroupInLines(lines, providerName, groupOptions) {
+  const cardName = getGroupCardNameForProvider(providerName);
+  const existingGroup = getGroupForProviderInLines(lines, providerName);
+
+  const groupType = (groupOptions && groupOptions.groupType) || (existingGroup && existingGroup.type) || 'url-test';
+  const groupUrl = (groupOptions && groupOptions.groupUrl) || (existingGroup && existingGroup.url) || 'http://www.gstatic.com/generate_204';
+  const groupInterval = (groupOptions && groupOptions.groupInterval !== undefined) ? (parseInt(groupOptions.groupInterval, 10) || 300) : ((existingGroup && existingGroup.interval) || 300);
+  const groupTolerance = (groupOptions && groupOptions.groupTolerance !== undefined) ? (parseInt(groupOptions.groupTolerance, 10) || 50) : ((existingGroup && existingGroup.tolerance) || 50);
+  const groupStrategy = (groupOptions && groupOptions.groupStrategy) || (existingGroup && existingGroup.strategy) || 'consistent-hashing';
+  const groupLazy = (groupOptions && groupOptions.groupLazy !== undefined) ? Boolean(groupOptions.groupLazy) : (existingGroup && existingGroup.lazy !== undefined ? existingGroup.lazy : true);
+  const groupExpectedStatus = (groupOptions && groupOptions.groupExpectedStatus !== undefined) ? String(groupOptions.groupExpectedStatus).trim() : ((existingGroup && existingGroup.expectedStatus) || '');
+
+  const groupName = existingGroup ? existingGroup.name : cardName;
+
+  const newGroupLines = [
+    `  - name: '${groupName}'`,
+    `    type: ${groupType}`
+  ];
+
+  // strategy применяется ТОЛЬКО в load-balance
+  if (groupType === 'load-balance') {
+    newGroupLines.push(`    strategy: ${groupStrategy}`);
+  }
+
+  newGroupLines.push(`    use:`);
+  newGroupLines.push(`      - ${providerName}`);
+
+  // Для select все параметры проверки удаляются полностью
+  if (groupType !== 'select') {
+    newGroupLines.push(`    url: ${groupUrl}`);
+    newGroupLines.push(`    interval: ${groupInterval}`);
+    // tolerance действует ТОЛЬКО в url-test; для fallback и load-balance он удаляется
+    if (groupType === 'url-test') {
+      newGroupLines.push(`    tolerance: ${groupTolerance}`);
+    }
+    if (groupLazy !== undefined) {
+      newGroupLines.push(`    lazy: ${groupLazy}`);
+    }
+    if (groupExpectedStatus) {
+      newGroupLines.push(`    expected-status: ${groupExpectedStatus}`);
+    }
+  }
+
+  if (existingGroup && existingGroup.startIndex !== -1 && existingGroup.endIndex !== -1) {
+    lines.splice(existingGroup.startIndex, existingGroup.endIndex - existingGroup.startIndex, ...newGroupLines);
+  } else {
+    const groupsIndex = lines.findIndex(l => l.trim() === 'proxy-groups:');
+    if (groupsIndex !== -1) {
+      lines.splice(groupsIndex + 1, 0, ...newGroupLines, '');
+      injectProxyIntoGroup(lines, 'GLOBAL', groupName);
+      injectProxyIntoGroup(lines, '🚀Auto-Best', groupName);
+    }
+  }
+}
+
 // Чтение провайдеров подписок из config.yaml
 function getProxyProvidersFromConfig(yamlText) {
   const lines = yamlText.split(/\r?\n/);
+  const providers = [];
   let inProviders = false;
   let inHeaderBlock = false;
-  const providers = [];
   let currentProvider = null;
   
   for (let i = 0; i < lines.length; i++) {
@@ -252,7 +587,17 @@ function getProxyProvidersFromConfig(yamlText) {
       
       if (line.startsWith('  ') && !line.startsWith('    ') && trimmed.endsWith(':')) {
         const nameVal = trimmed.slice(0, -1).trim().replace(/['"]/g, '');
-        currentProvider = { name: nameVal, deviceName: '', headers: {} };
+        currentProvider = {
+          name: nameVal,
+          deviceName: '',
+          hwid: '',
+          userAgent: '',
+          deviceOs: '',
+          verOs: '',
+          deviceModel: '',
+          clientPreset: '',
+          headers: {}
+        };
         providers.push(currentProvider);
         inHeaderBlock = false;
         continue;
@@ -276,32 +621,213 @@ function getProxyProvidersFromConfig(yamlText) {
         }
       }
 
-      // Парсинг имени устройства/HWID и заголовков СТРОГО из блока header
-      if (currentProvider && inHeaderBlock && line.startsWith('      ')) {
+      // Парсинг заголовков, HWID и мимикрии из блока header
+      if (currentProvider && inHeaderBlock) {
         if (!currentProvider.headers) currentProvider.headers = {};
-        const colonIndex = trimmed.indexOf(':');
-        if (colonIndex !== -1) {
+
+        if (line.startsWith('      ') && !line.startsWith('        ') && trimmed.includes(':')) {
+          const colonIndex = trimmed.indexOf(':');
           const k = trimmed.substring(0, colonIndex).trim();
-          const v = trimmed.substring(colonIndex + 1).trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
-          currentProvider.headers[k] = v;
+          let v = trimmed.substring(colonIndex + 1).trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
+          if (v) {
+            currentProvider.headers[k] = v;
+          }
+          currentProvider._lastKey = k;
+        } else if (line.startsWith('        - ') && currentProvider._lastKey) {
+          const v = trimmed.replace(/^-\s*/, '').replace(/^['"]|['"]$/g, '').trim();
+          currentProvider.headers[currentProvider._lastKey] = v;
         }
 
-        if (trimmed.startsWith('Device-Name:') || trimmed.startsWith('X-HWID:')) {
-          const v = trimmed.split(':')[1].trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
-          if (v) currentProvider.deviceName = v;
-        } else if (trimmed.startsWith('User-Agent:') && !currentProvider.deviceName) {
-          const v = trimmed.split(':')[1].trim().replace(/^\[|\]$/g, '').replace(/^['"]|['"]$/g, '').trim();
-          const m = v.match(/\(([^)]+)\)/);
-          if (m) currentProvider.deviceName = m[1];
-        }
+        // Обновляем структурированные поля
+        const h = currentProvider.headers;
+        currentProvider.hwid = h['x-hwid'] || h['X-HWID'] || h['hwid'] || '';
+        currentProvider.userAgent = h['User-Agent'] || h['user-agent'] || '';
+        currentProvider.deviceOs = h['x-device-os'] || h['X-Device-OS'] || '';
+        currentProvider.verOs = h['x-ver-os'] || h['X-Ver-OS'] || '';
+        currentProvider.deviceModel = h['x-device-model'] || h['X-Device-Model'] || h['Device-Name'] || '';
+        currentProvider.deviceName = currentProvider.deviceModel || currentProvider.hwid || '';
+        currentProvider.clientPreset = h['x-client-preset'] || h['X-Client-Preset'] || '';
       }
     }
   }
+
+  // Очищаем временные ключи, определяем clientPreset и считываем параметры привязанной группы из proxy-groups
+  for (const p of providers) {
+    if (p._lastKey !== undefined) delete p._lastKey;
+    if (!p.clientPreset) {
+      p.clientPreset = detectClientPreset(p.userAgent, p.deviceOs);
+    }
+    const g = getGroupForProviderInLines(lines, p.name);
+    if (g) {
+      p.groupType = g.type || 'url-test';
+      p.groupUrl = g.url || 'http://www.gstatic.com/generate_204';
+      p.groupInterval = g.interval !== undefined ? g.interval : 300;
+      p.groupTolerance = g.tolerance !== undefined ? g.tolerance : 50;
+      p.groupStrategy = g.strategy || 'consistent-hashing';
+      p.groupLazy = g.lazy !== undefined ? g.lazy : true;
+      p.groupExpectedStatus = g.expectedStatus || '';
+    } else {
+      p.groupType = 'url-test';
+      p.groupUrl = 'http://www.gstatic.com/generate_204';
+      p.groupInterval = 300;
+      p.groupTolerance = 50;
+      p.groupStrategy = 'consistent-hashing';
+      p.groupLazy = true;
+      p.groupExpectedStatus = '';
+    }
+  }
+
   return providers;
 }
 
+const KNOWN_PRESET_DEFAULTS = {
+  mihomo: {
+    userAgent: 'mihomo/v1.18.10',
+    deviceOs: 'KeeneticOS',
+    verOs: '5.0.4',
+    deviceModel: 'Keenetic Giga KN-1012'
+  },
+  happ_android: {
+    userAgent: 'Happ/1.2.0 (Linux; Android 14; SM-S928B)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Samsung Galaxy S24 Ultra'
+  },
+  happ_ios: {
+    userAgent: 'Happ/1.2.0 (iOS 18.3; iPhone16,2)',
+    deviceOs: 'iOS',
+    verOs: '18.3',
+    deviceModel: 'iPhone 15 Pro'
+  },
+  v2rayng: {
+    userAgent: 'v2rayNG/1.8.12 (Android 14; SM-G998B)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Samsung SM-G998B'
+  },
+  v2rayn: {
+    userAgent: 'v2rayN/6.42',
+    deviceOs: 'Windows',
+    verOs: '10.0.22631',
+    deviceModel: 'PC (x86_64)'
+  },
+  singbox_android: {
+    userAgent: 'SFA/1.10.0 (Android 14; Pixel 8 Pro)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Google Pixel 8 Pro'
+  },
+  singbox_ios: {
+    userAgent: 'SFI/1.10.0 (iOS 18.3; iPhone16,2)',
+    deviceOs: 'iOS',
+    verOs: '18.3',
+    deviceModel: 'iPhone 15 Pro'
+  },
+  shadowrocket: {
+    userAgent: 'Shadowrocket/2.2.35 (iOS 18.2; iPhone16,1)',
+    deviceOs: 'iOS',
+    verOs: '18.2',
+    deviceModel: 'iPhone 15'
+  },
+  streisand: {
+    userAgent: 'Streisand/1.6.4 (iOS 18.2; iPhone15,2)',
+    deviceOs: 'iOS',
+    verOs: '18.2',
+    deviceModel: 'iPhone 14 Pro'
+  },
+  foxray: {
+    userAgent: 'FoXray/1.4.2 (iOS 17.4; iPhone)',
+    deviceOs: 'iOS',
+    verOs: '17.4',
+    deviceModel: 'iPhone'
+  },
+  nekobox: {
+    userAgent: 'NekoBox/1.3.1 (Android 14; arm64-v8a)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Android Device'
+  },
+  hiddify: {
+    userAgent: 'HiddifyNext/2.0.0 (Android 14; Linux)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Android Device'
+  },
+  clash_verge: {
+    userAgent: 'ClashVerge/1.6.0 (Windows NT 10.0; Win64; x64) clash.meta',
+    deviceOs: 'Windows',
+    verOs: '11',
+    deviceModel: 'PC'
+  },
+  incy_android: {
+    userAgent: 'Incy/1.1.0 (Linux; Android 14; Mobile)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Android Device'
+  },
+  incy_ios: {
+    userAgent: 'Incy/1.1.0 (iOS 18.2; iPhone16,2)',
+    deviceOs: 'iOS',
+    verOs: '18.2',
+    deviceModel: 'iPhone 15 Pro'
+  }
+};
+
+// Генерация блока header: для proxy-providers в строгом YAML-формате списков
+function buildProviderHeaderLines(options) {
+  if (!options) return [];
+  const opts = typeof options === 'string' ? { deviceName: options } : options;
+
+  let clientPreset = opts.clientPreset || (opts.headers && (opts.headers['x-client-preset'] || opts.headers['X-Client-Preset'])) || '';
+  let userAgent = opts.userAgent || (opts.headers && (opts.headers['User-Agent'] || opts.headers['user-agent'])) || '';
+  let hwid = opts.hwid || (opts.headers && (opts.headers['x-hwid'] || opts.headers['X-HWID'])) || '';
+  let deviceOs = opts.deviceOs || (opts.headers && (opts.headers['x-device-os'] || opts.headers['X-Device-OS'])) || '';
+  let verOs = opts.verOs || (opts.headers && (opts.headers['x-ver-os'] || opts.headers['X-Ver-OS'])) || '';
+  let deviceModel = opts.deviceModel || opts.deviceName || (opts.headers && (opts.headers['x-device-model'] || opts.headers['X-Device-Model'] || opts.headers['Device-Name'])) || '';
+
+  // Если указан пресет, но поля пустые - берем умолчания пресета
+  if (clientPreset && KNOWN_PRESET_DEFAULTS[clientPreset] && clientPreset !== 'custom') {
+    const d = KNOWN_PRESET_DEFAULTS[clientPreset];
+    if (!userAgent) userAgent = d.userAgent;
+    if (!deviceOs) deviceOs = d.deviceOs;
+    if (!verOs) verOs = d.verOs;
+    if (!deviceModel) deviceModel = d.deviceModel;
+  }
+
+  // Если передан только legacy deviceName без прочих настроек
+  if (!userAgent && opts.deviceName) {
+    userAgent = `Happ/1.2.0 (${opts.deviceName}; Linux; Android 14)`;
+    if (!hwid) hwid = '9D4B2C81E70FA356';
+    if (!deviceOs) deviceOs = 'Android';
+  } else if (!userAgent) {
+    userAgent = 'Happ/1.2.0 (Linux; Android 14; SM-S928B)';
+    if (!hwid) hwid = '9D4B2C81E70FA356';
+    if (!deviceOs) deviceOs = 'Android';
+  }
+
+  // Если clientPreset не задан явно, автоопределяем его
+  if (!clientPreset) {
+    clientPreset = detectClientPreset(userAgent, deviceOs) || 'happ_android';
+  }
+
+  const lines = ['    header:'];
+  if (userAgent) lines.push(`      User-Agent: ["${userAgent}"]`);
+  if (hwid) lines.push(`      x-hwid: ["${hwid}"]`);
+  if (deviceOs) lines.push(`      x-device-os: ["${deviceOs}"]`);
+  if (verOs) lines.push(`      x-ver-os: ["${verOs}"]`);
+  if (deviceModel) {
+    lines.push(`      x-device-model: ["${deviceModel}"]`);
+    lines.push(`      Device-Name: ["${deviceModel}"]`);
+  }
+  if (clientPreset) {
+    lines.push(`      x-client-preset: ["${clientPreset}"]`);
+  }
+
+  return lines;
+}
+
 // Редактирование существующего провайдера в config.yaml
-function updateProviderInConfig(yamlText, name, url, interval, deviceName) {
+function updateProviderInConfig(yamlText, name, url, interval, options) {
   const lines = yamlText.split(/\r?\n/);
   let inProviders = false;
   let provStart = -1;
@@ -355,73 +881,47 @@ function updateProviderInConfig(yamlText, name, url, interval, deviceName) {
       }
     }
 
-    const cleanDevice = deviceName ? String(deviceName).trim() : '';
+    const headerLines = buildProviderHeaderLines(options);
+    const healthCheckLines = buildProviderHealthCheckLines(options);
     const newProviderLines = [
       `  ${name}:`,
       `    type: http`,
       `    url: "${url}"`,
       `    interval: ${interval || 3600}`,
       `    path: ${existingPath}`,
-      `    header:`,
-      ...(cleanDevice ? [
-        `      User-Agent: ["v2rayNG/1.8.12 (${cleanDevice}; Linux; KeeneticOS)"]`,
-        `      Device-Name: ["${cleanDevice}"]`,
-        `      X-Device-Name: ["${cleanDevice}"]`,
-        `      X-Device-Model: ["${cleanDevice}"]`,
-        `      X-Device-OS: ["KeeneticOS"]`,
-        `      X-HWID: ["9D4B2C81E70FA356"]`
-      ] : [
-        `      User-Agent: ["v2rayNG/1.8.12"]`,
-        `      X-HWID: ["9D4B2C81E70FA356"]`
-      ]),
-      `    health-check:`,
-      `      enable: true`,
-      `      url: http://www.gstatic.com/generate_204`,
-      `      interval: 300`,
-      `      tolerance: 50`
+      ...headerLines,
+      ...healthCheckLines
     ];
 
     lines.splice(provStart, provEnd - provStart, ...newProviderLines);
+    updateProviderGroupInLines(lines, name, options);
   }
   
   return lines.join('\n');
 }
 
 // Добавление нового провайдера подписки в config.yaml
-function addProviderToConfig(yamlText, name, url, interval, deviceName) {
+function addProviderToConfig(yamlText, name, url, interval, options) {
   const lines = yamlText.split(/\r?\n/);
   const providersIndex = lines.findIndex(line => line.trim() === 'proxy-providers:');
   if (providersIndex === -1) {
     throw new Error('Секция proxy-providers: не найдена в файле конфигурации');
   }
   
-  const cleanDevice = deviceName ? String(deviceName).trim() : '';
+  const headerLines = buildProviderHeaderLines(options);
+  const healthCheckLines = buildProviderHealthCheckLines(options);
   const providerYaml = [
     `  ${name}:`,
     `    type: http`,
     `    url: "${url}"`,
     `    interval: ${interval || 3600}`,
     `    path: ./proxy_providers/${name.toLowerCase().replace(/[^a-z0-9а-яё]/gi, '_')}.yaml`,
-    `    header:`,
-    ...(cleanDevice ? [
-      `      User-Agent: ["v2rayNG/1.8.12 (${cleanDevice}; Linux; KeeneticOS)"]`,
-      `      Device-Name: ["${cleanDevice}"]`,
-      `      X-Device-Name: ["${cleanDevice}"]`,
-      `      X-Device-Model: ["${cleanDevice}"]`,
-      `      X-Device-OS: ["KeeneticOS"]`,
-      `      X-HWID: ["9D4B2C81E70FA356"]`
-    ] : [
-      `      User-Agent: ["v2rayNG/1.8.12"]`,
-      `      X-HWID: ["9D4B2C81E70FA356"]`
-    ]),
-    `    health-check:`,
-    `      enable: true`,
-    `      url: http://www.gstatic.com/generate_204`,
-    `      interval: 300`,
-    `      tolerance: 50`
+    ...headerLines,
+    ...healthCheckLines
   ];
 
   lines.splice(providersIndex + 1, 0, ...providerYaml);
+  updateProviderGroupInLines(lines, name, options);
   return lines.join('\n');
 }
 
@@ -843,12 +1343,6 @@ function cleanupEmptyGroupsInLines(lines) {
   }
 }
 
-function getGroupCardNameForProvider(providerName) {
-  if (providerName === 'stealthsurf') return '💎 StealthSurf';
-  if (providerName === 'Igareck_Black_VPN') return '🎱 GitHub';
-  return `⚡ ${providerName}`;
-}
-
 function sortProxiesInAutoBestInLines(lines, orderedCardNames) {
   let inProxyGroups = false;
   let inAutoBest = false;
@@ -990,21 +1484,7 @@ function ensureProviderGroupInLines(lines, providerName) {
   const groupCardName = getGroupCardNameForProvider(providerName);
 
   if (!hasGroup) {
-    const groupsIndex = lines.findIndex(line => line.trim() === 'proxy-groups:');
-    if (groupsIndex !== -1) {
-      const newGroupLines = [
-        `  - name: '${groupCardName}'`,
-        `    type: url-test`,
-        `    use:`,
-        `      - ${providerName}`,
-        `    url: http://www.gstatic.com/generate_204`,
-        `    interval: 300`,
-        `    tolerance: 50`,
-        ``
-      ];
-      lines.splice(groupsIndex + 1, 0, ...newGroupLines);
-      injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
-    }
+    updateProviderGroupInLines(lines, providerName, { groupType: 'url-test' });
   }
 
   injectProxyIntoGroup(lines, 'GLOBAL', groupCardName);
@@ -1255,6 +1735,7 @@ function serializeProxyToUri(p) {
 
 module.exports = {
   parseProxyUri,
+  parseV2RayOrSingboxJson,
   serializeProxyToYaml,
   serializeProxyToUri,
   extractProxiesFromYaml,
@@ -1270,5 +1751,9 @@ module.exports = {
   cleanupEmptyGroupsInLines,
   ensureProviderGroupInLines,
   syncAllProviderGroupsInConfig,
-  reorderProvidersInConfig
+  reorderProvidersInConfig,
+  getGroupCardNameForProvider,
+  getGroupForProviderInLines,
+  updateProviderGroupInLines,
+  buildProviderHealthCheckLines
 };

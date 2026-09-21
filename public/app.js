@@ -92,6 +92,9 @@ function updateModeUI(mode) {
 
 document.addEventListener('DOMContentLoaded', () => {
   loadGlobalMihomoMode();
+  if (typeof fetchRouterHardwareInfo === 'function') {
+    fetchRouterHardwareInfo().catch(() => {});
+  }
 });
 
 // Переключение вкладок
@@ -119,7 +122,7 @@ function switchTab(tabId) {
     'editor': '📝 Редактор YAML конфигураций',
     'dns': '🛡️ Настройка DNS и Резолвера',
     'updates': '🔄 Управление версиями и обновлениями',
-    'qr': '📱 QR-подключения клиентов',
+    'hwid': '🛡️ Идентификация устройства (HWID) и мимикрия',
     'leak': '🔍 Анализ утечек доменов'
   };
 
@@ -136,6 +139,8 @@ function switchTab(tabId) {
     }, 50);
   } else if (tabId === 'dns') {
     loadDnsSettings();
+  } else if (tabId === 'hwid') {
+    loadHwidTab();
   } else if (tabId === 'import') {
     loadImportGroups();
   } else if (tabId === 'subs') {
@@ -148,8 +153,6 @@ function switchTab(tabId) {
     loadDynamicRulesTab();
   } else if (tabId === 'updates') {
     loadVersionsList();
-  } else if (tabId === 'qr') {
-    loadQrConnections();
   } else if (tabId === 'connections') {
     if (typeof startConnectionsPolling === 'function') startConnectionsPolling(false);
     if (typeof loadConnections === 'function') loadConnections();
@@ -492,7 +495,14 @@ document.getElementById('btn-import-links').onclick = async function() {
   const btn = this;
   const textarea = document.getElementById('import-links-textarea');
   const linksText = textarea.value;
-  const links = linksText.split('\n')
+
+  // Если пользователь вставил happ:// или v2raytun:// ссылки, декодируем их перед импортом
+  if (linksText.includes('happ://') || linksText.includes('v2raytun://')) {
+    await decodeHappInTextarea();
+  }
+
+  const updatedText = textarea.value;
+  const links = updatedText.split('\n')
     .map(l => l.trim())
     .filter(l => l.length > 0 && (l.startsWith('vless://') || l.startsWith('ss://') || l.startsWith('trojan://')));
   
@@ -521,6 +531,8 @@ document.getElementById('btn-import-links').onclick = async function() {
     }
     showToast(`Успешно импортировано прокси: ${result.count}!`);
     textarea.value = '';
+    const statusEl = document.getElementById('happ-decode-status');
+    if (statusEl) statusEl.style.display = 'none';
   } catch (err) {
     showToast(err.message, 'error');
   } finally {
@@ -528,6 +540,719 @@ document.getElementById('btn-import-links').onclick = async function() {
     btn.textContent = '📥 Импортировать прокси';
   }
 };
+
+// === ПРЕСЕТЫ МИМИКРИИ ПОД VPN-КЛИЕНТЫ (ПО АНАЛОГИИ С DNS) ===
+const CLIENT_PRESETS = {
+  mihomo: {
+    id: 'mihomo',
+    name: 'Mihomo (Keenetic)',
+    icon: '⚡',
+    title: 'Родной профиль ядра Mihomo / XKeen для KeeneticOS',
+    userAgent: 'mihomo/v1.18.10',
+    deviceOs: 'KeeneticOS',
+    verOs: '5.0.4',
+    deviceModel: 'Keenetic Giga KN-1012'
+  },
+  happ_android: {
+    id: 'happ_android',
+    name: 'Happ (Android)',
+    icon: '📱',
+    title: 'Клиент Happ для Android (стандартный формат x-hwid)',
+    userAgent: 'Happ/1.2.0 (Linux; Android 14; SM-S928B)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Samsung Galaxy S24 Ultra'
+  },
+  happ_ios: {
+    id: 'happ_ios',
+    name: 'Happ (iOS)',
+    icon: '🍏',
+    title: 'Клиент Happ для Apple iOS',
+    userAgent: 'Happ/1.2.0 (iOS 18.3; iPhone16,2)',
+    deviceOs: 'iOS',
+    verOs: '18.3',
+    deviceModel: 'iPhone 15 Pro'
+  },
+  v2rayng: {
+    id: 'v2rayng',
+    name: 'v2rayNG',
+    icon: '🚀',
+    title: 'Популярный клиент v2rayNG для Android',
+    userAgent: 'v2rayNG/1.8.12 (Android 14; SM-G998B)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Samsung SM-G998B'
+  },
+  v2rayn: {
+    id: 'v2rayn',
+    name: 'v2rayN',
+    icon: '💻',
+    title: 'v2rayN для Windows (десктоп)',
+    userAgent: 'v2rayN/6.42',
+    deviceOs: 'Windows',
+    verOs: '10.0.22631',
+    deviceModel: 'PC (x86_64)'
+  },
+  singbox_android: {
+    id: 'singbox_android',
+    name: 'Sing-box (Android)',
+    icon: '📦',
+    title: 'Sing-box for Android (SFA)',
+    userAgent: 'SFA/1.10.0 (Android 14; Pixel 8 Pro)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Google Pixel 8 Pro'
+  },
+  singbox_ios: {
+    id: 'singbox_ios',
+    name: 'Sing-box (iOS)',
+    icon: '🍎',
+    title: 'Sing-box for iOS (SFI)',
+    userAgent: 'SFI/1.10.0 (iOS 18.0; iPhone16,1)',
+    deviceOs: 'iOS',
+    verOs: '18.0',
+    deviceModel: 'iPhone 15'
+  },
+  shadowrocket: {
+    id: 'shadowrocket',
+    name: 'Shadowrocket',
+    icon: '🚀',
+    title: 'Shadowrocket для iOS',
+    userAgent: 'Shadowrocket/2.2.32 (iOS 17.5.1; iPhone15,2)',
+    deviceOs: 'iOS',
+    verOs: '17.5.1',
+    deviceModel: 'iPhone 14 Pro'
+  },
+  streisand: {
+    id: 'streisand',
+    name: 'Streisand',
+    icon: '✈️',
+    title: 'Streisand для iOS',
+    userAgent: 'Streisand/1.5.0 (iOS 17.5; iPhone15,3)',
+    deviceOs: 'iOS',
+    verOs: '17.5',
+    deviceModel: 'iPhone 14 Pro Max'
+  },
+  foxray: {
+    id: 'foxray',
+    name: 'FoXray',
+    icon: '🦊',
+    title: 'FoXray для iOS/macOS',
+    userAgent: 'FoXray/1.4.2 (iOS 17.4; iPhone)',
+    deviceOs: 'iOS',
+    verOs: '17.4',
+    deviceModel: 'iPhone'
+  },
+  nekobox: {
+    id: 'nekobox',
+    name: 'NekoBox',
+    icon: '🐱',
+    title: 'NekoBox для Android',
+    userAgent: 'NekoBox/1.3.1 (Android 14; arm64-v8a)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Android Device'
+  },
+  hiddify: {
+    id: 'hiddify',
+    name: 'Hiddify',
+    icon: '🛡️',
+    title: 'Мультиплатформенный клиент Hiddify',
+    userAgent: 'HiddifyNext/2.0.0 (Android 14; Linux)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Android Device'
+  },
+  clash_verge: {
+    id: 'clash_verge',
+    name: 'Clash Verge Rev',
+    icon: '🔀',
+    title: 'Clash Verge Rev для ПК (Clash.Meta)',
+    userAgent: 'ClashVerge/1.6.0 (Windows NT 10.0; Win64; x64) clash.meta',
+    deviceOs: 'Windows',
+    verOs: '11',
+    deviceModel: 'PC'
+  },
+  incy_android: {
+    id: 'incy_android',
+    name: 'INCY (Android)',
+    icon: '🅸',
+    title: 'Клиент INCY для Android',
+    userAgent: 'Incy/1.1.0 (Linux; Android 14; Mobile)',
+    deviceOs: 'Android',
+    verOs: '14',
+    deviceModel: 'Android Device'
+  },
+  incy_ios: {
+    id: 'incy_ios',
+    name: 'INCY (iOS)',
+    icon: '🅸',
+    title: 'Клиент INCY для iOS / iPadOS',
+    userAgent: 'Incy/1.1.0 (iOS 18.2; iPhone16,2)',
+    deviceOs: 'iOS',
+    verOs: '18.2',
+    deviceModel: 'iPhone 15 Pro'
+  },
+  custom: {
+    id: 'custom',
+    name: 'Свой вариант',
+    icon: '✏️',
+    title: 'Ручной ввод любых параметров и заголовков',
+    userAgent: '',
+    deviceOs: '',
+    verOs: '',
+    deviceModel: ''
+  }
+};
+
+let cachedRouterHardwareInfo = null;
+
+async function fetchRouterHardwareInfo() {
+  if (cachedRouterHardwareInfo) return cachedRouterHardwareInfo;
+  try {
+    const res = await fetch('/api/system/hwid');
+    if (res.ok) {
+      const data = await res.json();
+      if (data && data.success) {
+        cachedRouterHardwareInfo = data;
+        if (CLIENT_PRESETS && CLIENT_PRESETS.mihomo) {
+          if (data.deviceOs) CLIENT_PRESETS.mihomo.deviceOs = data.deviceOs;
+          if (data.verOs) CLIENT_PRESETS.mihomo.verOs = data.verOs;
+          if (data.deviceModel) CLIENT_PRESETS.mihomo.deviceModel = data.deviceModel;
+          if (data.mihomoVersion) CLIENT_PRESETS.mihomo.userAgent = `mihomo/${data.mihomoVersion}`;
+        }
+        return cachedRouterHardwareInfo;
+      }
+    }
+  } catch (e) {}
+  return {
+    routerMac: 'D49C53002390',
+    deviceOs: 'KeeneticOS',
+    verOs: '5.0.4',
+    deviceModel: 'Keenetic Giga KN-1012',
+    mihomoVersion: 'v1.19.31'
+  };
+}
+
+async function fetchRouterHwid() {
+  const info = await fetchRouterHardwareInfo();
+  return info.routerMac || 'D49C53002390';
+}
+
+function generateRandomHwid() {
+  const chars = '0123456789ABCDEF';
+  let res = '';
+  for (let i = 0; i < 16; i++) {
+    res += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return res;
+}
+
+async function useRouterMacHwid(notify = true) {
+  const mac = await fetchRouterHwid();
+  const hwidInput = document.getElementById('sub-hwid');
+  if (hwidInput) hwidInput.value = mac;
+  if (notify) {
+    showToast(`Использован аппаратный MAC: ${mac}`, 'info');
+  }
+}
+
+function generateSubRandomHwid() {
+  const rand = generateRandomHwid();
+  const hwidInput = document.getElementById('sub-hwid');
+  if (hwidInput) hwidInput.value = rand;
+  showToast(`Сгенерирован новый HWID: ${rand}`, 'info');
+}
+
+function detectPresetFromHeaders(ua = '', os = '') {
+  const subUa = String(ua || '').toLowerCase();
+  const subOs = String(os || '').toLowerCase();
+  if (subUa.includes('happ')) {
+    return (subOs.includes('ios') || subUa.includes('ios')) ? 'happ_ios' : 'happ_android';
+  }
+  if (subUa.includes('v2rayng')) return 'v2rayng';
+  if (subUa.includes('v2rayn')) return 'v2rayn';
+  if (subUa.includes('sfa') || (subUa.includes('sing-box') && subOs.includes('android'))) return 'singbox_android';
+  if (subUa.includes('sfi') || (subUa.includes('sing-box') && subOs.includes('ios'))) return 'singbox_ios';
+  if (subUa.includes('shadowrocket')) return 'shadowrocket';
+  if (subUa.includes('streisand')) return 'streisand';
+  if (subUa.includes('foxray')) return 'foxray';
+  if (subUa.includes('nekobox')) return 'nekobox';
+  if (subUa.includes('hiddify')) return 'hiddify';
+  if (subUa.includes('clashverge') || subUa.includes('clash-verge')) return 'clash_verge';
+  if (subUa.includes('incy')) {
+    return (subOs.includes('ios') || subUa.includes('ios')) ? 'incy_ios' : 'incy_android';
+  }
+  if (subUa.includes('mihomo')) return 'mihomo';
+  return subUa ? 'custom' : 'mihomo';
+}
+
+function renderHwidPresetButtons(activeKey = 'mihomo') {
+  const container = document.getElementById('hwid-presets-list');
+  if (!container) return;
+  container.innerHTML = '';
+  
+  Object.values(CLIENT_PRESETS).forEach(p => {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'hwid-preset-btn' + (p.id === activeKey ? ' active-preset' : '');
+    btn.dataset.preset = p.id;
+    btn.title = p.title;
+    btn.onclick = () => applyClientPreset(p.id, true);
+    btn.innerHTML = `<span class="hwid-preset-icon">${p.icon}</span><span class="hwid-preset-name">${p.name}</span>`;
+    container.appendChild(btn);
+  });
+}
+
+function applyClientPreset(presetKey, populateInputs = true) {
+  const p = CLIENT_PRESETS[presetKey] || CLIENT_PRESETS.custom;
+  let presetHidden = document.getElementById('sub-client-preset');
+  if (!presetHidden) {
+    presetHidden = document.createElement('input');
+    presetHidden.type = 'hidden';
+    presetHidden.id = 'sub-client-preset';
+    const form = document.getElementById('add-sub-modal') || document.body;
+    form.appendChild(presetHidden);
+  }
+  presetHidden.value = presetKey;
+  
+  // Подсветка активной кнопки
+  document.querySelectorAll('.hwid-preset-btn').forEach(b => {
+    b.classList.toggle('active-preset', b.dataset.preset === presetKey);
+  });
+  
+  if (populateInputs && presetKey !== 'custom') {
+    if (document.getElementById('sub-user-agent')) {
+      document.getElementById('sub-user-agent').value = p.userAgent || '';
+    }
+    if (document.getElementById('sub-device-os')) {
+      document.getElementById('sub-device-os').value = p.deviceOs || '';
+    }
+    if (document.getElementById('sub-ver-os')) {
+      document.getElementById('sub-ver-os').value = p.verOs || '';
+    }
+    if (document.getElementById('sub-device-model')) {
+      document.getElementById('sub-device-model').value = p.deviceModel || '';
+      const devNameInput = document.getElementById('sub-device-name');
+      if (devNameInput) devNameInput.value = p.deviceModel || '';
+    }
+  }
+
+  const details = document.getElementById('sub-mimicry-details');
+  if (details && presetKey === 'custom') {
+    details.open = true;
+  }
+}
+
+async function tryDecryptIncyMeta(link) {
+  const prefix = 'incy://crypt1/';
+  if (!link || !link.startsWith(prefix)) return null;
+
+  try {
+    if (window.crypto && window.crypto.subtle) {
+      let b64 = link.slice(prefix.length).replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const binary = atob(b64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+      if (bytes.length >= 28) {
+        const iv = bytes.slice(0, 12);
+        const ciphertextWithTag = bytes.slice(12);
+        const keyBytes = Uint8Array.from(atob('9tQOoMioiZ18aC0Jug1BZd/is91F5rs+JcsjPPAMJGI='), c => c.charCodeAt(0));
+        const cryptoKey = await window.crypto.subtle.importKey('raw', keyBytes, { name: 'AES-GCM' }, false, ['decrypt']);
+        const decrypted = await window.crypto.subtle.decrypt({ name: 'AES-GCM', iv }, cryptoKey, ciphertextWithTag);
+        const decStr = new TextDecoder().decode(decrypted);
+        return JSON.parse(decStr);
+      }
+    }
+  } catch (e) {}
+
+  // Резервный запрос через API сервера
+  try {
+    const res = await fetch('/api/decode-crypto-link', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url: link })
+    });
+    const data = await res.json();
+    if (data && data.success && data.url) {
+      return { n: data.providerName || '', url: data.url, v: 1 };
+    }
+  } catch (e) {}
+
+  return null;
+}
+
+function setGroupUrlPreset(url) {
+  const input = document.getElementById('sub-group-url');
+  if (input) input.value = url;
+}
+
+function selectSubGroupType(type, populateDefaults = false) {
+  const hiddenInput = document.getElementById('sub-group-type');
+  if (hiddenInput) hiddenInput.value = type;
+
+  // Подсветка активной кнопки пресета типа группы
+  document.querySelectorAll('.sub-group-type-btn').forEach(btn => {
+    btn.classList.toggle('active-preset', btn.dataset.type === type);
+  });
+
+  const paramsBox = document.getElementById('sub-group-params-box');
+  const toleranceField = document.getElementById('field-group-tolerance');
+  const strategyField = document.getElementById('field-group-strategy');
+  const hintEl = document.getElementById('sub-group-type-hint');
+
+  if (type === 'select') {
+    // В режиме select параметры проверки скрываются полностью (и удаляются из конфига)
+    if (paramsBox) paramsBox.style.display = 'none';
+    if (hintEl) {
+      hintEl.innerHTML = `👆 <strong>Select (Ручной выбор)</strong>: автоматическая проверка здоровья нод отключена. Все параметры проверки (<code>url</code>, <code>interval</code>, <code>tolerance</code>, <code>strategy</code>, <code>lazy</code>, <code>expected-status</code>) полностью удаляются из конфигурации. Вы сможете вручную выбирать ноду в панели.`;
+    }
+  } else if (type === 'fallback') {
+    if (paramsBox) paramsBox.style.display = 'block';
+    if (toleranceField) toleranceField.style.display = 'none';
+    if (strategyField) strategyField.style.display = 'none';
+    if (hintEl) {
+      hintEl.innerHTML = `🛡️ <strong>Fallback (Резервный переключатель)</strong>: трафик всегда идёт через первую рабочую ноду из списка подписки. При сбое ядро мгновенно переключается на следующую живую. Недействующие параметры <code>tolerance</code> и <code>strategy</code> автоматически удаляются из конфигурации.`;
+    }
+    if (populateDefaults) {
+      const urlInput = document.getElementById('sub-group-url');
+      if (urlInput && !urlInput.value) urlInput.value = 'http://www.gstatic.com/generate_204';
+      const intInput = document.getElementById('sub-group-interval');
+      if (intInput && (!intInput.value || intInput.value === '0')) intInput.value = '300';
+    }
+  } else if (type === 'load-balance') {
+    if (paramsBox) paramsBox.style.display = 'block';
+    if (toleranceField) toleranceField.style.display = 'none';
+    if (strategyField) strategyField.style.display = 'block';
+    if (hintEl) {
+      hintEl.innerHTML = `⚖️ <strong>Load-Balance (Балансировка)</strong>: трафик распределяется между всеми доступными нодами по выбранному алгоритму (consistent-hashing или round-robin). Недействующий параметр <code>tolerance</code> автоматически удаляется из конфигурации.`;
+    }
+    if (populateDefaults) {
+      const urlInput = document.getElementById('sub-group-url');
+      if (urlInput && !urlInput.value) urlInput.value = 'http://www.gstatic.com/generate_204';
+      const intInput = document.getElementById('sub-group-interval');
+      if (intInput && (!intInput.value || intInput.value === '0')) intInput.value = '300';
+    }
+  } else {
+    // По умолчанию url-test
+    if (paramsBox) paramsBox.style.display = 'block';
+    if (toleranceField) toleranceField.style.display = 'block';
+    if (strategyField) strategyField.style.display = 'none';
+    if (hintEl) {
+      hintEl.innerHTML = `🔄 <strong>URL-Test (Автовыбор лучшего)</strong>: ядро периодически опрашивает ноды и направляет трафик на сервер с наименьшей задержкой. Параметр <code>tolerance</code> предотвращает лишние переключения при схожем пинге. Недействующий параметр <code>strategy</code> автоматически удаляется из конфигурации.`;
+    }
+    if (populateDefaults) {
+      const urlInput = document.getElementById('sub-group-url');
+      if (urlInput && !urlInput.value) urlInput.value = 'http://www.gstatic.com/generate_204';
+      const intInput = document.getElementById('sub-group-interval');
+      if (intInput && (!intInput.value || intInput.value === '0')) intInput.value = '300';
+      const tolInput = document.getElementById('sub-group-tolerance');
+      if (tolInput && (!tolInput.value || tolInput.value === '0')) tolInput.value = '50';
+    }
+  }
+}
+
+function updateSubUrlHints(clean) {
+  const hint = document.getElementById('sub-url-happ-hint');
+  if (!hint) return;
+  if (clean.startsWith('happ://') || clean.startsWith('v2raytun://')) {
+    hint.style.display = 'block';
+    hint.innerHTML = '🔐 Зашифрованная <b>Happ</b> ссылка: декодируется через прокси Happy Decoder!';
+  } else if (clean.startsWith('incy://crypt1/')) {
+    hint.style.display = 'block';
+    hint.innerHTML = '🔐 Зашифрованная <b>INCY</b> ссылка: расшифровывается ядром панели!';
+  } else {
+    hint.style.display = 'none';
+  }
+}
+
+async function onSubUrlInput(val) {
+  const nameInput = document.getElementById('sub-name');
+  const clean = String(val || '').trim();
+  updateSubUrlHints(clean);
+
+  if (clean.startsWith('happ://') || clean.startsWith('v2raytun://')) {
+    const currentPreset = document.getElementById('sub-client-preset')?.value;
+    if (!currentPreset || currentPreset === 'mihomo') {
+      renderHwidPresetButtons('happ_android');
+      applyClientPreset('happ_android', true);
+    }
+  } else if (clean.startsWith('incy://crypt1/')) {
+    try {
+      const meta = await tryDecryptIncyMeta(clean);
+      if (meta) {
+        const hint = document.getElementById('sub-url-happ-hint');
+        if (meta.n && hint) {
+          hint.innerHTML = `🔐 Зашифрованная <b>INCY</b> ссылка (Провайдер: <b style="color: #60a5fa;">${meta.n}</b>)`;
+        }
+        if (meta.n && nameInput && !nameInput.value) {
+          nameInput.value = meta.n.toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+        }
+        const currentPreset = document.getElementById('sub-client-preset')?.value;
+        if (!currentPreset || currentPreset === 'mihomo') {
+          renderHwidPresetButtons('incy_android');
+          applyClientPreset('incy_android', true);
+        }
+      }
+    } catch (e) {}
+  }
+}
+
+async function probeCurrentSub(isAuto = false) {
+  const urlInput = document.getElementById('sub-url');
+  const url = (urlInput?.value || '').trim();
+  if (!url) {
+    if (!isAuto) showToast('Сначала введите ссылку на подписку для проверки', 'error');
+    return;
+  }
+
+  const activeBtn = document.querySelector('.hwid-preset-btn.active-preset');
+  const activePresetKey = (activeBtn && activeBtn.dataset.preset) || document.getElementById('sub-client-preset')?.value || 'happ_android';
+  const presetObj = CLIENT_PRESETS[activePresetKey] || CLIENT_PRESETS.happ_android || {};
+
+  let hwid = (document.getElementById('sub-hwid')?.value || '').trim();
+  if (!hwid) {
+    hwid = await fetchRouterHwid();
+    const hwidEl = document.getElementById('sub-hwid');
+    if (hwidEl) hwidEl.value = hwid;
+  }
+
+  let userAgent = (document.getElementById('sub-user-agent')?.value || '').trim() || presetObj.userAgent || '';
+  let deviceOs = (document.getElementById('sub-device-os')?.value || '').trim() || presetObj.deviceOs || 'Android';
+  let verOs = (document.getElementById('sub-ver-os')?.value || '').trim() || presetObj.verOs || '14';
+  let deviceModel = (document.getElementById('sub-device-model')?.value || '').trim() || presetObj.deviceModel || 'Samsung Galaxy S24 Ultra';
+
+  const spinner = document.getElementById('sub-probe-spinner');
+  const btn = document.getElementById('btn-probe-sub');
+  const resultBox = document.getElementById('sub-probe-result');
+  const nameInput = document.getElementById('sub-name');
+
+  if (spinner) spinner.style.display = 'inline-block';
+  if (btn) btn.disabled = true;
+
+  try {
+    const res = await fetch('/api/providers/probe', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url, hwid, userAgent, deviceOs, verOs, deviceModel })
+    });
+    let data;
+    try {
+      data = await res.json();
+    } catch (e) {
+      throw new Error(`Ответ сервера HTTP ${res.status}. Убедитесь, что служба на роутере перезапущена.`);
+    }
+
+    if (!resultBox) return;
+    resultBox.style.display = 'block';
+
+    if (!data.success) {
+      resultBox.innerHTML = `
+        <div style="color: var(--danger); display: flex; align-items: center; gap: 8px;">
+          <span>❌</span>
+          <span><strong>Ошибка соединения с сервером подписки:</strong> ${escapeHtml(data.message || 'Неизвестная ошибка')}</span>
+        </div>
+      `;
+      return;
+    }
+
+    let statusBadgeHtml = '';
+    if (data.deviceError) {
+      const errTxt = data.deviceError === 'unknown_not_allowed'
+        ? 'Клиент/ОС запрещены сервером (выберите другой пресет, например Happ/Sing-box)'
+        : escapeHtml(data.deviceError);
+      statusBadgeHtml = `<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); padding: 4px 8px; border-radius: 6px; font-weight: 600;">🔴 Remnawave: ${errTxt}</span>`;
+    } else if (data.hwidActive) {
+      statusBadgeHtml = '<span class="badge" style="background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.3); padding: 4px 8px; border-radius: 6px; font-weight: 600;">🟢 Remnawave: HWID подтверждён (x-hwid-active: true)</span>';
+    } else if (data.hwidMaxReached) {
+      statusBadgeHtml = '<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); padding: 4px 8px; border-radius: 6px; font-weight: 600;">🔴 Remnawave: Лимит устройств исчерпан (x-hwid-max-devices-reached)</span>';
+    } else if (data.statusCode === 200) {
+      statusBadgeHtml = '<span class="badge" style="background: rgba(16,185,129,0.2); color: #34d399; border: 1px solid rgba(16,185,129,0.3); padding: 4px 8px; border-radius: 6px; font-weight: 600;">🟢 Доступ открыт (HTTP 200 OK)</span>';
+    } else if (data.statusCode === 404) {
+      statusBadgeHtml = '<span class="badge" style="background: rgba(239,68,68,0.2); color: #f87171; border: 1px solid rgba(239,68,68,0.3); padding: 4px 8px; border-radius: 6px; font-weight: 600;">🔴 Ошибка 404 (сервер требует HWID или ссылка не найдена)</span>';
+    } else {
+      statusBadgeHtml = `<span class="badge" style="background: rgba(245,158,11,0.2); color: #fbbf24; border: 1px solid rgba(245,158,11,0.3); padding: 4px 8px; border-radius: 6px; font-weight: 600;">⚠️ Статус ответа: HTTP ${data.statusCode}</span>`;
+    }
+
+    let titleHtml = '';
+    const nameInputEl = document.getElementById('sub-name');
+    const isAddingNew = nameInputEl && !nameInputEl.disabled;
+    if (data.profileTitle) {
+      titleHtml = `
+        <div style="margin-top: 8px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 8px;">
+          <span>📌 Имя из профиля: <strong style="color: #60a5fa;">${escapeHtml(data.profileTitle)}</strong></span>
+          ${isAddingNew ? `<button type="button" class="btn btn-sm" style="font-size: 0.75rem; padding: 2px 8px;" onclick="applyProfileTitle('${escapeHtml(data.profileTitle)}')">Вставить имя</button>` : ''}
+        </div>
+      `;
+    }
+
+    let userinfoHtml = '';
+    if (data.userInfo) {
+      const u = data.userInfo;
+      const downloadStr = u.download ? formatBytes(u.download) : '0 B';
+      const uploadStr = u.upload ? formatBytes(u.upload) : '0 B';
+      const totalStr = u.total ? formatBytes(u.total) : 'Безлимит';
+      const expireStr = u.expire ? new Date(u.expire * 1000).toLocaleDateString() : 'Бессрочно';
+
+      userinfoHtml = `
+        <div style="margin-top: 8px; padding: 8px 10px; background: rgba(255,255,255,0.04); border-radius: 6px; font-size: 0.8rem; color: #cbd5e1; display: flex; flex-wrap: wrap; gap: 14px;">
+          <span>📊 Трафик: <strong>${downloadStr}</strong> (исх: ${uploadStr}) / <strong>${totalStr}</strong></span>
+          <span>⏳ Срок действия: <strong>${expireStr}</strong></span>
+        </div>
+      `;
+    }
+
+    let intervalHtml = '';
+    if (data.updateInterval) {
+      const intervalSec = parseInt(data.updateInterval, 10) * 3600;
+      intervalHtml = `
+        <div style="margin-top: 8px; display: flex; align-items: center; justify-content: space-between; font-size: 0.8rem; color: var(--text-muted);">
+          <span>⏱️ Рекомендованный интервал: <strong>${data.updateInterval} ч.</strong> (${intervalSec} сек)</span>
+          <button type="button" class="btn btn-sm" style="font-size: 0.75rem; padding: 2px 8px;" onclick="document.getElementById('sub-interval').value = '${intervalSec}'">Применить</button>
+        </div>
+      `;
+    }
+
+    let announceHtml = '';
+    if (data.announce) {
+      announceHtml = `
+        <div style="margin-top: 8px; padding: 8px 10px; background: rgba(59, 130, 246, 0.08); border: 1px solid rgba(59, 130, 246, 0.2); border-radius: 6px; font-size: 0.8rem; color: #93c5fd;">
+          ${escapeHtml(data.announce)}
+        </div>
+      `;
+    }
+
+    resultBox.innerHTML = `
+      <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px; flex-wrap: wrap; gap: 8px;">
+        <span style="font-weight: 600; color: #fff;">Результат проверки подключения:</span>
+        ${statusBadgeHtml}
+      </div>
+      ${titleHtml}
+      ${userinfoHtml}
+      ${intervalHtml}
+      ${announceHtml}
+    `;
+
+    if (!isAuto) {
+      showToast('Проверка подписки успешно выполнена', 'success');
+    }
+  } catch (err) {
+    if (resultBox) {
+      resultBox.style.display = 'block';
+      resultBox.innerHTML = `<span style="color: var(--danger);">Ошибка при проверке: ${escapeHtml(err.message)}</span>`;
+    }
+  } finally {
+    if (spinner) spinner.style.display = 'none';
+    if (btn) btn.disabled = false;
+  }
+}
+
+function applyProfileTitle(title) {
+  const nameInput = document.getElementById('sub-name');
+  if (nameInput) {
+    if (nameInput.disabled) {
+      showToast('Имя существующей подписки нельзя изменить', 'info');
+      return;
+    }
+    nameInput.value = String(title || '').toLowerCase().replace(/[^a-z0-9]/g, '_').replace(/_+/g, '_').replace(/^_|_$/g, '');
+    showToast(`Имя подписки установлено: ${nameInput.value}`, 'success');
+  }
+}
+
+async function decodeHappInTextarea() {
+  const textarea = document.getElementById('import-links-textarea');
+  const statusEl = document.getElementById('happ-decode-status');
+  const btn = document.getElementById('btn-decode-happ-import');
+  const text = textarea.value;
+  const lines = text.split(/\r?\n/).map(l => l.trim()).filter(l => l.length > 0);
+  const cryptoLines = lines.filter(l => l.startsWith('happ://') || l.startsWith('v2raytun://') || l.startsWith('incy://crypt1/'));
+  
+  if (cryptoLines.length === 0) {
+    showToast('В поле ввода нет зашифрованных happ://, v2raytun:// или incy:// ссылок', 'info');
+    return;
+  }
+
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = '⏳ Декодируем...';
+  }
+  if (statusEl) {
+    statusEl.style.display = 'inline';
+    statusEl.textContent = `Расшифровка ${cryptoLines.length} ссылок...`;
+  }
+
+  let totalDecoded = 0;
+  let newLines = [...lines];
+
+  try {
+    for (const cUrl of cryptoLines) {
+      let decodedLinks = [];
+
+      // 1. Попытка прямой расшифровки INCY в браузере
+      if (cUrl.startsWith('incy://crypt1/')) {
+        try {
+          const meta = await tryDecryptIncyMeta(cUrl);
+          if (meta && meta.url) {
+            decodedLinks = [meta.url];
+          }
+        } catch (e) {}
+      }
+
+      // 2. Запрос к API сервера для извлечения всех узлов
+      try {
+        const res = await fetch('/api/decode-crypto-link', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: cUrl })
+        });
+        
+        let data = null;
+        try {
+          data = await res.json();
+        } catch (jsonErr) {
+          if (res.status === 404) {
+            throw new Error('Служба на роутере запущена со старой версии кода (HTTP 404). Пожалуйста, перезапустите процесс server.js на роутере.');
+          }
+          throw new Error(`Сервер вернул некорректный ответ (HTTP ${res.status})`);
+        }
+
+        if (data && data.success && data.links && data.links.length > 0) {
+          decodedLinks = data.links;
+        } else if (data && !data.success) {
+          throw new Error(data.message || 'Ошибка расшифровки на сервере');
+        }
+      } catch (srvErr) {
+        if (decodedLinks.length > 0) {
+          console.warn('[decodeHappInTextarea] Сервер недоступен, использован адрес из браузера:', decodedLinks[0]);
+        } else {
+          throw srvErr;
+        }
+      }
+
+      if (decodedLinks.length > 0) {
+        totalDecoded += decodedLinks.length;
+        const idx = newLines.indexOf(cUrl);
+        if (idx !== -1) {
+          newLines.splice(idx, 1, ...decodedLinks);
+        }
+      }
+    }
+    textarea.value = newLines.join('\n');
+    showToast(`Успешно расшифровано: ${totalDecoded} прокси-узлов!`, 'success');
+    if (statusEl) {
+      statusEl.textContent = `✅ Расшифровано ${totalDecoded} узлов`;
+    }
+  } catch (err) {
+    const msg = String(err.message || '').replace(/^Ошибка расшифровки:\s*/i, '');
+    showToast('Ошибка расшифровки: ' + msg, 'error');
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = '🔓 Расшифровать Happ / INCY ссылки';
+    }
+  }
+}
 
 // === ФУНКЦИОНАЛ МЕНЕДЖЕРА ПОДПИСОК ===
 async function moveSubPriority(list, index, direction) {
@@ -605,7 +1330,46 @@ async function loadSubscriptions() {
       
       const tdName = document.createElement('td');
       tdName.style.fontWeight = '600';
-      tdName.innerHTML = `<div>${sub.name}</div>${sub.deviceName ? `<div style="font-size: 0.76rem; color: #60a5fa; font-weight: normal; margin-top: 2px;">🏷️ ${sub.deviceName}</div>` : ''}`;
+
+      // Определение бейджа клиента
+      let matchedIcon = '⚡';
+      let matchedLabel = 'Mihomo';
+      const presetId = sub.clientPreset || detectPresetFromHeaders(
+        sub.userAgent || (sub.headers && (sub.headers['User-Agent'] || sub.headers['user-agent'])) || '',
+        sub.deviceOs || (sub.headers && (sub.headers['x-device-os'] || sub.headers['X-Device-OS'])) || ''
+      );
+      if (CLIENT_PRESETS[presetId]) {
+        matchedIcon = CLIENT_PRESETS[presetId].icon;
+        matchedLabel = CLIENT_PRESETS[presetId].name;
+      }
+
+      const clientBadgeHtml = `<span class="sub-client-badge">${matchedIcon} ${matchedLabel}</span>`;
+      const hwidVal = sub.hwid || (sub.headers && (sub.headers['x-hwid'] || sub.headers['X-HWID'])) || '';
+      const hwidBadgeHtml = hwidVal ? `<span class="sub-hwid-badge" title="HWID: ${hwidVal}">🔑 ${hwidVal.length > 10 ? hwidVal.substring(0, 8) + '…' : hwidVal}</span>` : '';
+      const deviceModelVal = sub.deviceModel || sub.deviceName || '';
+
+      // Бейдж типа группы
+      let groupBadgeHtml = '';
+      const gType = sub.groupType || 'url-test';
+      if (gType === 'url-test') {
+        groupBadgeHtml = `<span class="sub-group-badge badge-url-test" title="URL-Test: автовыбор лучшего (порог: ${sub.groupTolerance || 50}мс, интервал: ${sub.groupInterval || 300}с)">🔄 URL-Test (${sub.groupTolerance || 50}ms)</span>`;
+      } else if (gType === 'fallback') {
+        groupBadgeHtml = `<span class="sub-group-badge badge-fallback" title="Fallback: резервный переключатель (интервал: ${sub.groupInterval || 300}с)">🛡️ Fallback</span>`;
+      } else if (gType === 'load-balance') {
+        groupBadgeHtml = `<span class="sub-group-badge badge-load-balance" title="Load-Balance: балансировка нагрузки (${sub.groupStrategy || 'consistent-hashing'})">⚖️ Load-Balance</span>`;
+      } else if (gType === 'select') {
+        groupBadgeHtml = `<span class="sub-group-badge badge-select" title="Select: ручной выбор узла">👆 Select</span>`;
+      }
+
+      tdName.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+          <span>${sub.name}</span>
+          ${groupBadgeHtml}
+          ${clientBadgeHtml}
+          ${hwidBadgeHtml}
+        </div>
+        ${deviceModelVal ? `<div style="font-size: 0.74rem; color: #94a3b8; font-weight: normal; margin-top: 2px;">🏷️ ${deviceModelVal}</div>` : ''}
+      `;
       
       const tdUrl = document.createElement('td');
       tdUrl.style.wordBreak = 'break-all';
@@ -666,31 +1430,6 @@ async function loadSubscriptions() {
         }
       };
       
-function copyToClipboardFallback(text) {
-  if (navigator.clipboard && window.isSecureContext) {
-    return navigator.clipboard.writeText(text);
-  }
-  return new Promise((resolve, reject) => {
-    const textArea = document.createElement('textarea');
-    textArea.value = text;
-    textArea.style.position = 'fixed';
-    textArea.style.left = '-999999px';
-    textArea.style.top = '-999999px';
-    document.body.appendChild(textArea);
-    textArea.focus();
-    textArea.select();
-    try {
-      const successful = document.execCommand('copy');
-      document.body.removeChild(textArea);
-      if (successful) resolve();
-      else reject(new Error('execCommand failed'));
-    } catch (err) {
-      document.body.removeChild(textArea);
-      reject(err);
-    }
-  });
-}
-
       // Кнопка копирования готовой подписки (Clash / V2Ray)
       const btnCopy = document.createElement('button');
       btnCopy.className = 'btn';
@@ -705,11 +1444,11 @@ function copyToClipboardFallback(text) {
         const host = window.location.host;
         const proto = window.location.protocol;
         const clashUrl = `${proto}//${host}/sub/${encodeURIComponent(sub.name)}.yaml`;
-        copyToClipboardFallback(clashUrl).then(() => {
-          showToast(`✅ Ссылка на подписку скопирована в буфер: ${clashUrl}`, 'success');
-        }).catch(() => {
+        if (typeof copyToClipboard === 'function') {
+          copyToClipboard(clashUrl);
+        } else {
           prompt('Скопируйте ссылку для Clash/Mihomo:', clashUrl);
-        });
+        }
       };
 
       // Кнопка редактирования
@@ -754,7 +1493,22 @@ function copyToClipboardFallback(text) {
         }
       };
       
+      // Кнопка проверки HWID и доступности
+      const btnProbeRow = document.createElement('button');
+      btnProbeRow.className = 'btn';
+      btnProbeRow.style.padding = '6px 12px';
+      btnProbeRow.style.marginRight = '6px';
+      btnProbeRow.style.background = 'rgba(16, 185, 129, 0.1)';
+      btnProbeRow.style.borderColor = 'rgba(16, 185, 129, 0.2)';
+      btnProbeRow.style.color = '#34d399';
+      btnProbeRow.textContent = '🛡️ HWID';
+      btnProbeRow.title = 'Проверить статус HWID и доступность подписки у провайдера';
+      btnProbeRow.onclick = function() {
+        probeSubFromTable(sub);
+      };
+
       tdActions.appendChild(btnUpdate);
+      tdActions.appendChild(btnProbeRow);
       tdActions.appendChild(btnCopy);
       tdActions.appendChild(btnEdit);
       tdActions.appendChild(btnDel);
@@ -775,6 +1529,26 @@ function copyToClipboardFallback(text) {
   }
 }
 
+async function probeSubFromTable(sub) {
+  if (!sub) return;
+  showAddSubModal(sub);
+
+  const details = document.getElementById('sub-mimicry-details');
+  if (details) details.open = true;
+
+  const mimicrySec = document.querySelector('.sub-mimicry-section') || document.getElementById('sub-hwid');
+  if (mimicrySec) {
+    mimicrySec.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }
+
+  const hwidInput = document.getElementById('sub-hwid');
+  if (hwidInput && !hwidInput.value.trim()) {
+    hwidInput.value = await fetchRouterHwid();
+  }
+
+  await probeCurrentSub(false);
+}
+
 function showAddSubModal(sub = null) {
   const modal = document.getElementById('add-sub-modal');
   const title = document.getElementById('sub-modal-title');
@@ -784,6 +1558,19 @@ function showAddSubModal(sub = null) {
   const intervalInput = document.getElementById('sub-interval');
   const oldNameInput = document.getElementById('edit-sub-old-name');
   const groupsSection = document.getElementById('sub-groups-section');
+
+  const hwidInput = document.getElementById('sub-hwid');
+  const userAgentInput = document.getElementById('sub-user-agent');
+  const deviceOsInput = document.getElementById('sub-device-os');
+  const verOsInput = document.getElementById('sub-ver-os');
+  const deviceModelInput = document.getElementById('sub-device-model');
+  const clientPresetInput = document.getElementById('sub-client-preset');
+  const details = document.getElementById('sub-mimicry-details');
+  const probeBox = document.getElementById('sub-probe-result');
+  if (probeBox) {
+    probeBox.style.display = 'none';
+    probeBox.innerHTML = '';
+  }
   
   modal.style.display = 'block';
   
@@ -814,19 +1601,94 @@ function showAddSubModal(sub = null) {
     nameInput.value = sub.name;
     nameInput.disabled = true;
     urlInput.value = sub.url;
-    if (deviceNameInput) deviceNameInput.value = sub.deviceName || '';
+    updateSubUrlHints(sub.url);
+    if (deviceNameInput) deviceNameInput.value = sub.deviceName || sub.deviceModel || '';
     intervalInput.value = sub.interval;
     oldNameInput.value = sub.name;
     groupsSection.style.display = 'none';
+
+    // Определение подходящего пресета клиента
+    let detectedPreset = 'custom';
+    if (sub.clientPreset && CLIENT_PRESETS[sub.clientPreset]) {
+      detectedPreset = sub.clientPreset;
+    } else if (sub.userAgent) {
+      detectedPreset = detectPresetFromHeaders(sub.userAgent, sub.deviceOs);
+    } else {
+      detectedPreset = 'mihomo';
+    }
+
+    renderHwidPresetButtons(detectedPreset);
+    applyClientPreset(detectedPreset, false);
+
+    const presetObj = CLIENT_PRESETS[detectedPreset] || CLIENT_PRESETS.mihomo || {};
+
+    if (hwidInput) {
+      hwidInput.value = sub.hwid || '';
+      if (!sub.hwid) {
+        useRouterMacHwid(false);
+      }
+    }
+
+    if (userAgentInput) userAgentInput.value = sub.userAgent || presetObj.userAgent || '';
+    if (deviceOsInput) deviceOsInput.value = sub.deviceOs || presetObj.deviceOs || '';
+    if (verOsInput) verOsInput.value = sub.verOs || presetObj.verOs || '';
+    if (deviceModelInput) deviceModelInput.value = sub.deviceModel || presetObj.deviceModel || '';
+    if (details) details.open = true;
+
+    // Параметры типа группы и проверки доступности
+    const groupType = sub.groupType || 'url-test';
+    const groupUrl = sub.groupUrl || 'http://www.gstatic.com/generate_204';
+    const groupInterval = sub.groupInterval !== undefined ? sub.groupInterval : 300;
+    const groupTolerance = sub.groupTolerance !== undefined ? sub.groupTolerance : 50;
+    const groupStrategy = sub.groupStrategy || 'consistent-hashing';
+    const groupLazy = sub.groupLazy !== undefined ? Boolean(sub.groupLazy) : true;
+    const groupExpectedStatus = sub.groupExpectedStatus || '';
+
+    const grpUrlInput = document.getElementById('sub-group-url');
+    if (grpUrlInput) grpUrlInput.value = groupUrl;
+    const grpIntInput = document.getElementById('sub-group-interval');
+    if (grpIntInput) grpIntInput.value = groupInterval;
+    const grpTolInput = document.getElementById('sub-group-tolerance');
+    if (grpTolInput) grpTolInput.value = groupTolerance;
+    const grpStratInput = document.getElementById('sub-group-strategy');
+    if (grpStratInput) grpStratInput.value = groupStrategy;
+    const grpLazyInput = document.getElementById('sub-group-lazy');
+    if (grpLazyInput) grpLazyInput.checked = groupLazy;
+    const grpExpStatusInput = document.getElementById('sub-group-expected-status');
+    if (grpExpStatusInput) grpExpStatusInput.value = groupExpectedStatus;
+
+    selectSubGroupType(groupType, false);
   } else {
     title.textContent = 'Добавить новую подписку';
     nameInput.value = '';
     nameInput.disabled = false;
     urlInput.value = '';
+    updateSubUrlHints('');
     if (deviceNameInput) deviceNameInput.value = '';
     intervalInput.value = '3600';
     oldNameInput.value = '';
     groupsSection.style.display = 'block';
+
+    renderHwidPresetButtons('happ_android');
+    applyClientPreset('happ_android', true);
+    if (details) details.open = false;
+    useRouterMacHwid(false);
+
+    // Сброс параметров группы в значения по умолчанию
+    const grpUrlInput = document.getElementById('sub-group-url');
+    if (grpUrlInput) grpUrlInput.value = 'http://www.gstatic.com/generate_204';
+    const grpIntInput = document.getElementById('sub-group-interval');
+    if (grpIntInput) grpIntInput.value = 300;
+    const grpTolInput = document.getElementById('sub-group-tolerance');
+    if (grpTolInput) grpTolInput.value = 50;
+    const grpStratInput = document.getElementById('sub-group-strategy');
+    if (grpStratInput) grpStratInput.value = 'consistent-hashing';
+    const grpLazyInput = document.getElementById('sub-group-lazy');
+    if (grpLazyInput) grpLazyInput.checked = true;
+    const grpExpStatusInput = document.getElementById('sub-group-expected-status');
+    if (grpExpStatusInput) grpExpStatusInput.value = '';
+
+    selectSubGroupType('url-test', false);
   }
 }
 
@@ -837,11 +1699,40 @@ function hideAddSubModal() {
 async function saveSubscription() {
   const name = document.getElementById('sub-name').value.trim();
   const url = document.getElementById('sub-url').value.trim();
-  const deviceName = document.getElementById('sub-device-name') ? document.getElementById('sub-device-name').value.trim() : '';
   const rawInterval = document.getElementById('sub-interval').value.trim();
   const interval = rawInterval ? (parseInt(rawInterval, 10) || 3600) : 3600;
   const oldName = document.getElementById('edit-sub-old-name').value;
   const btn = document.getElementById('btn-save-sub');
+
+  const activeBtn = document.querySelector('.hwid-preset-btn.active-preset');
+  let clientPreset = (activeBtn && activeBtn.dataset.preset) || (document.getElementById('sub-client-preset')?.value || '').trim() || 'happ_android';
+  const presetObj = CLIENT_PRESETS[clientPreset] || CLIENT_PRESETS.happ_android || {};
+
+  const hwid = (document.getElementById('sub-hwid')?.value || '').trim();
+  let userAgent = (document.getElementById('sub-user-agent')?.value || '').trim();
+  let deviceOs = (document.getElementById('sub-device-os')?.value || '').trim();
+  let verOs = (document.getElementById('sub-ver-os')?.value || '').trim();
+  let deviceModel = (document.getElementById('sub-device-model')?.value || '').trim();
+  let deviceName = (document.getElementById('sub-device-name')?.value || deviceModel || '').trim();
+
+  // Считывание параметров типа группы и проверки доступности
+  const groupType = (document.getElementById('sub-group-type')?.value || 'url-test').trim();
+  const groupUrl = (document.getElementById('sub-group-url')?.value || 'http://www.gstatic.com/generate_204').trim();
+  const rawGroupInt = document.getElementById('sub-group-interval')?.value;
+  const groupInterval = rawGroupInt ? (parseInt(rawGroupInt, 10) || 300) : 300;
+  const rawGroupTol = document.getElementById('sub-group-tolerance')?.value;
+  const groupTolerance = rawGroupTol ? (parseInt(rawGroupTol, 10) || 50) : 50;
+  const groupStrategy = (document.getElementById('sub-group-strategy')?.value || 'consistent-hashing').trim();
+  const groupLazy = document.getElementById('sub-group-lazy') ? document.getElementById('sub-group-lazy').checked : true;
+  const groupExpectedStatus = (document.getElementById('sub-group-expected-status')?.value || '').trim();
+
+  if (clientPreset !== 'custom') {
+    if (!userAgent) userAgent = presetObj.userAgent || '';
+    if (!deviceOs) deviceOs = presetObj.deviceOs || '';
+    if (!verOs) verOs = presetObj.verOs || '';
+    if (!deviceModel) deviceModel = presetObj.deviceModel || '';
+    if (!deviceName) deviceName = deviceModel;
+  }
   
   if (!name || !url) {
     showToast('Пожалуйста, укажите название и ссылку на подписку!', 'error');
@@ -854,7 +1745,26 @@ async function saveSubscription() {
   const isEdit = oldName.length > 0;
   const apiEndpoint = isEdit ? '/api/providers/edit' : '/api/providers/add';
   
-  const payload = { name, url, interval, deviceName };
+  const payload = { 
+    name, 
+    oldName,
+    url, 
+    interval, 
+    deviceName,
+    hwid,
+    clientPreset,
+    userAgent,
+    deviceOs,
+    verOs,
+    deviceModel,
+    groupType,
+    groupUrl,
+    groupInterval,
+    groupTolerance,
+    groupStrategy,
+    groupLazy,
+    groupExpectedStatus
+  };
   if (!isEdit) {
     const checkedGroups = [];
     document.querySelectorAll('.sub-group-select:checked').forEach(chk => {
@@ -1005,7 +1915,17 @@ async function pingSingleProxy(name) {
     });
     if (!res.ok) return 0;
     const data = await res.json();
-    return data.delay || 0;
+    const delay = data.delay || 0;
+    if (delay > 0) {
+      if (window.setClientPing) {
+        window.setClientPing(name, delay);
+        if (data.activeNode) window.setClientPing(data.activeNode, delay);
+      }
+      if (window.updateLatencyInDOM) {
+        window.updateLatencyInDOM(name, delay, data.activeNode);
+      }
+    }
+    return delay;
   } catch (e) {
     return 0;
   }
@@ -1144,8 +2064,21 @@ async function loadPanelVersion() {
       const versionVal = document.getElementById('panel-version-val');
       const branchVal = document.getElementById('panel-branch-val');
       if (versionVal) versionVal.textContent = data.version;
+      const isDev = (data.branch && data.branch.toLowerCase() === 'dev') || isDevVersion(data.version);
+      
+      // Если пользователь ещё не выбирал вручную канал обновлений в этом браузере/домене,
+      // синхронизируем с веткой текущей сборки (Dev -> all, Main -> main)
+      if (!localStorage.getItem('vpn_update_channel_mode')) {
+        updateChannelMode = isDev ? 'all' : 'main';
+        const btnMain = document.getElementById('mode-btn-main');
+        const btnAll = document.getElementById('mode-btn-all');
+        if (btnMain && btnAll) {
+          btnMain.classList.toggle('active', updateChannelMode === 'main');
+          btnAll.classList.toggle('active', updateChannelMode === 'all');
+        }
+      }
+
       if (branchVal) {
-        const isDev = isDevVersion(data.version);
         branchVal.textContent = isDev ? 'Dev' : 'Main';
         if (!isDev) {
           branchVal.style.background = 'var(--success-container)';
@@ -2020,6 +2953,15 @@ function convertToCustomSelect(selectEl) {
         
         syncSelect();
         wrapper.classList.remove('open');
+        wrapper.classList.remove('open-up');
+        dropdown.style.position = '';
+        dropdown.style.zIndex = '';
+        dropdown.style.top = '';
+        dropdown.style.bottom = '';
+        dropdown.style.left = '';
+        dropdown.style.right = '';
+        dropdown.style.minWidth = '';
+        dropdown.style.maxWidth = '';
       });
       dropdown.appendChild(opt);
     });
@@ -2037,6 +2979,17 @@ function convertToCustomSelect(selectEl) {
       if (w !== wrapper) {
         w.classList.remove('open');
         w.classList.remove('open-up');
+        const otherDd = w.querySelector('.custom-select-dropdown');
+        if (otherDd) {
+          otherDd.style.position = '';
+          otherDd.style.zIndex = '';
+          otherDd.style.top = '';
+          otherDd.style.bottom = '';
+          otherDd.style.left = '';
+          otherDd.style.right = '';
+          otherDd.style.minWidth = '';
+          otherDd.style.maxWidth = '';
+        }
         const parentTr = w.closest('tr');
         if (parentTr) parentTr.style.zIndex = '';
       }
@@ -2044,17 +2997,40 @@ function convertToCustomSelect(selectEl) {
     
     const wasOpen = wrapper.classList.contains('open');
     if (!wasOpen) {
-      const rect = wrapper.getBoundingClientRect();
+      const rect = trigger.getBoundingClientRect();
       const dropdownHeight = dropdown.scrollHeight || (selectEl.options.length * 38 + 10);
       const spaceBelow = window.innerHeight - rect.bottom;
       
       // Open upwards ONLY when genuinely no space below for this specific dropdown
-      if (spaceBelow < dropdownHeight + 10 && rect.top > dropdownHeight + 10) {
+      const openUp = (spaceBelow < dropdownHeight + 10 && rect.top > dropdownHeight + 10);
+      if (openUp) {
         wrapper.classList.add('open-up');
       } else {
         wrapper.classList.remove('open-up');
       }
       wrapper.classList.add('open');
+
+      // Fixed positioning so dropdown floats over table without breaking table scroll/overflow
+      dropdown.style.position = 'fixed';
+      dropdown.style.zIndex = '9999999';
+
+      const minW = Math.max(rect.width, 140);
+      let left = rect.left;
+      if (left + minW > window.innerWidth - 8) {
+        left = Math.max(8, window.innerWidth - minW - 8);
+      }
+      dropdown.style.left = left + 'px';
+      dropdown.style.minWidth = minW + 'px';
+      dropdown.style.maxWidth = '95vw';
+
+      if (openUp) {
+        dropdown.style.top = 'auto';
+        dropdown.style.bottom = (window.innerHeight - rect.top + 4) + 'px';
+      } else {
+        dropdown.style.bottom = 'auto';
+        dropdown.style.top = (rect.bottom + 4) + 'px';
+      }
+
       const tr = wrapper.closest('tr');
       if (tr) {
         tr.style.zIndex = '99999';
@@ -2067,6 +3043,15 @@ function convertToCustomSelect(selectEl) {
       }
     } else {
       wrapper.classList.remove('open');
+      wrapper.classList.remove('open-up');
+      dropdown.style.position = '';
+      dropdown.style.zIndex = '';
+      dropdown.style.top = '';
+      dropdown.style.bottom = '';
+      dropdown.style.left = '';
+      dropdown.style.right = '';
+      dropdown.style.minWidth = '';
+      dropdown.style.maxWidth = '';
       const tr = wrapper.closest('tr');
       if (tr) tr.style.zIndex = '';
     }
@@ -2118,6 +3103,18 @@ function initCustomSelects() {
 function closeAllCustomSelects() {
   document.querySelectorAll('.custom-select-wrapper.open').forEach(wrapper => {
     wrapper.classList.remove('open');
+    wrapper.classList.remove('open-up');
+    const dropdown = wrapper.querySelector('.custom-select-dropdown');
+    if (dropdown) {
+      dropdown.style.position = '';
+      dropdown.style.zIndex = '';
+      dropdown.style.top = '';
+      dropdown.style.bottom = '';
+      dropdown.style.left = '';
+      dropdown.style.right = '';
+      dropdown.style.minWidth = '';
+      dropdown.style.maxWidth = '';
+    }
     const parentTr = wrapper.closest('tr');
     if (parentTr) parentTr.style.zIndex = '';
   });
@@ -2125,6 +3122,12 @@ function closeAllCustomSelects() {
 
 document.addEventListener('click', closeAllCustomSelects);
 window.addEventListener('scroll', closeAllCustomSelects, { passive: true });
+document.addEventListener('scroll', (e) => {
+  if (e.target && e.target.classList && e.target.classList.contains('custom-select-dropdown')) {
+    return;
+  }
+  closeAllCustomSelects();
+}, true);
 window.addEventListener('resize', closeAllCustomSelects, { passive: true });
 
 // === ФУНКЦИОНАЛ УПРАВЛЕНИЯ ВЕРСИЯМИ И ОБНОВЛЕНИЯМИ ===
@@ -2296,7 +3299,7 @@ function updatePanelHeroBanner(isUpdateAvailable, currentCommit, latestCommit) {
     hero.className = 'update-hero-banner up-to-date';
     if (icon) icon.textContent = '✅';
     if (title) title.textContent = 'У вас установлена актуальная версия панели';
-    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.1'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
+    if (desc) desc.textContent = `Текущая версия: ${currentCommit ? currentCommit.version : 'v1.9.2'} • Режим: ${updateChannelMode === 'all' ? 'Все версии и Dev' : 'Только стабильные (Main)'}`;
     if (actions) actions.style.display = 'none';
   }
 }
@@ -2776,145 +3779,6 @@ function hideMihomoDimmerOverlay() {
   }
 }
 
-async function loadQrConnections() {
-  const container = document.getElementById('qr-codes-container');
-  if (!container) return;
-  container.innerHTML = '<div style="text-align: center; color: var(--text-muted); padding: 40px 0;">⏳ Загрузка параметров подключения...</div>';
-  
-  try {
-    const [wifiRes, providersRes] = await Promise.all([
-      fetch('/api/wifi/info'),
-      fetch('/api/providers')
-    ]);
-    
-    const wifiData = wifiRes.ok ? await wifiRes.json() : { success: false, ssid: 'Keenetic-WiFi', key: '12345678', encryption: 'WPA' };
-    const providersData = providersRes.ok ? await providersRes.json() : { success: true, list: [] };
-    
-    const wifiString = `WIFI:S:${wifiData.ssid};T:${wifiData.encryption};P:${wifiData.key};;`;
-    const baseDomainHttps = 'https://admin:gricha0609@spyware.keenet9883.netcraze.link:8083';
-    const baseDomainHttp = 'http://spyware.keenet9883.netcraze.link:4000';
-    
-    const fullConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled`;
-    const fullConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled`;
-    
-    const noRoutingConfigUrlHttps = `${baseDomainHttps}/api/config?file=config_compiled&routing=false`;
-    const noRoutingConfigUrlHttp = `${baseDomainHttp}/api/config?file=config_compiled&routing=false`;
-    
-    const qrUrlHttpsFull = `${baseDomainHttps}/api/config/mihomo_full.yaml`;
-    const qrUrlHttpsLite = `${baseDomainHttps}/api/config/mihomo_lite.yaml`;
-
-    const clashFullUrl = `clash://install-config?url=${encodeURIComponent(qrUrlHttpsFull)}&name=${encodeURIComponent('Mihomo Router Full')}`;
-    const clashNoRoutingUrl = `clash://install-config?url=${encodeURIComponent(qrUrlHttpsLite)}&name=${encodeURIComponent('Mihomo Router Lite')}`;
-    
-    let html = '';
-    html += `<div class="qr-cards-grid">`;
-    
-    // --- 1. КАРТОЧКА WIFI ---
-    html += `
-      <div class="qr-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">📶</span>
-          <span class="qr-card-title">Подключение к Wi-Fi</span>
-        </div>
-        <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(wifiString)}" class="qr-image" alt="Wi-Fi QR" />
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-item"><strong>SSID:</strong> <span>${wifiData.ssid}</span> <button class="btn-copy-small" onclick="copyToClipboard('${wifiData.ssid.replace(/'/g, "\\'")}')">📋</button></div>
-          <div class="qr-detail-item"><strong>Пароль:</strong> <span>${wifiData.key}</span> <button class="btn-copy-small" onclick="copyToClipboard('${wifiData.key.replace(/'/g, "\\'")}')">📋</button></div>
-        </div>
-      </div>
-    `;
-    
-    // --- 2. КАРТОЧКА ПОЛНОГО КОНФИГА МИХОМО ---
-    html += `
-      <div class="qr-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">🚀</span>
-          <span class="qr-card-title">Подписка Mihomo (Полная)</span>
-        </div>
-        <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(clashFullUrl)}" class="qr-image" alt="Full Config QR" />
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-text">С полной маршрутизацией и встроенными правилами для роутера.</div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTPS (с паролем):</div>
-          <div class="qr-detail-url" style="margin-bottom: 6px;"><input type="text" readonly value="${fullConfigUrlHttps}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrlHttps}')">📋</button></div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTP (без пароля):</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${fullConfigUrlHttp}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${fullConfigUrlHttp}')">📋</button></div>
-        </div>
-      </div>
-    `;
-
-    // --- 3. КАРТОЧКА КОНФИГА БЕЗ МАРШРУТИЗАЦИИ (ОБНОВЛЯЕМАЯ ПОДПИСКА) ---
-    html += `
-      <div class="qr-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">🌐</span>
-          <span class="qr-card-title">Подписка Mihomo (Без правил)</span>
-        </div>
-        <div class="qr-code-wrapper">
-          <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(clashNoRoutingUrl)}" class="qr-image" alt="No Routing QR" />
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-text">Все ваши VPN-узлы и группы. Идеально для импорта на телефон/ПК без засорения маршрутов.</div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTPS (с паролем):</div>
-          <div class="qr-detail-url" style="margin-bottom: 6px;"><input type="text" readonly value="${noRoutingConfigUrlHttps}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrlHttps}')">📋</button></div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-bottom: 2px;">HTTP (без пароля):</div>
-          <div class="qr-detail-url"><input type="text" readonly value="${noRoutingConfigUrlHttp}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${noRoutingConfigUrlHttp}')">📋</button></div>
-        </div>
-      </div>
-    `;
-    
-    // --- 4. КАРТОЧКИ VPN ПОДПИСОК ---
-    const providers = providersData.list || [];
-    providers.forEach(p => {
-      if (p.url) {
-        html += `
-          <div class="qr-card">
-            <div class="qr-card-header">
-              <span class="qr-card-icon">📦</span>
-              <span class="qr-card-title">Вход подписки: ${p.name}</span>
-            </div>
-            <div class="qr-code-wrapper">
-              <img src="https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(p.url)}" class="qr-image" alt="Sub QR" />
-            </div>
-            <div class="qr-card-details">
-              <div class="qr-detail-text">Оригинальная ссылка провайдера VPN.</div>
-              <div class="qr-detail-url"><input type="text" readonly value="${p.url}" onclick="this.select()" /> <button class="btn-copy-small" onclick="copyToClipboard('${p.url.replace(/'/g, "\\'")}')">📋</button></div>
-            </div>
-          </div>
-        `;
-      }
-    });
-
-    // --- 5. ЗАГЛУШКА ЛОКАЛЬНОГО VPN-СЕРВЕРА ---
-    html += `
-      <div class="qr-card wg-placeholder-card">
-        <div class="qr-card-header">
-          <span class="qr-card-icon">🛡️</span>
-          <span class="qr-card-title">Внешний VPN-сервер роутера</span>
-        </div>
-        <div class="qr-code-wrapper placeholder-qr">
-          <div class="qr-placeholder-overlay">
-            <span>ЗАГЛУШКА</span>
-          </div>
-        </div>
-        <div class="qr-card-details">
-          <div class="qr-detail-text">Для подключения из внешней сети напрямую к домашнему роутеру.</div>
-          <div class="qr-detail-subnet"><strong>Пул IP-адресов:</strong> <code>192.168.2.x</code></div>
-          <div class="qr-detail-text" style="font-size: 0.75rem; color: var(--text-muted); margin-top: 4px;">Устройствам будут выделяться адреса 192.168.2.2 - 2.254 для интеграции в локальную сеть с полной маршрутизацией.</div>
-        </div>
-      </div>
-    `;
-
-    html += `</div>`;
-    container.innerHTML = html;
-  } catch (err) {
-    container.innerHTML = `<div style="text-align: center; color: var(--danger); padding: 40px 0;">Ошибка загрузки подключений: ${err.message}</div>`;
-  }
-}
-window.loadQrConnections = loadQrConnections;
 
 function copyToClipboard(text) {
   if (navigator.clipboard && window.isSecureContext) {
